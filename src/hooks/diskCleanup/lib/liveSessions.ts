@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 
+import { unfinishedClaudeJobStates } from "../../lib/claudeJobs.js";
 import { claudeConfigRoots, liveClaudeSessionIds } from "../../lib/claudeLiveSessions.js";
 import { codexHome } from "../../lib/codexHome.js";
-import { isRecord } from "../../lib/jsonLines.js";
 import { listOpenPaths } from "./runningProcesses.js";
 
 export type LiveSessions = {
@@ -28,25 +28,11 @@ const textAt = (jobState: Record<string, unknown>, property: string): string => 
   return typeof candidate === "string" ? candidate : "";
 };
 
-// A background job runs until its state.json says "done"; a blocked or stopped job can still be resumed.
-const unfinishedJobIn = (stateFile: string): ReadonlyArray<ClaudeJob> => {
-  try {
-    const jobState: unknown = JSON.parse(readFileSync(stateFile, "utf8"));
-    if (!isRecord(jobState) || jobState.state === "done") {
-      return [];
-    }
-
-    return [{ sessionId: textAt(jobState, "sessionId"), folder: textAt(jobState, "cwd") }];
-  } catch {
-    return [];
-  }
-};
-
 const unfinishedClaudeJobs = (homeRoot: string): ReadonlyArray<ClaudeJob> =>
-  claudeConfigRoots(homeRoot).flatMap((configRoot) => {
-    const jobsFolder = path.join(configRoot, "jobs");
-    return childNames(jobsFolder).flatMap((jobName) => unfinishedJobIn(path.join(jobsFolder, jobName, "state.json")));
-  });
+  unfinishedClaudeJobStates(homeRoot).map((jobState) => ({
+    sessionId: textAt(jobState, "sessionId"),
+    folder: textAt(jobState, "cwd"),
+  }));
 
 const claudeProjectFolders = (homeRoot: string): ReadonlyArray<string> =>
   claudeConfigRoots(homeRoot).flatMap((configRoot) => {

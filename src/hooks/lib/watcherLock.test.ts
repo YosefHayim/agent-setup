@@ -4,10 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { acquireWatcherLock, releaseWatcherLock } from "./watcherLock.js";
+import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "./watcherLock.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEAD_PID = 2_147_483_646;
+const OTHER_LIVE_PID = String(process.ppid);
 const stateFolders: Array<string> = [];
 
 const newLockFile = (): string => {
@@ -34,11 +35,11 @@ describe("acquireWatcherLock", () => {
 
   it("waits while a live watcher holds the lock", () => {
     const lockFile = newLockFile();
-    writeFileSync(lockFile, "1");
+    writeFileSync(lockFile, OTHER_LIVE_PID);
 
     expect(acquireWatcherLock(lockFile)).toBe(false);
     releaseWatcherLock(lockFile);
-    expect(readFileSync(lockFile, "utf8")).toBe("1");
+    expect(readFileSync(lockFile, "utf8")).toBe(OTHER_LIVE_PID);
   });
 
   it("takes over a lock left by a dead watcher, and releases it", () => {
@@ -49,5 +50,20 @@ describe("acquireWatcherLock", () => {
     expect(readFileSync(lockFile, "utf8")).toBe(String(process.pid));
     releaseWatcherLock(lockFile);
     expect(existsSync(lockFile)).toBe(false);
+  });
+});
+
+describe("isWatcherLockHeldByOther", () => {
+  it("is true only while another live watcher holds the lock, and never takes it", () => {
+    const lockFile = newLockFile();
+
+    expect(isWatcherLockHeldByOther(lockFile)).toBe(false);
+    writeFileSync(lockFile, OTHER_LIVE_PID);
+    expect(isWatcherLockHeldByOther(lockFile)).toBe(true);
+    writeFileSync(lockFile, String(DEAD_PID));
+    expect(isWatcherLockHeldByOther(lockFile)).toBe(false);
+    expect(readFileSync(lockFile, "utf8")).toBe(String(DEAD_PID));
+    writeFileSync(lockFile, String(process.pid));
+    expect(isWatcherLockHeldByOther(lockFile)).toBe(false);
   });
 });
