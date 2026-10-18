@@ -83,10 +83,12 @@ const runHook = (request: { readonly homeRoot: string; readonly hookInput: strin
     },
   });
 
+// The detached watcher outlives the hook, so a test fails rather than deleting its workspace under a running watcher.
 const waitUntil = async (isDone: () => boolean) => {
   for (let attempt = 0; attempt < 60 && !isDone(); attempt += 1) {
     await delay(250);
   }
+  expect(isDone()).toBe(true);
 };
 
 afterEach(() => {
