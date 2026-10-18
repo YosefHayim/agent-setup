@@ -10,7 +10,7 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 
 ## Safety
 
-- Other sessions share Docker. Remove only what this run made, selected by its run name and its clone path. Never run `docker system prune` or any other `prune`.
+- Other sessions share Docker. Remove only what this run made, selected by its run name. Never run `docker system prune` or any other `prune`.
 - Never print or store the GitHub token; pass it only as an act secret.
 
 - Docker is running with enough memory for the heaviest job. A leg killed with exit 137 means Docker needs more memory.
@@ -37,7 +37,13 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    git -C "<scratchpad>/$CI_NAME" remote set-url origin https://github.com/<owner>/<repo>.git
    ```
 
-3. **One act process per job.** Jobs in one act process race on the action cache. Run each job as its own leg with `-j <job>`. act also runs the jobs it `needs` in that leg, so give each leg its own workflow copy inside the clone, named `<CI_NAME>-<job>`, or the shared jobs collide on container names:
+3. **Run name in every container name.** act names a container `act-<workflow name>-<job>`, and a called reusable workflow's container `act-<caller job>-<called workflow name>-<job>`, trimmed to 63 characters. Prefix every workflow name in the clone, so parallel runs of the same repository never collide and cleanup finds every container. Keep `CI_NAME` under 40 characters.
+
+   ```bash
+   perl -pi -e "s/^name: /name: $CI_NAME-/" .github/workflows/*.yml
+   ```
+
+4. **One act process per job.** Jobs in one act process race on the action cache. Run each job as its own leg with `-j <job>`. act also runs the jobs it `needs` in that leg, so give each leg its own workflow copy, or the shared jobs collide:
 
    ```bash
    sed "s/^name: .*/name: $CI_NAME-<job>/" .github/workflows/ci.yml > ".github/workflows/$CI_NAME-<job>.yml"
@@ -45,13 +51,13 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 
    Skip a gate job that only reads `needs.*.result`: the other legs already prove it.
 
-4. **Own action cache per leg.** Concurrent runs corrupt a shared `~/.cache/act` ("reference not found", "EOF").
+5. **Own action cache per leg.** Concurrent runs corrupt a shared `~/.cache/act` ("reference not found", "EOF").
 
    ```bash
    cp -cR ~/.cache/act "<scratchpad>/$CI_NAME-cache-<job>"   # macOS copy-on-write; use cp -R elsewhere
    ```
 
-5. **Event file.** For `pull_request`, write the event JSON to the scratchpad with the base and head of the branch, so changed-file tools (`dorny/paths-filter`, `vitest --changed`, `biome check --changed`) see the same diff as on GitHub:
+6. **Event file.** For `pull_request`, write the event JSON to the scratchpad with the base and head of the branch, so changed-file tools (`dorny/paths-filter`, `vitest --changed`, `biome check --changed`) see the same diff as on GitHub:
 
    ```json
    {"pull_request":{"number":1,"head":{"ref":"<branch>","sha":"<git rev-parse HEAD>"},"base":{"ref":"main","sha":"<git merge-base origin/main HEAD>"}}}
@@ -97,24 +103,18 @@ act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> -e "<scratch
 
 ### Cleanup (always, also after a failure)
 
-Remove only what this run made. Containers of called reusable workflows are named `act-<job>-<CalledWorkflow>-<job>-<hash>`, without `CI_NAME`, so select containers by their working directory, which is the clone path:
+Remove only what this run made, selected by `CI_NAME`. `--rm` already removes most of it; this catches the rest.
 
 ```bash
-CLONE="<scratchpad>/$CI_NAME"
-for container in $(docker ps -aq); do
-  [ "$(docker inspect --format '{{.Config.WorkingDir}}' "$container")" = "$CLONE" ] || continue
-  name=$(docker inspect --format '{{.Name}}' "$container" | tr -d /)
-  docker rm -f "$container"
-  docker volume rm "$name" "$name-env"
-done
+for container in $(docker ps -aq --filter "name=$CI_NAME"); do docker rm -f "$container"; done
 for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume rm "$volume"; done
 ```
 
 - **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
 - **Shared volumes.** Keep `act-toolcache` and any volume without `CI_NAME` in its name.
-- **Files.** Delete the clone, the workflow copies, the leg caches, the event file and the logs from the scratchpad once the report is written.
+- **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.
 
-Check that no container has the clone path as its working directory and that `docker volume ls --filter "name=$CI_NAME"` prints nothing.
+Check that `docker ps -a --filter "name=$CI_NAME"` and `docker volume ls --filter "name=$CI_NAME"` print nothing.
 
 ## Verification
 
