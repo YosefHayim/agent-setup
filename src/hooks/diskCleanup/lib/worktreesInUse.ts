@@ -1,6 +1,6 @@
-import { type FolderPaths, folderPaths } from "./folderPaths.js";
+import { type FolderPaths, folderPaths, isInsideAnyFolder } from "./folderPaths.js";
 import { liveSessions } from "./liveSessions.js";
-import { isInsideAnyFolder, isUsedByRunningProcess, runningProcesses } from "./runningProcesses.js";
+import { isUsedByRunningProcess, runningProcesses } from "./runningProcesses.js";
 import { foldersNamedIn, sessionTranscripts } from "./sessionTranscripts.js";
 
 const foldersHoldingAny = (request: {

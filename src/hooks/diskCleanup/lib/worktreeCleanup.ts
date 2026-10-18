@@ -1,9 +1,8 @@
 import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
 import { gitAnswerLines } from "../../lib/gitAnswers.js";
-import { folderPaths } from "./folderPaths.js";
+import { folderPaths, isInsideAnyFolder } from "./folderPaths.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linkedWorktrees.js";
 import { reportLine } from "./reportLine.js";
-import { isInsideAnyFolder } from "./runningProcesses.js";
 import { foldersNamedIn, sessionTranscripts } from "./sessionTranscripts.js";
 import { decideWorktreeCleanup, type WorktreeCleanupDecision } from "./worktreeCleanupDecision.js";
 import { readWorktreeFacts } from "./worktreeFacts.js";

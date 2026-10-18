@@ -1,6 +1,18 @@
 import { realpathSync } from "node:fs";
+import path from "node:path";
 
 export type FolderPaths = { readonly folder: string; readonly paths: ReadonlyArray<string> };
+
+// Only the top folder "/" already ends in the separator that starts every path inside a folder.
+const isInsideFolder = (request: { readonly candidate: string; readonly folder: string }): boolean => {
+  const insideStart = request.folder.endsWith("/") ? request.folder : `${request.folder}/`;
+  return request.candidate === request.folder || request.candidate.startsWith(insideStart);
+};
+
+export const isInsideAnyFolder = (request: {
+  readonly candidate: string;
+  readonly folders: ReadonlyArray<string>;
+}): boolean => request.folders.some((folder) => isInsideFolder({ candidate: request.candidate, folder }));
 
 // lsof names each open file by its real path, whatever symlink led to it.
 export const realFolder = (folder: string): string => {
@@ -13,8 +25,9 @@ export const realFolder = (folder: string): string => {
 
 const pathThroughRoot = (request: { readonly realPath: string; readonly root: string }): ReadonlyArray<string> => {
   const realRoot = realFolder(request.root);
-  const isUnderRoot = request.realPath.startsWith(`${realRoot}/`);
-  return isUnderRoot ? [`${request.root}${request.realPath.slice(realRoot.length)}`] : [];
+  const insidePath = path.relative(realRoot, request.realPath);
+  const isUnderRoot = isInsideFolder({ candidate: request.realPath, folder: realRoot });
+  return isUnderRoot ? [path.join(request.root, insidePath)] : [];
 };
 
 // git keeps the path a worktree was made at, which runs through a symlink once a folder on it is moved and linked

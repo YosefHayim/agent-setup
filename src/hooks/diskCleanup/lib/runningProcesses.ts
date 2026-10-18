@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 
+import { isInsideAnyFolder } from "./folderPaths.js";
+
 export type RunningProcesses = {
   readonly openPaths: ReadonlyArray<string>;
   readonly commandLines: ReadonlyArray<string>;
@@ -42,12 +44,6 @@ export const runningProcesses = (): RunningProcesses | undefined => {
 
   return { openPaths, commandLines: ps.stdout.split("\n").filter(Boolean) };
 };
-
-export const isInsideAnyFolder = (request: {
-  readonly candidate: string;
-  readonly folders: ReadonlyArray<string>;
-}): boolean =>
-  request.folders.some((folder) => request.candidate === folder || request.candidate.startsWith(`${folder}/`));
 
 // The paths are every path one folder goes by.
 export const isUsedByRunningProcess = (request: {
