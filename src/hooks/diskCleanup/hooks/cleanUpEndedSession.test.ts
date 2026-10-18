@@ -83,9 +83,9 @@ const runHook = (request: { readonly homeRoot: string; readonly hookInput: strin
     },
   });
 
-const waitUntilGone = async (entry: string) => {
-  for (let attempt = 0; attempt < 60 && existsSync(entry); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+const waitUntil = async (isDone: () => boolean) => {
+  for (let attempt = 0; attempt < 60 && !isDone(); attempt += 1) {
+    await delay(250);
   }
 };
 
@@ -100,24 +100,25 @@ describe("cleanUpEndedSession process boundary", { timeout: 30_000 }, () => {
     const { homeRoot, remote, feature } = createFeatureWorktree();
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: endedSessionId }) });
-    await waitUntilGone(feature);
+    await waitUntil(() => !existsSync(feature));
     // The watcher holds its lock until it is done, so the workspace is only removed after it exits.
-    await waitUntilGone(path.join(homeRoot, "disk-cleanup-state", "watcher.lock"));
+    await waitUntil(() => !existsSync(path.join(homeRoot, "disk-cleanup-state", "watcher.lock")));
 
     expect(execution.status).toBe(0);
     expect(existsSync(feature)).toBe(false);
     expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
   });
 
-  it("starts no watcher for a session whose ID is not a UUID, as Grok's are, since it owns no worktree", async () => {
+  it("only cleans the caches after a session whose ID is not a UUID, as Grok's are, since it owns no worktree", async () => {
     const { homeRoot, feature } = createFeatureWorktree();
+    const cacheStamp = path.join(homeRoot, "disk-cleanup-state", "last-cache-cleanup");
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: "../grok-session" }) });
-    // A watcher would have taken its lock, in the state folder, well within this time.
-    await delay(3_000);
+    await waitUntil(() => existsSync(cacheStamp));
+    await waitUntil(() => !existsSync(path.join(homeRoot, "disk-cleanup-state", "watcher.lock")));
 
     expect(execution.status).toBe(0);
-    expect(existsSync(path.join(homeRoot, "disk-cleanup-state"))).toBe(false);
+    expect(existsSync(cacheStamp)).toBe(true);
     expect(existsSync(feature)).toBe(true);
   });
 

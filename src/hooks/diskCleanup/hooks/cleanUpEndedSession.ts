@@ -7,19 +7,16 @@ import { readFileSync } from "node:fs";
 import { startDetachedWatcher } from "../../lib/detachedWatcher.js";
 import { sessionIdFrom } from "../../lib/sessionIds.js";
 
-// Grok's session IDs are not UUIDs and its transcripts are never read, so its sessions own no worktree to clean up.
+// Grok's session IDs are not UUIDs and its transcripts are never read, so its sessions own no worktree: its watcher
+// only gives the caches their daily look.
+const watcherArgumentsFor = (endedSessionId: string): ReadonlyArray<string> =>
+  endedSessionId ? ["--session", endedSessionId, "--wait"] : ["--caches-only"];
+
 const handOverEndedSession = (): void => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
   const endedSessionId = sessionIdFrom(hookInput);
-  if (!endedSessionId) {
-    return;
-  }
-
-  startDetachedWatcher({
-    hookUrl: import.meta.url,
-    watcherName: "cleanupWatcher",
-    watcherArguments: ["--session", endedSessionId, "--wait"],
-  });
+  const watcherArguments = watcherArgumentsFor(endedSessionId);
+  startDetachedWatcher({ hookUrl: import.meta.url, watcherName: "cleanupWatcher", watcherArguments });
 };
 
 try {

@@ -525,6 +525,24 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
     expect(toolCalls(home)).toBe("");
   });
 
+  it("looks at no worktree with --caches-only, as after a Grok session, and still cleans the caches", () => {
+    const home = createCodeHome();
+    const feature = addWorktree({
+      home,
+      name: "feature",
+      checkoutOptions: ["-b", "feature"],
+      startPoint: [],
+      creatorId: endedSessionId,
+    });
+    const staleNpx = createNpxEntry({ home, name: "stale", touched: MONTH_AGO });
+
+    const run = runWatcher({ home, watcherArguments: ["--caches-only"] });
+
+    expect(reportLineFor({ report: run.stdout, target: feature })).toBe("");
+    expect(existsSync(feature)).toBe(true);
+    expect(existsSync(staleNpx)).toBe(false);
+  });
+
   it("skips Docker while its engine is stopped", () => {
     const home = createCodeHome({ dockerRunning: false });
 
