@@ -108,6 +108,13 @@ describe("liveClaudeSessionIds", () => {
     expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
   });
 
+  it("fails while a config root is a link to nowhere, since a session could be running from it", () => {
+    const homeRoot = createHomeRoot();
+    symlinkSync(path.join(homeRoot, "unmounted"), path.join(homeRoot, ".claude-work"));
+
+    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+  });
+
   it("skips a file whose name looks like a config root", () => {
     const homeRoot = createHomeRoot();
     writeFileSync(path.join(homeRoot, ".claude-notes"), "notes\n");
