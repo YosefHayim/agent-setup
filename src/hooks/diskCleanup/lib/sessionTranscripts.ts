@@ -1,8 +1,9 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { claudeConfigRoots } from "../../lib/claudeLiveSessions.js";
 import { codexHome } from "../../lib/codexHome.js";
+import { folderEntries } from "../../lib/folderEntries.js";
 import { createPathMatcher } from "../../lib/pathMatcher.js";
 import { readClaudeEvidence, readCodexEvidence } from "../../lib/sessionEvidence.js";
 
@@ -10,26 +11,10 @@ type SessionTranscript = { readonly transcriptFile: string; readonly readEvidenc
 
 const NO_KEYWORDS = (): ReadonlySet<string> => new Set();
 
-const isMissingFolder = (failure: unknown): boolean =>
-  failure instanceof Error && "code" in failure && (failure.code === "ENOENT" || failure.code === "ENOTDIR");
-
-// A folder that is not there has no entries. One that is there but cannot be listed throws.
-const entryNames = (request: { readonly folder: string; readonly recursive: boolean }): ReadonlyArray<string> => {
-  try {
-    return readdirSync(request.folder, { recursive: request.recursive, encoding: "utf8" });
-  } catch (failure) {
-    if (isMissingFolder(failure)) {
-      return [];
-    }
-
-    throw failure;
-  }
-};
-
 const claudeProjectFolders = (homeRoot: string): ReadonlyArray<string> =>
   claudeConfigRoots(homeRoot).flatMap((configRoot) => {
     const projectsFolder = path.join(configRoot, "projects");
-    const projectNames = entryNames({ folder: projectsFolder, recursive: false });
+    const projectNames = folderEntries({ folder: projectsFolder, recursive: false });
     return projectNames.map((projectName) => path.join(projectsFolder, projectName));
   });
 
@@ -38,7 +23,7 @@ const claudeProjectFolders = (homeRoot: string): ReadonlyArray<string> =>
 const claudeTranscriptsIn = (request: { readonly projectFolder: string; readonly sessionId: string }) => {
   const ownTranscript = path.join(request.projectFolder, `${request.sessionId}.jsonl`);
   const subagentsFolder = path.join(request.projectFolder, request.sessionId, "subagents");
-  const subagentTranscripts = entryNames({ folder: subagentsFolder, recursive: false })
+  const subagentTranscripts = folderEntries({ folder: subagentsFolder, recursive: false })
     .filter((name) => name.endsWith(".jsonl"))
     .map((name) => path.join(subagentsFolder, name));
   return [ownTranscript, ...subagentTranscripts].filter(existsSync);
@@ -59,7 +44,7 @@ const codexRolloutsOf = (request: { readonly homeRoot: string; readonly threadId
   }
 
   const sessionsFolder = path.join(codexHome(request.homeRoot), "sessions");
-  return entryNames({ folder: sessionsFolder, recursive: true })
+  return folderEntries({ folder: sessionsFolder, recursive: true })
     .filter((name) => name.endsWith(".jsonl") && request.threadIds.some((threadId) => name.includes(threadId)))
     .map((name) => path.join(sessionsFolder, name));
 };

@@ -151,6 +151,12 @@ const runWatcher = (request: { readonly home: CodeHome; readonly watcherArgument
     env: watcherEnvironment(request.home),
   });
 
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
+};
+
 const cleanUpAfterSession = (home: CodeHome) => runWatcher({ home, watcherArguments: ["--session", endedSessionId] });
 
 const reportLineFor = (request: { readonly report: string; readonly target: string }): string =>
@@ -306,10 +312,18 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
     const registryEntry = { pid: process.pid, sessionId: liveSessionId };
     writeFileSync(path.join(configRoot, "sessions", `${liveSessionId}.json`), JSON.stringify(registryEntry));
-    // A folder that links to itself cannot be listed even by root, which ignores file modes.
-    const subagentsFolder = path.join(configRoot, "projects", "-app", liveSessionId, "subagents");
-    mkdirSync(path.dirname(subagentsFolder), { recursive: true });
-    symlinkSync(subagentsFolder, subagentsFolder);
+    linkToItself(path.join(configRoot, "projects", "-app", liveSessionId, "subagents"));
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^kept +in-use +\//);
+    expect(existsSync(finished)).toBe(true);
+  });
+
+  it("keeps every worktree while the Codex lock folder cannot be listed", () => {
+    const home = createCodeHome();
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    linkToItself(path.join(home.homeRoot, ".codex", "thread-writer-locks"));
 
     const run = cleanUpAfterSession(home);
 

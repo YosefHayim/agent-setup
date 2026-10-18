@@ -11,8 +11,8 @@ const foldersHoldingAny = (request: {
   );
 
 // A worktree is in use while a process holds a file in it or names it on its command line, an unfinished background
-// job runs there, or a live session's commands, edits, and working folders name it. A transcript that cannot be read,
-// or a folder of transcripts that cannot be listed, could name any worktree.
+// job runs there, or a live session's commands, edits, and working folders name it. Live sessions that cannot all be
+// found, a folder of transcripts that cannot be listed, or a transcript that cannot be read could name any worktree.
 export const worktreesInUse = (request: {
   readonly homeRoot: string;
   readonly worktreeFolders: ReadonlyArray<string>;
@@ -28,6 +28,10 @@ export const worktreesInUse = (request: {
   }
 
   const live = liveSessions(request);
+  if (!live) {
+    return new Set(request.worktreeFolders);
+  }
+
   const transcripts = sessionTranscripts({ ...live, homeRoot: request.homeRoot });
   if (!transcripts) {
     return new Set(request.worktreeFolders);

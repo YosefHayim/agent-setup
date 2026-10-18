@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 import { unfinishedClaudeJobStates } from "../../lib/claudeJobs.js";
 import { liveClaudeSessionIds } from "../../lib/claudeLiveSessions.js";
 import { codexHome } from "../../lib/codexHome.js";
+import { folderEntries } from "../../lib/folderEntries.js";
 import { listOpenPaths } from "./runningProcesses.js";
 
 export type LiveSessions = {
@@ -13,14 +14,6 @@ export type LiveSessions = {
 };
 
 type ClaudeJob = { readonly sessionId: string; readonly folder: string };
-
-const childNames = (folder: string): ReadonlyArray<string> => {
-  try {
-    return readdirSync(folder);
-  } catch {
-    return [];
-  }
-};
 
 const textAt = (jobState: Record<string, unknown>, property: string): string => {
   const candidate = jobState[property];
@@ -61,7 +54,7 @@ const heldLockFiles = (lockFiles: ReadonlyArray<string>): ReadonlyArray<string> 
 
 const heldCodexLockIds = (homeRoot: string): ReadonlyArray<string> => {
   const lockFolder = codexLockFolder(homeRoot);
-  const lockFiles = childNames(lockFolder)
+  const lockFiles = folderEntries({ folder: lockFolder, recursive: false })
     .filter((name) => name.endsWith(".lock"))
     .map((name) => path.join(lockFolder, name));
   const heldFiles = heldLockFiles(lockFiles);
@@ -78,17 +71,25 @@ const isCodexLockHeld = (request: { readonly homeRoot: string; readonly threadId
 };
 
 // The ended session never counts: SessionEnd fires before its agent lets go, and a manual run names its own session.
-export const liveSessions = (request: { readonly homeRoot: string; readonly endedSessionId: string }): LiveSessions => {
+// A folder that names live sessions but cannot be listed leaves them unknown.
+export const liveSessions = (request: {
+  readonly homeRoot: string;
+  readonly endedSessionId: string;
+}): LiveSessions | undefined => {
   const isOtherSession = (sessionId: string) => sessionId !== "" && sessionId !== request.endedSessionId;
-  const jobs = unfinishedClaudeJobs(request.homeRoot);
-  const runningClaudeSessionIds = [...liveClaudeSessionIds(request.homeRoot)];
-  const jobSessionIds = jobs.map((job) => job.sessionId);
-  const claudeSessionIds = new Set([...runningClaudeSessionIds, ...jobSessionIds].filter(isOtherSession));
-  return {
-    claudeSessionIds: [...claudeSessionIds],
-    codexThreadIds: heldCodexLockIds(request.homeRoot).filter(isOtherSession),
-    jobFolders: jobs.map((job) => job.folder).filter(Boolean),
-  };
+  try {
+    const jobs = unfinishedClaudeJobs(request.homeRoot);
+    const runningClaudeSessionIds = [...liveClaudeSessionIds(request.homeRoot)];
+    const jobSessionIds = jobs.map((job) => job.sessionId);
+    const claudeSessionIds = new Set([...runningClaudeSessionIds, ...jobSessionIds].filter(isOtherSession));
+    return {
+      claudeSessionIds: [...claudeSessionIds],
+      codexThreadIds: heldCodexLockIds(request.homeRoot).filter(isOtherSession),
+      jobFolders: jobs.map((job) => job.folder).filter(Boolean),
+    };
+  } catch {
+    return undefined;
+  }
 };
 
 export const isSessionLive = (request: { readonly homeRoot: string; readonly sessionId: string }): boolean => {
