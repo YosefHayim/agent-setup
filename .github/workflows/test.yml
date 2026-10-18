@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - name: Install lsof
+        run: command -v lsof || (sudo apt-get update && sudo apt-get install -y lsof)
       - name: Setup workspace
         uses: ./.github/actions/setup
       - name: Run check
