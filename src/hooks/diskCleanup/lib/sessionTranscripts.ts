@@ -6,6 +6,7 @@ import { codexHome } from "../../lib/codexHome.js";
 import { folderEntries } from "../../lib/folderEntries.js";
 import { createPathMatcher } from "../../lib/pathMatcher.js";
 import { readClaudeEvidence, readCodexEvidence } from "../../lib/sessionEvidence.js";
+import type { FolderPaths } from "./folderPaths.js";
 
 type SessionTranscript = { readonly transcriptFile: string; readonly readEvidence: typeof readClaudeEvidence };
 
@@ -67,13 +68,14 @@ export const sessionTranscripts = (request: {
   }
 };
 
-// The folders a transcript's commands, edits, and working folders name, or undefined when it cannot be read.
+// The folders a transcript's commands, edits, and working folders name by either of their paths, or undefined when it
+// cannot be read.
 export const foldersNamedIn = (request: {
   readonly transcript: SessionTranscript;
-  readonly folders: ReadonlyArray<string>;
+  readonly folders: ReadonlyArray<FolderPaths>;
   readonly homeRoot: string;
 }): ReadonlyArray<string> | undefined => {
-  const namedFolders = request.folders.map((folder) => ({ name: folder, root: folder }));
+  const namedFolders = request.folders.flatMap(({ folder, paths }) => paths.map((root) => ({ name: folder, root })));
   const matchers = { matchPaths: createPathMatcher(namedFolders), matchKeywords: NO_KEYWORDS };
   const { transcriptFile, readEvidence } = request.transcript;
   try {

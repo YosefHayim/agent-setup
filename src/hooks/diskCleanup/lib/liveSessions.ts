@@ -1,10 +1,11 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { unfinishedClaudeJobStates } from "../../lib/claudeJobs.js";
 import { liveClaudeSessionIds } from "../../lib/claudeLiveSessions.js";
 import { codexHome } from "../../lib/codexHome.js";
 import { folderEntries } from "../../lib/folderEntries.js";
+import { realFolder } from "./folderPaths.js";
 import { listOpenPaths } from "./runningProcesses.js";
 
 export type LiveSessions = {
@@ -25,15 +26,6 @@ const unfinishedClaudeJobs = (homeRoot: string): ReadonlyArray<ClaudeJob> =>
     sessionId: textAt(jobState, "sessionId"),
     folder: textAt(jobState, "cwd"),
   }));
-
-// lsof names each open file by its real path, whatever symlink led to it.
-const realFolder = (folder: string): string => {
-  try {
-    return realpathSync(folder);
-  } catch {
-    return folder;
-  }
-};
 
 const codexLockFolder = (homeRoot: string): string => {
   const lockFolder = path.join(codexHome(homeRoot), "thread-writer-locks");
