@@ -15,8 +15,9 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 
 - Docker is running with enough memory for the heaviest job. A leg killed with exit 137 means Docker needs more memory.
 - `act` is installed. Read its config file (`~/.actrc`, or `~/Library/Application Support/act/actrc` on macOS) for the runner image, for example `-P ubuntu-latest=catthehacker/ubuntu:act-latest`.
+- Pass the host's own architecture as `--container-architecture linux/<arch>`: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. A config that pins `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
 - `gh auth status` works. The token goes in as a secret, never into a file.
-- Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
+- Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`, with every `/` in the branch turned into `-`, because the name goes into `sed` and `perl` patterns and into container names. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
 
 ## Workflow
 
@@ -28,17 +29,40 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    git clone --single-branch --branch <branch> <repo-path> "<scratchpad>/$CI_NAME"
    ```
 
+   Run every later command from inside the clone (`cd "<scratchpad>/$CI_NAME"`), so the relative paths never edit the repository's own workflows. Commit in the repository and clone again; never commit inside the clone. `dorny/paths-filter` diffs against `origin/<branch>` when it exists, so it misses a commit made only in the clone.
+
 2. **GitHub origin.** act reads `github.repository` from the clone's origin; a file-path origin breaks actions such as `dorny/paths-filter`.
 
    ```bash
    git -C "<scratchpad>/$CI_NAME" remote set-url origin https://github.com/<owner>/<repo>.git
    ```
 
-3. **Unique workflow name.** act names containers after the workflow and job, so parallel runs collide. Copy the workflow inside the clone with `name: <CI_NAME>-<leg>` and pass the copy with `-W`.
-4. **Own action cache per leg.** Concurrent runs corrupt a shared `~/.cache/act` ("reference not found", "EOF").
+3. **Run name in every container name.** act names a container `act-<workflow name>-<job>`, and a called reusable workflow's container `act-<caller job>-<called workflow name>-<job>`, trimmed to 63 characters. Prefix every workflow name in the clone, so parallel runs of the same repository never collide and cleanup finds every container. Keep `CI_NAME` under 40 characters.
 
    ```bash
-   cp -cR ~/.cache/act "<scratchpad>/$CI_NAME-cache-<leg>"   # macOS copy-on-write; use cp -R elsewhere
+   perl -pi -e "s/^name: /name: $CI_NAME-/" .github/workflows/*.yml
+   ```
+
+4. **One act process per job.** Jobs in one act process race on the action cache. Run each job as its own leg with `-j <job>`. act also runs the jobs it `needs` in that leg, so give each leg its own workflow copy, or the shared jobs collide:
+
+   ```bash
+   sed "s/^name: .*/name: $CI_NAME-<job>/" .github/workflows/ci.yml > ".github/workflows/$CI_NAME-<job>.yml"
+   ```
+
+   Skip a gate job that only reads `needs.*.result`: the other legs already prove it.
+
+5. **Own action cache per leg.** Concurrent runs corrupt a shared `~/.cache/act` ("reference not found", "EOF").
+
+   ```bash
+   cp -cR ~/.cache/act "<scratchpad>/$CI_NAME-cache-<job>"   # macOS copy-on-write; use cp -R elsewhere
+   ```
+
+   When `~/.cache/act` lacks an action the workflow uses (a fresh setup, or a new action), run one leg once without `--action-offline-mode` and copy the caches after it.
+
+6. **Event file.** For `pull_request`, write the event JSON to the scratchpad with the pull request's number, base and head, so changed-file tools (`dorny/paths-filter`, `vitest --changed`, `biome check --changed`) see the same diff as on GitHub. `gh pr view <branch> --json number,baseRefName` gives the number and the base branch. The single-branch clone has no `origin/<base>`, so run `git fetch origin <base>:refs/remotes/origin/<base>` first:
+
+   ```json
+   {"pull_request":{"number":<number>,"head":{"ref":"<branch>","sha":"<git rev-parse HEAD>"},"base":{"ref":"<base>","sha":"<git merge-base origin/<base> HEAD>"}}}
    ```
 
 ### Node missing after a PATH step
@@ -47,39 +71,53 @@ In `catthehacker/ubuntu:act-latest`, node lives only in the tool cache. After a 
 
 ```dockerfile
 FROM catthehacker/ubuntu:act-latest
-RUN NODE_BIN=$(ls -d /opt/acttoolcache/node/*/x64/bin | tail -n 1) \
+RUN NODE_BIN=$(ls -d /opt/acttoolcache/node/*/*/bin | tail -n 1) \
  && for tool in node npm npx corepack; do ln -sf "$NODE_BIN/$tool" "/usr/local/bin/$tool"; done
 ```
 
 Build it once as `act-runner-node:<date>` and run with `-P ubuntu-latest=act-runner-node:<date> --pull=false`.
 
-### Run
+### Job containers
+
+`--pull=false` also skips images named in a job's `container:`. Pull each one once for the runner's platform, and keep it like a runner image:
 
 ```bash
-act push -W .github/workflows/<copy>.yml \
-  -P ubuntu-latest=act-runner-node:<date> --pull=false \
-  --action-cache-path "<scratchpad>/$CI_NAME-cache-<leg>" --action-offline-mode \
-  -s GITHUB_TOKEN="$(gh auth token)" \
-  > "<scratchpad>/$CI_NAME-<leg>.log" 2>&1
+docker pull --platform linux/<arch> mcr.microsoft.com/playwright:<version>
 ```
 
-- Use the event the workflow really runs on. For `pull_request`, pass `-e <event.json>` with the base and head SHAs.
-- Run about 6 legs at once at most. More causes CPU contention and test timeouts. Rerun one failed leg alone with `--matrix <key>:<value>`.
+### Run
+
+Start every leg in the background, then wait for all of them:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> \
+  -e "<scratchpad>/$CI_NAME-event.json" --rm \
+  -P ubuntu-latest=act-runner-node:<date> --pull=false --container-architecture linux/<arch> \
+  --action-cache-path "<scratchpad>/$CI_NAME-cache-<job>" --action-offline-mode \
+  -s GITHUB_TOKEN \
+  > "<scratchpad>/$CI_NAME-<job>.log" 2>&1
+```
+
+- `-s GITHUB_TOKEN` without a value reads the variable, so the token stays out of act's arguments in the process list.
+
+- Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
+- Run about 6 legs at once at most, and keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine. Rerun one failed leg alone with `--matrix <key>:<value>`.
 - Scripts inside the container write temp files to `$RUNNER_TEMP`, not the system temp folder.
-- A step that cannot work under act (an action with broken outputs, a deploy, an upload) gets a stand-in step in the workflow copy that runs the same tool directly. List every stand-in in the report.
+- act has no artifact server, so `actions/upload-artifact` fails with `Unable to get the ACTIONS_RUNTIME_TOKEN`. When it runs only on failure, the first failing step above it is the cause.
+- A step that cannot work under act (an action with broken outputs, a deploy) gets a stand-in step in the workflow copy that runs the same tool directly. List every stand-in in the report.
 
 ### Cleanup (always, also after a failure)
 
-Remove only what this run made, selected by `CI_NAME`.
+Remove only what this run made, selected by `CI_NAME`. `--rm` already removes most of it; this catches the rest.
 
 ```bash
 for container in $(docker ps -aq --filter "name=$CI_NAME"); do docker rm -f "$container"; done
 for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume rm "$volume"; done
 ```
 
-- **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image and `act-runner-node:<date>`): they are machine tooling reused by every run.
+- **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
 - **Shared volumes.** Keep `act-toolcache` and any volume without `CI_NAME` in its name.
-- **Files.** Delete the clone, the leg caches, the event files and the logs from the scratchpad once the report is written.
+- **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.
 
 Check that `docker ps -a --filter "name=$CI_NAME"` and `docker volume ls --filter "name=$CI_NAME"` print nothing.
 
@@ -87,7 +125,7 @@ Check that `docker ps -a --filter "name=$CI_NAME"` and `docker volume ls --filte
 
 Report:
 
-
+- The event, and which jobs ran and which were skipped by their `if`.
 - Each leg: job, matrix values, pass or fail, duration, and for a failure the first failing step with a short log excerpt.
 - Every stand-in step and why act could not run the original.
-- Cleanup result: containers, volumes, images and files removed, and nothing left with `CI_NAME`.
+- Cleanup result: containers, volumes, images and files removed, and nothing left from this run.
