@@ -107,6 +107,12 @@ const ledgerLines = (workspace: Workspace) =>
     .split("\n")
     .map((line) => JSON.parse(line));
 
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
+};
+
 const lastLine = (file: string) => JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1) || "{}");
 
 const waitUntil = async (condition: () => boolean) => {
@@ -204,6 +210,16 @@ describe("rehome watcher with Claude Code sessions", () => {
     const jobFolder = path.join(workspace.homeRoot, ".claude-work", "jobs", "5cc2fa97");
     mkdirSync(jobFolder, { recursive: true });
     writeFileSync(path.join(jobFolder, "state.json"), JSON.stringify({ sessionId, state: "stopped" }));
+
+    runWatcher({ workspace, args: ["--sweep"] });
+
+    expect(existsSync(transcript)).toBe(true);
+  });
+
+  it("leaves every session alone while a jobs folder cannot be listed", () => {
+    const workspace = createWorkspace();
+    const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
+    linkToItself(path.join(workspace.homeRoot, ".claude", "jobs"));
 
     runWatcher({ workspace, args: ["--sweep"] });
 

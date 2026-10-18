@@ -331,6 +331,17 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(finished)).toBe(true);
   });
 
+  it("keeps every worktree while the session registry cannot be listed", () => {
+    const home = createCodeHome();
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    linkToItself(path.join(home.homeRoot, ".claude", "sessions"));
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^kept +in-use +\//);
+    expect(existsSync(finished)).toBe(true);
+  });
+
   it("keeps a worktree a process holds a file in, or names on its command line, from another folder", async () => {
     const home = createCodeHome();
     const opened = addBranchWorktree({ home, branch: "opened" });

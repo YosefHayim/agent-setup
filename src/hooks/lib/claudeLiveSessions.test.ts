@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +35,12 @@ const registerSession = (request: {
 const exitedProcessId = (): number => {
   const exitedProcess = spawnSync(process.execPath, ["-e", ""]);
   return exitedProcess.pid;
+};
+
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
 };
 
 afterEach(() => {
@@ -75,5 +81,24 @@ describe("liveClaudeSessionIds", () => {
     writeFileSync(path.join(registryFolder, "2.json"), JSON.stringify({ pid: process.pid }));
 
     expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(false);
+  });
+
+  it("reads a config root that never ran a session as holding none", () => {
+    const homeRoot = createHomeRoot();
+    mkdirSync(path.join(homeRoot, ".claude"));
+    registerSession({
+      configRoot: path.join(homeRoot, ".claude-work"),
+      sessionId: secondAccountSessionId,
+      processId: process.pid,
+    });
+
+    expect(liveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
+  });
+
+  it("fails while a registry folder cannot be listed, since any session could be running", () => {
+    const homeRoot = createHomeRoot();
+    linkToItself(path.join(homeRoot, ".claude", "sessions"));
+
+    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
   });
 });
