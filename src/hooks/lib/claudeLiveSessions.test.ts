@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +35,12 @@ const registerSession = (request: {
 const exitedProcessId = (): number => {
   const exitedProcess = spawnSync(process.execPath, ["-e", ""]);
   return exitedProcess.pid;
+};
+
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
 };
 
 afterEach(() => {
@@ -75,5 +81,49 @@ describe("liveClaudeSessionIds", () => {
     writeFileSync(path.join(registryFolder, "2.json"), JSON.stringify({ pid: process.pid }));
 
     expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(false);
+  });
+
+  it("reads a config root that never ran a session as holding none", () => {
+    const homeRoot = createHomeRoot();
+    mkdirSync(path.join(homeRoot, ".claude"));
+    registerSession({
+      configRoot: path.join(homeRoot, ".claude-work"),
+      sessionId: secondAccountSessionId,
+      processId: process.pid,
+    });
+
+    expect(liveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
+  });
+
+  it.each<[string, (folder: string) => void]>([
+    ["a folder that links to itself", linkToItself],
+    ["a file", (folder) => writeFileSync(folder, "")],
+    ["a link to nowhere", (folder) => symlinkSync(`${folder}-gone`, folder)],
+  ])("fails while %s stands where a registry folder belongs, since any session could be running", (_blocker, block) => {
+    const homeRoot = createHomeRoot();
+    const registryFolder = path.join(homeRoot, ".claude", "sessions");
+    mkdirSync(path.dirname(registryFolder), { recursive: true });
+    block(registryFolder);
+
+    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+  });
+
+  it("fails while a config root is a link to nowhere, since a session could be running from it", () => {
+    const homeRoot = createHomeRoot();
+    symlinkSync(path.join(homeRoot, "unmounted"), path.join(homeRoot, ".claude-work"));
+
+    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+  });
+
+  it("skips a file whose name looks like a config root", () => {
+    const homeRoot = createHomeRoot();
+    writeFileSync(path.join(homeRoot, ".claude-notes"), "notes\n");
+    registerSession({
+      configRoot: path.join(homeRoot, ".claude"),
+      sessionId: runningSessionId,
+      processId: process.pid,
+    });
+
+    expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(true);
   });
 });

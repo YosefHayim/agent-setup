@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,6 +62,12 @@ const registerRunningSession = (request: { readonly homeRoot: string; readonly s
     path.join(registryFolder, `${process.pid}.json`),
     JSON.stringify({ sessionId: request.sessionId, pid: process.pid }),
   );
+};
+
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
 };
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
@@ -141,6 +156,20 @@ describe("scratchWatcher process boundary", () => {
     const execution = runWatcher({ homeRoot, watcherArguments: [] });
 
     expect(execution.status).toBe(0);
+    expect(existsSync(path.join(idleFolder, "scratchpad", "notes.txt"))).toBe(true);
+  });
+
+  it("keeps every quiet folder while the session registry cannot be listed, and still removes the ended one", () => {
+    const homeRoot = createHomeRoot();
+    const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
+    const idleFolder = createSessionFolder({ homeRoot, sessionId: otherSessionId });
+    leaveUntouchedFor({ folder: idleFolder, days: 30 });
+    linkToItself(path.join(homeRoot, ".claude", "sessions"));
+
+    const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
+
+    expect(execution.status).toBe(0);
+    expect(existsSync(endedFolder)).toBe(false);
     expect(existsSync(path.join(idleFolder, "scratchpad", "notes.txt"))).toBe(true);
   });
 

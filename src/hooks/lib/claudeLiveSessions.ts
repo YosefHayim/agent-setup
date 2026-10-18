@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { folderEntries } from "./folderEntries.js";
 import { isRecord } from "./jsonLines.js";
 import { isProcessAlive } from "./processAlive.js";
 
@@ -14,16 +15,12 @@ export const claudeConfigRoots = (homeRoot: string): ReadonlyArray<string> => {
   return configuredRoot ? [...new Set([configuredRoot, ...accountRoots])] : accountRoots;
 };
 
+// A config root that never ran a session has no registry.
 const registryFilesIn = (configRoot: string): ReadonlyArray<string> => {
   const registryFolder = path.join(configRoot, "sessions");
-  try {
-    return readdirSync(registryFolder)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => path.join(registryFolder, name));
-  } catch {
-    // A config root that never ran a session has no registry.
-    return [];
-  }
+  return folderEntries({ folder: registryFolder, recursive: false })
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => path.join(registryFolder, name));
 };
 
 const liveSessionIdsIn = (registryFile: string): ReadonlyArray<string> => {
@@ -41,7 +38,8 @@ const liveSessionIdsIn = (registryFile: string): ReadonlyArray<string> => {
   }
 };
 
-// Claude Code writes <config root>/sessions/<pid>.json for every running process, naming the session it holds.
+// Claude Code writes <config root>/sessions/<pid>.json for every running process, naming the session it holds. A
+// registry that cannot be listed throws, since any session could be running.
 export const liveClaudeSessionIds = (homeRoot: string): ReadonlySet<string> => {
   const registryFiles = claudeConfigRoots(homeRoot).flatMap(registryFilesIn);
   const liveSessionIds = registryFiles.flatMap(liveSessionIdsIn);
