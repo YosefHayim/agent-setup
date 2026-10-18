@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { oldCodexReleases } from "./codexReleases.js";
+import { folderPaths } from "./folderPaths.js";
 import { isUsedByRunningProcess, type RunningProcesses, runningProcesses } from "./runningProcesses.js";
 import { childEntries, deleteEntries, isStale } from "./staleEntries.js";
 import { runToolPrunes } from "./toolPrunes.js";
@@ -32,7 +33,10 @@ const unusedCacheEntries = (homeRoot: string): ReadonlyArray<string> => {
     ...oldCodexReleases(homeRoot),
     ...staleToolCaches({ homeRoot, processes }),
   ];
-  return candidates.filter((folder) => !isUsedByRunningProcess({ folder, processes }));
+  return candidates.filter((folder) => {
+    const { paths } = folderPaths({ folder, roots: [] });
+    return !isUsedByRunningProcess({ paths, processes });
+  });
 };
 
 export const cleanUpCaches = (request: { readonly homeRoot: string; readonly dryRun: boolean }) => {

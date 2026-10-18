@@ -159,8 +159,9 @@ const linkToItself = (folder: string) => {
   symlinkSync(folder, folder);
 };
 
-// Moving a folder to another disk and linking it back leaves git naming the worktrees under it by their old paths,
-// which now run through the link, while lsof names every open file by its real path.
+// Moving a folder to another disk and linking it back leaves git naming the worktrees made before by their old paths,
+// which now run through the link, and the ones made after by their real paths, while lsof names every open file by its
+// real path.
 const moveAndLinkBack = (request: { readonly folder: string; readonly movedFolder: string }) => {
   mkdirSync(path.dirname(request.movedFolder), { recursive: true });
   renameSync(request.folder, request.movedFolder);
@@ -431,6 +432,29 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^removed +nothing to push +\//);
     expect(existsSync(busy)).toBe(true);
     expect(existsSync(jobbed)).toBe(true);
+  });
+
+  it("cleans up worktrees made under a linked code folder, and keeps one a live session works in through the link", () => {
+    const home = createCodeHome();
+    moveAndLinkBack({ folder: path.dirname(home.repo), movedFolder: path.join(home.homeRoot, "Volumes", "Code") });
+    const busy = addBranchWorktree({ home, branch: "busy" });
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    const configRoot = path.join(home.homeRoot, ".claude");
+    const registryEntry = { pid: process.pid, sessionId: liveSessionId };
+    mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
+    writeFileSync(path.join(configRoot, "sessions", `${liveSessionId}.json`), JSON.stringify(registryEntry));
+    const toolUse = { type: "tool_use", input: { file_path: path.join(busy, "src", "app.ts") } };
+    const transcriptLine = { type: "assistant", cwd: home.repo, message: { content: [toolUse] } };
+    appendTranscriptLine({ home, sessionId: liveSessionId, transcriptLine });
+    const busyRealFolder = realpathSync(busy);
+    const finishedRealFolder = realpathSync(finished);
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: busyRealFolder })).toMatch(/^kept +in-use +\//);
+    expect(reportLineFor({ report: run.stdout, target: finishedRealFolder })).toMatch(/^removed +nothing to push +\//);
+    expect(existsSync(busy)).toBe(true);
+    expect(existsSync(finished)).toBe(false);
   });
 
   it("leaves a worktree another session made to that session, while a manual pass looks at it too", () => {
