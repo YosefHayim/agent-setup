@@ -7,22 +7,18 @@ import { readFileSync } from "node:fs";
 import { startDetachedWatcher } from "../../lib/detachedWatcher.js";
 import { sessionIdFrom } from "../../lib/sessionIds.js";
 
-// Grok's session IDs are not UUIDs. Its sessions never count as live, so its watcher only needs no session named.
-const sessionArguments = (hookInput: unknown): ReadonlyArray<string> => {
-  const endedSessionId = sessionIdFrom(hookInput);
-  if (!endedSessionId) {
-    return [];
-  }
-
-  return ["--session", endedSessionId];
-};
-
+// Grok's session IDs are not UUIDs and its transcripts are never read, so its sessions own no worktree to clean up.
 const handOverEndedSession = (): void => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
+  const endedSessionId = sessionIdFrom(hookInput);
+  if (!endedSessionId) {
+    return;
+  }
+
   startDetachedWatcher({
     hookUrl: import.meta.url,
     watcherName: "cleanupWatcher",
-    watcherArguments: [...sessionArguments(hookInput), "--wait"],
+    watcherArguments: ["--session", endedSessionId, "--wait"],
   });
 };
 

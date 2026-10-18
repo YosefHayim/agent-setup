@@ -44,6 +44,8 @@ const COMMITTED_FILE_FORMAT = ["--format=", "--name-only", "--diff-filter=d"];
 const REMOTE_LIST_QUERY = ["remote"];
 // GitHub refuses files over 100 MB; one this big in a worktree is a build or a download, not work.
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
+// git writes a linked worktree's .git file once, when it adds the worktree.
+const RECENT_WORKTREE_MILLISECONDS = 60 * 60 * 1_000;
 // They count as the default branch even when the remote never said which one it is.
 const ALWAYS_DEFAULT_BRANCHES = ["main", "master"];
 
@@ -98,6 +100,15 @@ const isUniqueIgnoredSecret = (request: { readonly worktree: LinkedWorktree; rea
   }
 };
 
+const isCreatedRecently = (folder: string): boolean => {
+  try {
+    const createdAt = statSync(path.join(folder, ".git")).mtimeMs;
+    return Date.now() - createdAt < RECENT_WORKTREE_MILLISECONDS;
+  } catch {
+    return true;
+  }
+};
+
 const remoteFor = (worktree: LinkedWorktree): string => {
   const remotes = gitAnswerLines({ folder: worktree.folder, query: REMOTE_LIST_QUERY }) || [];
   const branchRemoteQuery = ["config", "--get", `branch.${worktree.branch}.remote`];
@@ -145,6 +156,7 @@ export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; 
   const gitAnswers = [changeLines, ignoredSecrets, unpushedCommits, committedFiles];
   const facts: WorktreeFacts = {
     inUse: request.inUse,
+    createdRecently: isCreatedRecently(worktree.folder),
     locked: worktree.locked,
     readable: gitAnswers.every((answer) => answer !== undefined),
     detached,

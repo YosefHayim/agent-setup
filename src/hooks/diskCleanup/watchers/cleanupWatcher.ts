@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Detached watcher behind the disk-cleanup hook, and the command for a manual pass:
 //   node cleanupWatcher.js [--session <id>] [--wait] [--dry-run]
-// --session names a session that no longer counts as live; --wait first waits for that session to end.
+// --session names the ended session: only the worktrees it created or worked in are looked at, and it no longer counts
+// as live. Without it every worktree is looked at. --wait first waits for that session to end.
 // Fails open: a crash leaves every worktree and cache where it was.
 
 import { writeSync } from "node:fs";

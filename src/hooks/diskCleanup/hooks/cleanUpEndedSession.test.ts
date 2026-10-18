@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,7 +30,8 @@ const git = (request: { readonly folder: string; readonly command: ReadonlyArray
   return execution.stdout.trim();
 };
 
-// ~/Desktop/Code/app with one feature worktree holding a commit its remote lacks.
+// ~/Desktop/Code/app with one two-hour-old feature worktree holding a commit its remote lacks, which the ended
+// session's transcript names.
 const createFeatureWorktree = () => {
   const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-hook-"));
   workspaces.push(homeRoot);
@@ -45,6 +47,13 @@ const createFeatureWorktree = () => {
   git({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
   git({ folder: repo, command: ["worktree", "add", "--quiet", "-b", "feature", feature] });
   git({ folder: feature, command: ["commit", "--quiet", "--allow-empty", "--message", "feature work"] });
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+  utimesSync(path.join(feature, ".git"), twoHoursAgo, twoHoursAgo);
+  const projectFolder = path.join(homeRoot, ".claude", "projects", "-app");
+  const toolUse = { type: "tool_use", name: "Bash", input: { command: "git worktree add .worktrees/feature" } };
+  const transcriptLine = { type: "assistant", cwd: repo, message: { content: [toolUse] } };
+  mkdirSync(projectFolder, { recursive: true });
+  writeFileSync(path.join(projectFolder, `${endedSessionId}.jsonl`), `${JSON.stringify(transcriptLine)}\n`);
   return { homeRoot, remote, feature };
 };
 
@@ -100,16 +109,16 @@ describe("cleanUpEndedSession process boundary", { timeout: 30_000 }, () => {
     expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
   });
 
-  it("still cleans up after a session whose ID is not a UUID, as Grok's are, without naming it", async () => {
-    const { homeRoot, remote, feature } = createFeatureWorktree();
+  it("starts no watcher for a session whose ID is not a UUID, as Grok's are, since it owns no worktree", async () => {
+    const { homeRoot, feature } = createFeatureWorktree();
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: "../grok-session" }) });
-    await waitUntilGone(feature);
-    await waitUntilGone(path.join(homeRoot, "disk-cleanup-state", "watcher.lock"));
+    // A watcher would have taken its lock, in the state folder, well within this time.
+    await delay(3_000);
 
     expect(execution.status).toBe(0);
-    expect(existsSync(feature)).toBe(false);
-    expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
+    expect(existsSync(path.join(homeRoot, "disk-cleanup-state"))).toBe(false);
+    expect(existsSync(feature)).toBe(true);
   });
 
   it("exits cleanly on input that is not JSON", () => {

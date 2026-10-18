@@ -3,6 +3,7 @@ import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linkedWorktrees.js";
 import { reportLine } from "./reportLine.js";
 import { isInsideFolder } from "./runningProcesses.js";
+import { foldersNamedIn, sessionTranscripts } from "./sessionTranscripts.js";
 import { decideWorktreeCleanup, type WorktreeCleanupDecision } from "./worktreeCleanupDecision.js";
 import { readWorktreeFacts } from "./worktreeFacts.js";
 import { removeWorktree } from "./worktreeRemoval.js";
@@ -77,6 +78,30 @@ const pruneGoneWorktrees = (request: {
     .map((worktree) => reportLine({ action, detail: "folder gone", target: worktree.folder }));
 };
 
+// A session owns the worktrees its transcripts name: the ones it created or worked in. One whose transcripts cannot be
+// read owns none, and a manual pass, which names no session, looks at every worktree.
+const worktreesOwnedBy = (request: {
+  readonly homeRoot: string;
+  readonly endedSessionId: string;
+  readonly worktrees: ReadonlyArray<LinkedWorktree>;
+}): ReadonlyArray<LinkedWorktree> => {
+  if (!request.endedSessionId || request.worktrees.length === 0) {
+    return request.worktrees;
+  }
+
+  const sessionIds = [request.endedSessionId];
+  const transcripts = sessionTranscripts({
+    homeRoot: request.homeRoot,
+    claudeSessionIds: sessionIds,
+    codexThreadIds: sessionIds,
+  });
+  const worktreeFolders = request.worktrees.map((worktree) => worktree.folder);
+  const ownedFolders = transcripts.flatMap(
+    (transcript) => foldersNamedIn({ transcript, folders: worktreeFolders, homeRoot: request.homeRoot }) || [],
+  );
+  return request.worktrees.filter((worktree) => ownedFolders.includes(worktree.folder));
+};
+
 // Only worktrees under the code roots are touched; ones in scratch, job, or agent folders belong to whoever made them.
 export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray<string> => {
   const roots = codeRootFolders(request);
@@ -85,9 +110,10 @@ export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray
     roots.some((folder) => isInsideFolder({ candidate: worktree.folder, folder })),
   );
   const presentWorktrees = worktrees.filter((worktree) => !worktree.prunable);
-  const worktreeFolders = presentWorktrees.map((worktree) => worktree.folder);
+  const ownedWorktrees = worktreesOwnedBy({ ...request, worktrees: presentWorktrees });
+  const worktreeFolders = ownedWorktrees.map((worktree) => worktree.folder);
   const usedFolders = worktreesInUse({ ...request, worktreeFolders });
-  const worktreeLines = presentWorktrees.map((worktree) =>
+  const worktreeLines = ownedWorktrees.map((worktree) =>
     cleanUpWorktree({ worktree, inUse: usedFolders.has(worktree.folder), dryRun: request.dryRun }),
   );
   return [...worktreeLines, ...pruneGoneWorktrees({ worktrees, dryRun: request.dryRun })];
