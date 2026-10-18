@@ -1,13 +1,19 @@
-import { existsSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 
-// A path that runs through a file names no folder, while a file in the folder's own place leaves its entries unknown.
-const isMissingFolder = (request: { readonly folder: string; readonly failure: unknown }): boolean => {
-  const code = request.failure instanceof Error && "code" in request.failure ? request.failure.code : "";
-  return code === "ENOENT" || (code === "ENOTDIR" && !existsSync(request.folder));
+// Only a path with nothing at its end names no folder. A file, or a link to nowhere, in the folder's place leaves its
+// entries unknown.
+const isMissingFolder = (folder: string): boolean => {
+  try {
+    lstatSync(folder);
+    return false;
+  } catch (failure) {
+    const code = failure instanceof Error && "code" in failure ? failure.code : "";
+    return code === "ENOENT" || code === "ENOTDIR";
+  }
 };
 
-// A folder that is not there has no entries. A file in its place, or a folder that cannot be listed, throws, since its
-// entries are unknown.
+// A folder that is not there, or whose path runs through a file, has no entries. Anything else that cannot be listed
+// throws, since its entries are unknown.
 export const folderEntries = (request: {
   readonly folder: string;
   readonly recursive: boolean;
@@ -15,7 +21,7 @@ export const folderEntries = (request: {
   try {
     return readdirSync(request.folder, { recursive: request.recursive, encoding: "utf8" });
   } catch (failure) {
-    if (isMissingFolder({ folder: request.folder, failure })) {
+    if (isMissingFolder(request.folder)) {
       return [];
     }
 

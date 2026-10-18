@@ -95,17 +95,15 @@ describe("liveClaudeSessionIds", () => {
     expect(liveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
   });
 
-  it("fails while a registry folder cannot be listed, since any session could be running", () => {
+  it.each<[string, (folder: string) => void]>([
+    ["a folder that links to itself", linkToItself],
+    ["a file", (folder) => writeFileSync(folder, "")],
+    ["a link to nowhere", (folder) => symlinkSync(`${folder}-gone`, folder)],
+  ])("fails while %s stands where a registry folder belongs, since any session could be running", (_blocker, block) => {
     const homeRoot = createHomeRoot();
-    linkToItself(path.join(homeRoot, ".claude", "sessions"));
-
-    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
-  });
-
-  it("fails while a file stands where a registry folder belongs", () => {
-    const homeRoot = createHomeRoot();
-    mkdirSync(path.join(homeRoot, ".claude"));
-    writeFileSync(path.join(homeRoot, ".claude", "sessions"), "");
+    const registryFolder = path.join(homeRoot, ".claude", "sessions");
+    mkdirSync(path.dirname(registryFolder), { recursive: true });
+    block(registryFolder);
 
     expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
   });
