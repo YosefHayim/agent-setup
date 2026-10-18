@@ -10,18 +10,27 @@ type SessionTranscript = { readonly transcriptFile: string; readonly readEvidenc
 
 const NO_KEYWORDS = (): ReadonlySet<string> => new Set();
 
-const childNames = (folder: string): ReadonlyArray<string> => {
+const isMissingFolder = (failure: unknown): boolean =>
+  failure instanceof Error && "code" in failure && (failure.code === "ENOENT" || failure.code === "ENOTDIR");
+
+// A folder that is not there has no entries. One that is there but cannot be listed throws.
+const entryNames = (request: { readonly folder: string; readonly recursive: boolean }): ReadonlyArray<string> => {
   try {
-    return readdirSync(folder);
-  } catch {
-    return [];
+    return readdirSync(request.folder, { recursive: request.recursive, encoding: "utf8" });
+  } catch (failure) {
+    if (isMissingFolder(failure)) {
+      return [];
+    }
+
+    throw failure;
   }
 };
 
 const claudeProjectFolders = (homeRoot: string): ReadonlyArray<string> =>
   claudeConfigRoots(homeRoot).flatMap((configRoot) => {
     const projectsFolder = path.join(configRoot, "projects");
-    return childNames(projectsFolder).map((projectName) => path.join(projectsFolder, projectName));
+    const projectNames = entryNames({ folder: projectsFolder, recursive: false });
+    return projectNames.map((projectName) => path.join(projectsFolder, projectName));
   });
 
 // A session's own transcript is <project>/<id>.jsonl, and each of its subagents writes
@@ -29,7 +38,7 @@ const claudeProjectFolders = (homeRoot: string): ReadonlyArray<string> =>
 const claudeTranscriptsIn = (request: { readonly projectFolder: string; readonly sessionId: string }) => {
   const ownTranscript = path.join(request.projectFolder, `${request.sessionId}.jsonl`);
   const subagentsFolder = path.join(request.projectFolder, request.sessionId, "subagents");
-  const subagentTranscripts = childNames(subagentsFolder)
+  const subagentTranscripts = entryNames({ folder: subagentsFolder, recursive: false })
     .filter((name) => name.endsWith(".jsonl"))
     .map((name) => path.join(subagentsFolder, name));
   return [ownTranscript, ...subagentTranscripts].filter(existsSync);
@@ -43,14 +52,6 @@ const claudeTranscriptsOf = (request: { readonly homeRoot: string; readonly sess
   return [...new Set(transcriptFiles)];
 };
 
-const rolloutNamesIn = (sessionsFolder: string): ReadonlyArray<string> => {
-  try {
-    return readdirSync(sessionsFolder, { recursive: true, encoding: "utf8" });
-  } catch {
-    return [];
-  }
-};
-
 // Rollouts are sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl.
 const codexRolloutsOf = (request: { readonly homeRoot: string; readonly threadIds: ReadonlyArray<string> }) => {
   if (request.threadIds.length === 0) {
@@ -58,22 +59,27 @@ const codexRolloutsOf = (request: { readonly homeRoot: string; readonly threadId
   }
 
   const sessionsFolder = path.join(codexHome(request.homeRoot), "sessions");
-  return rolloutNamesIn(sessionsFolder)
+  return entryNames({ folder: sessionsFolder, recursive: true })
     .filter((name) => name.endsWith(".jsonl") && request.threadIds.some((threadId) => name.includes(threadId)))
     .map((name) => path.join(sessionsFolder, name));
 };
 
+// The named sessions' transcripts, or undefined when a folder that could hold one cannot be listed.
 export const sessionTranscripts = (request: {
   readonly homeRoot: string;
   readonly claudeSessionIds: ReadonlyArray<string>;
   readonly codexThreadIds: ReadonlyArray<string>;
-}): ReadonlyArray<SessionTranscript> => {
-  const claudeTranscripts = claudeTranscriptsOf({ homeRoot: request.homeRoot, sessionIds: request.claudeSessionIds });
-  const codexRollouts = codexRolloutsOf({ homeRoot: request.homeRoot, threadIds: request.codexThreadIds });
-  return [
-    ...claudeTranscripts.map((transcriptFile) => ({ transcriptFile, readEvidence: readClaudeEvidence })),
-    ...codexRollouts.map((transcriptFile) => ({ transcriptFile, readEvidence: readCodexEvidence })),
-  ];
+}): ReadonlyArray<SessionTranscript> | undefined => {
+  try {
+    const claudeTranscripts = claudeTranscriptsOf({ homeRoot: request.homeRoot, sessionIds: request.claudeSessionIds });
+    const codexRollouts = codexRolloutsOf({ homeRoot: request.homeRoot, threadIds: request.codexThreadIds });
+    return [
+      ...claudeTranscripts.map((transcriptFile) => ({ transcriptFile, readEvidence: readClaudeEvidence })),
+      ...codexRollouts.map((transcriptFile) => ({ transcriptFile, readEvidence: readCodexEvidence })),
+    ];
+  } catch {
+    return undefined;
+  }
 };
 
 // The folders a transcript's commands, edits, and working folders name, or undefined when it cannot be read.

@@ -90,11 +90,8 @@ const worktreesOwnedBy = (request: {
   }
 
   const sessionIds = [request.endedSessionId];
-  const transcripts = sessionTranscripts({
-    homeRoot: request.homeRoot,
-    claudeSessionIds: sessionIds,
-    codexThreadIds: sessionIds,
-  });
+  const transcripts =
+    sessionTranscripts({ homeRoot: request.homeRoot, claudeSessionIds: sessionIds, codexThreadIds: sessionIds }) || [];
   const worktreeFolders = request.worktrees.map((worktree) => worktree.folder);
   const ownedFolders = transcripts.flatMap(
     (transcript) => foldersNamedIn({ transcript, folders: worktreeFolders, homeRoot: request.homeRoot }) || [],

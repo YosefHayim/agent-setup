@@ -299,6 +299,24 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(busy)).toBe(true);
   });
 
+  it("keeps every worktree while a live session's transcript folder cannot be listed", () => {
+    const home = createCodeHome();
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    const configRoot = path.join(home.homeRoot, ".claude");
+    mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
+    const registryEntry = { pid: process.pid, sessionId: liveSessionId };
+    writeFileSync(path.join(configRoot, "sessions", `${liveSessionId}.json`), JSON.stringify(registryEntry));
+    // A folder that links to itself cannot be listed even by root, which ignores file modes.
+    const subagentsFolder = path.join(configRoot, "projects", "-app", liveSessionId, "subagents");
+    mkdirSync(path.dirname(subagentsFolder), { recursive: true });
+    symlinkSync(subagentsFolder, subagentsFolder);
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^kept +in-use +\//);
+    expect(existsSync(finished)).toBe(true);
+  });
+
   it("keeps a worktree a process holds a file in, or names on its command line, from another folder", async () => {
     const home = createCodeHome();
     const opened = addBranchWorktree({ home, branch: "opened" });
