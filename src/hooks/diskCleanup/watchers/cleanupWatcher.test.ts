@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -105,21 +106,21 @@ const addWorktree = (request: {
 const addBranchWorktree = (request: { readonly home: CodeHome; readonly branch: string }) =>
   addWorktree({ home: request.home, name: request.branch, checkoutOptions: ["-b", request.branch], startPoint: [] });
 
-const runWatcher = (request: { readonly home: CodeHome; readonly watcherArguments: ReadonlyArray<string> }) => {
-  const { homeRoot } = request.home;
-  return spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.watcherArguments], {
+const watcherEnvironment = (home: CodeHome): NodeJS.ProcessEnv => ({
+  ...process.env,
+  HOME: home.homeRoot,
+  PATH: `${path.join(home.homeRoot, "stub-tools")}:${process.env.PATH}`,
+  CLAUDE_CONFIG_DIR: path.join(home.homeRoot, ".claude"),
+  CODEX_HOME: path.join(home.homeRoot, ".codex"),
+  AGENT_SETUP_DISK_CLEANUP_STATE_DIR: path.join(home.homeRoot, "disk-cleanup-state"),
+});
+
+const runWatcher = (request: { readonly home: CodeHome; readonly watcherArguments: ReadonlyArray<string> }) =>
+  spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.watcherArguments], {
     cwd: packageRoot,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      HOME: homeRoot,
-      PATH: `${path.join(homeRoot, "stub-tools")}:${process.env.PATH}`,
-      CLAUDE_CONFIG_DIR: path.join(homeRoot, ".claude"),
-      CODEX_HOME: path.join(homeRoot, ".codex"),
-      AGENT_SETUP_DISK_CLEANUP_STATE_DIR: path.join(homeRoot, "disk-cleanup-state"),
-    },
+    env: watcherEnvironment(request.home),
   });
-};
 
 const cleanUpAfterSession = (home: CodeHome) => runWatcher({ home, watcherArguments: ["--session", endedSessionId] });
 
@@ -306,6 +307,42 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(feature)).toBe(true);
     expect(remoteBranches(home)).toBe("main");
     expect(toolCalls(home)).not.toContain("prune");
+  });
+});
+
+describe("cleanupWatcher waiting", { timeout: 30_000 }, () => {
+  it("does not look at the ended session while another watcher holds the lock, and cleans up once it frees", async () => {
+    const home = createCodeHome();
+    const merged = addBranchWorktree({ home, branch: "merged" });
+    const lockFolder = path.join(home.homeRoot, ".codex", "thread-writer-locks");
+    const lsofCallsFile = path.join(home.homeRoot, "lsof-calls.log");
+    const lsofStub = path.join(home.homeRoot, "stub-tools", "lsof");
+    const watcherLock = path.join(home.homeRoot, "disk-cleanup-state", "watcher.lock");
+    // An own Codex lock makes every live check list open files, so a check while locked would show in the log.
+    mkdirSync(lockFolder, { recursive: true });
+    writeFileSync(path.join(lockFolder, `${endedSessionId}.lock`), "");
+    writeFileSync(lsofStub, `#!/bin/sh\necho "lsof $*" >> "${lsofCallsFile}"\n`);
+    chmodSync(lsofStub, 0o755);
+    mkdirSync(path.dirname(watcherLock), { recursive: true });
+    writeFileSync(watcherLock, String(process.pid));
+
+    const waiter = spawn(process.execPath, ["--import", "tsx", watcherPath, "--session", endedSessionId, "--wait"], {
+      cwd: packageRoot,
+      stdio: "ignore",
+      env: watcherEnvironment(home),
+    });
+    const waiterExit = once(waiter, "exit");
+    try {
+      await delay(3_000);
+      const listedFilesWhileLocked = existsSync(lsofCallsFile);
+      rmSync(watcherLock);
+      await Promise.race([waiterExit, delay(20_000)]);
+
+      expect(listedFilesWhileLocked).toBe(false);
+      expect(existsSync(merged)).toBe(false);
+    } finally {
+      waiter.kill();
+    }
   });
 });
 

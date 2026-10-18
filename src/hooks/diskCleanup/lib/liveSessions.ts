@@ -67,20 +67,39 @@ const realFolder = (folder: string): string => {
   }
 };
 
-// A Codex writer holds an flock on thread-writer-locks/<id>.lock for as long as it can append; without a list of open
-// files every lock counts as held.
-const heldCodexLockIds = (homeRoot: string): ReadonlyArray<string> => {
-  const lockFolder = realFolder(path.join(codexHome(homeRoot), "thread-writer-locks"));
-  const lockFiles = childNames(lockFolder)
-    .filter((name) => name.endsWith(".lock"))
-    .map((name) => path.join(lockFolder, name));
+const codexLockFolder = (homeRoot: string): string => {
+  const lockFolder = path.join(codexHome(homeRoot), "thread-writer-locks");
+  return realFolder(lockFolder);
+};
+
+// A Codex writer holds an flock on thread-writer-locks/<id>.lock for as long as it can append. Listing open files
+// looks at every process on the machine, so it runs only when there is a lock to check; without the list every lock
+// counts as held.
+const heldLockFiles = (lockFiles: ReadonlyArray<string>): ReadonlyArray<string> => {
   if (lockFiles.length === 0) {
     return [];
   }
 
   const openPaths = listOpenPaths();
-  const heldLockFiles = lockFiles.filter((lockFile) => !openPaths || openPaths.includes(lockFile));
-  return heldLockFiles.map((lockFile) => path.basename(lockFile, ".lock"));
+  return lockFiles.filter((lockFile) => !openPaths || openPaths.includes(lockFile));
+};
+
+const heldCodexLockIds = (homeRoot: string): ReadonlyArray<string> => {
+  const lockFolder = codexLockFolder(homeRoot);
+  const lockFiles = childNames(lockFolder)
+    .filter((name) => name.endsWith(".lock"))
+    .map((name) => path.join(lockFolder, name));
+  const heldFiles = heldLockFiles(lockFiles);
+  return heldFiles.map((lockFile) => path.basename(lockFile, ".lock"));
+};
+
+// Codex leaves its lock files behind, so a waiting watcher looks only at its own session's lock, and lists open files
+// only while that lock exists.
+const isCodexLockHeld = (request: { readonly homeRoot: string; readonly threadId: string }): boolean => {
+  const lockFolder = codexLockFolder(request.homeRoot);
+  const lockFile = path.join(lockFolder, `${request.threadId}.lock`);
+  const existingLockFiles = [lockFile].filter(existsSync);
+  return heldLockFiles(existingLockFiles).length > 0;
 };
 
 const rolloutNamesIn = (sessionsFolder: string): ReadonlyArray<string> => {
@@ -122,5 +141,5 @@ export const liveSessions = (request: { readonly homeRoot: string; readonly ende
 
 export const isSessionLive = (request: { readonly homeRoot: string; readonly sessionId: string }): boolean => {
   const isClaudeSessionLive = liveClaudeSessionIds(request.homeRoot).has(request.sessionId);
-  return isClaudeSessionLive || heldCodexLockIds(request.homeRoot).includes(request.sessionId);
+  return isClaudeSessionLive || isCodexLockHeld({ homeRoot: request.homeRoot, threadId: request.sessionId });
 };

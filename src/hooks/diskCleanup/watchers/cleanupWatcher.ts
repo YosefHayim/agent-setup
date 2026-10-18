@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 
 import { readConfig } from "../../lib/hookConfig.js";
 import { claimIntervalSlot } from "../../lib/intervalStamp.js";
-import { acquireWatcherLock, releaseWatcherLock } from "../../lib/watcherLock.js";
+import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../lib/watcherLock.js";
 import { cleanUpCaches } from "../lib/cacheCleanup.js";
 import { cacheCleanupStampFile, cleanupLockFile } from "../lib/cleanupState.js";
 import { isSessionLive } from "../lib/liveSessions.js";
@@ -38,11 +38,13 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
 
 const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-// SessionEnd runs before the agent exits, and the agent's own folder only frees up once it has.
+// SessionEnd runs before the agent exits, and the agent's own folder only frees up once it has. While another
+// watcher holds the lock this one cannot act anyway, so it does not look at the session until the lock frees.
 const waitUntilReady = async (request: { readonly homeRoot: string; readonly sessionId: string }) => {
   const deadline = Date.now() + WAIT_LIMIT_MILLISECONDS;
   while (Date.now() < deadline) {
-    if (!isSessionLive(request) && acquireWatcherLock(cleanupLockFile())) {
+    const isLockFree = !isWatcherLockHeldByOther(cleanupLockFile());
+    if (isLockFree && !isSessionLive(request) && acquireWatcherLock(cleanupLockFile())) {
       return true;
     }
     await pause(WAIT_POLL_MILLISECONDS);
