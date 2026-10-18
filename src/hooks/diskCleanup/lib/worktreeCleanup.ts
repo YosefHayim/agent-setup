@@ -2,7 +2,7 @@ import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
 import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linkedWorktrees.js";
 import { reportLine } from "./reportLine.js";
-import { isInsideFolder } from "./runningProcesses.js";
+import { isInsideAnyFolder } from "./runningProcesses.js";
 import { foldersNamedIn, sessionTranscripts } from "./sessionTranscripts.js";
 import { decideWorktreeCleanup, type WorktreeCleanupDecision } from "./worktreeCleanupDecision.js";
 import { readWorktreeFacts } from "./worktreeFacts.js";
@@ -104,7 +104,7 @@ export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray
   const roots = codeRootFolders(request);
   const repoRoots = repoRootsUnder(roots);
   const worktrees = listLinkedWorktrees(repoRoots).filter((worktree) =>
-    roots.some((folder) => isInsideFolder({ candidate: worktree.folder, folder })),
+    isInsideAnyFolder({ candidate: worktree.folder, folders: roots }),
   );
   const presentWorktrees = worktrees.filter((worktree) => !worktree.prunable);
   const ownedWorktrees = worktreesOwnedBy({ ...request, worktrees: presentWorktrees });

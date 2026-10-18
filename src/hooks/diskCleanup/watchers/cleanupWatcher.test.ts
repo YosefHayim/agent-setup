@@ -7,6 +7,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -156,6 +158,24 @@ const linkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
   symlinkSync(folder, folder);
 };
+
+// Moving a folder to another disk and linking it back leaves git naming the worktrees under it by their old paths,
+// which now run through the link, while lsof names every open file by its real path.
+const moveAndLinkBack = (request: { readonly folder: string; readonly movedFolder: string }) => {
+  mkdirSync(path.dirname(request.movedFolder), { recursive: true });
+  renameSync(request.folder, request.movedFolder);
+  symlinkSync(request.movedFolder, request.folder);
+};
+
+const HOLD_OPEN_FILE =
+  "require('node:fs').openSync(process.env.HELD_FILE, 'r'); console.log('ready'); setInterval(() => {}, 1000);";
+
+// The holder prints a line once the file is open.
+const holdFileOpen = (request: { readonly home: CodeHome; readonly heldFile: string }) =>
+  spawn(process.execPath, ["-e", HOLD_OPEN_FILE], {
+    cwd: request.home.homeRoot,
+    env: { ...process.env, HELD_FILE: request.heldFile },
+  });
 
 const cleanUpAfterSession = (home: CodeHome) => runWatcher({ home, watcherArguments: ["--session", endedSessionId] });
 
@@ -346,12 +366,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const home = createCodeHome();
     const opened = addBranchWorktree({ home, branch: "opened" });
     const named = addBranchWorktree({ home, branch: "named" });
-    const holdOpenFile =
-      "require('node:fs').openSync(process.env.HELD_FILE, 'r'); console.log('ready'); setInterval(() => {}, 1000);";
-    const fileHolder = spawn(process.execPath, ["-e", holdOpenFile], {
-      cwd: home.homeRoot,
-      env: { ...process.env, HELD_FILE: path.join(opened, "README.md") },
-    });
+    const fileHolder = holdFileOpen({ home, heldFile: path.join(opened, "README.md") });
     const folderNamer = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", named], { cwd: home.homeRoot });
     try {
       await once(fileHolder.stdout, "data");
@@ -364,6 +379,58 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
       fileHolder.kill();
       folderNamer.kill();
     }
+  });
+
+  it("keeps a worktree a process uses by its real path, after its code folder was moved and linked back", async () => {
+    const home = createCodeHome();
+    const opened = addBranchWorktree({ home, branch: "opened" });
+    const named = addBranchWorktree({ home, branch: "named" });
+    moveAndLinkBack({ folder: path.dirname(home.repo), movedFolder: path.join(home.homeRoot, "Volumes", "Code") });
+    const namedRealFolder = realpathSync(named);
+    const fileHolder = holdFileOpen({ home, heldFile: path.join(opened, "README.md") });
+    const folderNamer = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", namedRealFolder], {
+      cwd: home.homeRoot,
+    });
+    try {
+      await once(fileHolder.stdout, "data");
+
+      const run = cleanUpAfterSession(home);
+
+      expect(reportLineFor({ report: run.stdout, target: opened })).toMatch(/^kept +in-use +\//);
+      expect(reportLineFor({ report: run.stdout, target: named })).toMatch(/^kept +in-use +\//);
+    } finally {
+      fileHolder.kill();
+      folderNamer.kill();
+    }
+  });
+
+  it("keeps a worktree a live session or job works in by its real path, after its code folder was moved and linked back", () => {
+    const home = createCodeHome();
+    const busy = addBranchWorktree({ home, branch: "busy" });
+    const jobbed = addBranchWorktree({ home, branch: "jobbed" });
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    moveAndLinkBack({ folder: path.dirname(home.repo), movedFolder: path.join(home.homeRoot, "Volumes", "Code") });
+    const configRoot = path.join(home.homeRoot, ".claude");
+    const busyRealFolder = realpathSync(busy);
+    const registryEntry = { pid: process.pid, sessionId: liveSessionId };
+    mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
+    writeFileSync(path.join(configRoot, "sessions", `${liveSessionId}.json`), JSON.stringify(registryEntry));
+    const toolUse = { type: "tool_use", input: { file_path: path.join(busyRealFolder, "src", "app.ts") } };
+    const transcriptLine = { type: "assistant", cwd: home.repo, message: { content: [toolUse] } };
+    appendTranscriptLine({ home, sessionId: liveSessionId, transcriptLine });
+    const jobbedRealFolder = realpathSync(jobbed);
+    const jobFolder = path.join(configRoot, "jobs", "nightly-build");
+    const jobState = { sessionId: otherSessionId, state: "working", cwd: jobbedRealFolder };
+    mkdirSync(jobFolder, { recursive: true });
+    writeFileSync(path.join(jobFolder, "state.json"), JSON.stringify(jobState));
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: busy })).toMatch(/^kept +in-use +\//);
+    expect(reportLineFor({ report: run.stdout, target: jobbed })).toMatch(/^kept +in-use +\//);
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^removed +nothing to push +\//);
+    expect(existsSync(busy)).toBe(true);
+    expect(existsSync(jobbed)).toBe(true);
   });
 
   it("leaves a worktree another session made to that session, while a manual pass looks at it too", () => {
@@ -552,6 +619,31 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
     expect(toolCalls(home)).toContain("pnpm store prune\n");
     expect(toolCalls(home)).toContain("uv cache prune\n");
     expect(toolCalls(home)).toContain("docker system prune --force --filter until=168h\n");
+  });
+
+  it("keeps a stale npx package a process holds a file in, after the npm folder was moved and linked back", async () => {
+    const home = createCodeHome();
+    const heldNpx = createNpxEntry({ home, name: "held", touched: MONTH_AGO });
+    const heldFile = path.join(heldNpx, "package.json");
+    writeFileSync(heldFile, "{}\n");
+    utimesSync(heldNpx, MONTH_AGO, MONTH_AGO);
+    const staleNpx = createNpxEntry({ home, name: "stale", touched: MONTH_AGO });
+    moveAndLinkBack({
+      folder: path.join(home.homeRoot, ".npm"),
+      movedFolder: path.join(home.homeRoot, "Volumes", "npm"),
+    });
+    const fileHolder = holdFileOpen({ home, heldFile });
+    try {
+      await once(fileHolder.stdout, "data");
+
+      const run = cleanUpAfterSession(home);
+
+      expect(reportLineFor({ report: run.stdout, target: staleNpx })).toMatch(/^deleted +stale cache +\//);
+      expect(reportLineFor({ report: run.stdout, target: heldNpx })).toBe("");
+      expect(existsSync(heldNpx)).toBe(true);
+    } finally {
+      fileHolder.kill();
+    }
   });
 
   it("runs the cache cleanup at most once a day", () => {
