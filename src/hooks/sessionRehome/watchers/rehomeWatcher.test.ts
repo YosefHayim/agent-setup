@@ -1,11 +1,13 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -84,17 +86,19 @@ const createClaudeSession = (request: {
   return transcript;
 };
 
+const watcherEnvironment = (workspace: Workspace) => ({
+  ...process.env,
+  HOME: workspace.homeRoot,
+  CLAUDE_CONFIG_DIR: path.join(workspace.homeRoot, ".claude"),
+  CODEX_HOME: path.join(workspace.homeRoot, ".codex"),
+  AGENT_SETUP_REHOME_STATE_DIR: workspace.stateFolder,
+});
+
 const runWatcher = (request: { readonly workspace: Workspace; readonly args: ReadonlyArray<string> }) =>
   spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.args], {
     cwd: packageRoot,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      HOME: request.workspace.homeRoot,
-      CLAUDE_CONFIG_DIR: path.join(request.workspace.homeRoot, ".claude"),
-      CODEX_HOME: path.join(request.workspace.homeRoot, ".codex"),
-      AGENT_SETUP_REHOME_STATE_DIR: request.workspace.stateFolder,
-    },
+    env: watcherEnvironment(request.workspace),
   });
 
 const ledgerLines = (workspace: Workspace) =>
@@ -104,6 +108,12 @@ const ledgerLines = (workspace: Workspace) =>
     .map((line) => JSON.parse(line));
 
 const lastLine = (file: string) => JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1) || "{}");
+
+const waitUntil = async (condition: () => boolean) => {
+  for (let attempt = 0; attempt < 40 && !condition(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+};
 
 afterEach(() => {
   for (const workspace of workspaces.splice(0)) {
@@ -193,11 +203,35 @@ describe("rehome watcher with Claude Code sessions", () => {
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
     const jobFolder = path.join(workspace.homeRoot, ".claude-work", "jobs", "5cc2fa97");
     mkdirSync(jobFolder, { recursive: true });
-    writeFileSync(path.join(jobFolder, "state.json"), JSON.stringify({ sessionId }));
+    writeFileSync(path.join(jobFolder, "state.json"), JSON.stringify({ sessionId, state: "stopped" }));
 
     runWatcher({ workspace, args: ["--sweep"] });
 
     expect(existsSync(transcript)).toBe(true);
+  });
+
+  it("moves a session whose background job is done", () => {
+    const workspace = createWorkspace();
+    const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
+    const jobFolder = path.join(workspace.homeRoot, ".claude", "jobs", "5cc2fa97");
+    mkdirSync(jobFolder, { recursive: true });
+    writeFileSync(path.join(jobFolder, "state.json"), JSON.stringify({ sessionId, state: "done" }));
+
+    runWatcher({ workspace, args: ["--sweep"] });
+
+    expect(existsSync(transcript)).toBe(false);
+  });
+
+  it("reads only each job's own state.json, never one among the job's files", () => {
+    const workspace = createWorkspace();
+    const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
+    const jobFilesFolder = path.join(workspace.homeRoot, ".claude", "jobs", "5cc2fa97", "tmp", "copied-job");
+    mkdirSync(jobFilesFolder, { recursive: true });
+    writeFileSync(path.join(jobFilesFolder, "state.json"), JSON.stringify({ sessionId }));
+
+    runWatcher({ workspace, args: ["--sweep"] });
+
+    expect(existsSync(transcript)).toBe(false);
   });
 
   it("deletes what a second Claude account kept for a deleted session, and nothing of its other sessions", () => {
@@ -294,12 +328,74 @@ describe("rehome watcher with Claude Code sessions", () => {
         AGENT_SETUP_REHOME_STATE_DIR: workspace.stateFolder,
       },
     });
-    for (let attempt = 0; attempt < 40 && !existsSync(movedTranscript); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
+    const lockFile = path.join(workspace.stateFolder, "watcher.lock");
+    const ledgerFile = path.join(workspace.stateFolder, "ledger.jsonl");
+    await waitUntil(() => existsSync(movedTranscript) && existsSync(ledgerFile) && !existsSync(lockFile));
 
     expect(hook.status).toBe(0);
     expect(existsSync(movedTranscript)).toBe(true);
+  });
+
+  it("waits while another watcher holds the lock, and moves the ended session once it lets go", async () => {
+    const workspace = createWorkspace();
+    const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
+    const lockFile = path.join(workspace.stateFolder, "watcher.lock");
+    mkdirSync(workspace.stateFolder, { recursive: true });
+    writeFileSync(lockFile, String(process.pid));
+
+    const waiter = spawn(
+      process.execPath,
+      ["--import", "tsx", watcherPath, "--agent", "claude-code", "--session", sessionId, "--wait"],
+      { cwd: packageRoot, stdio: "ignore", env: watcherEnvironment(workspace) },
+    );
+    const waiterExit = new Promise((resolve) => waiter.once("exit", resolve));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      const waitedWhileLocked = existsSync(transcript);
+      rmSync(lockFile);
+      await waitUntil(() => !existsSync(transcript));
+
+      expect(waitedWhileLocked).toBe(true);
+      expect(existsSync(transcript)).toBe(false);
+    } finally {
+      waiter.kill();
+      await waiterExit;
+    }
+  });
+
+  it("finds an ended session again after another watcher moved it, and still places it", async () => {
+    const workspace = createWorkspace();
+    const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
+    const replybaseRoot = path.join(workspace.codeRoot, "replybase");
+    const replybaseFolder = projectFolder({ workspace, folder: replybaseRoot });
+    const replybaseTranscript = path.join(replybaseFolder, `${sessionId}.jsonl`);
+    const vybekiitFolder = projectFolder({ workspace, folder: path.join(workspace.codeRoot, "vybekiit") });
+    const lockFile = path.join(workspace.stateFolder, "watcher.lock");
+    mkdirSync(workspace.stateFolder, { recursive: true });
+    writeFileSync(lockFile, String(process.pid));
+
+    const waiter = spawn(
+      process.execPath,
+      ["--import", "tsx", watcherPath, "--agent", "claude-code", "--session", sessionId, "--wait"],
+      { cwd: packageRoot, stdio: "ignore", env: watcherEnvironment(workspace) },
+    );
+    const waiterExit = new Promise((resolve) => waiter.once("exit", resolve));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      mkdirSync(replybaseFolder, { recursive: true });
+      renameSync(transcript, replybaseTranscript);
+      renameSync(path.join(path.dirname(transcript), sessionId), path.join(replybaseFolder, sessionId));
+      const relocated = JSON.stringify({ type: "relocated", sessionId, relocatedCwd: replybaseRoot });
+      appendFileSync(replybaseTranscript, `${relocated}\n`);
+      ageFile(replybaseTranscript);
+      rmSync(lockFile);
+      await waiterExit;
+
+      expect(existsSync(replybaseTranscript)).toBe(false);
+      expect(existsSync(path.join(vybekiitFolder, `${sessionId}.jsonl`))).toBe(true);
+    } finally {
+      waiter.kill();
+    }
   });
 
   it("fails open on malformed SessionEnd input", () => {

@@ -46,6 +46,12 @@ export const acquireWatcherLock = (lockFile: string): boolean => {
   return createLock(lockFile);
 };
 
+// Reads the lock without taking it, so a waiting watcher can skip its own checks while another one has the turn.
+export const isWatcherLockHeldByOther = (lockFile: string): boolean => {
+  const holder = lockHolder(lockFile);
+  return holder !== process.pid && isProcessAlive(holder);
+};
+
 export const releaseWatcherLock = (lockFile: string): void => {
   if (lockHolder(lockFile) === process.pid) {
     rmSync(lockFile, { force: true });

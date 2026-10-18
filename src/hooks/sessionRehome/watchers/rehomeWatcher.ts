@@ -5,13 +5,13 @@
 //   node rehomeWatcher.js --sweep --delete-repo aria --assign 5cc2fa97=vybekiit
 // Fails open: a crash leaves every session where it was.
 
-import { writeSync } from "node:fs";
+import { existsSync, writeSync } from "node:fs";
 import os from "node:os";
 import { parseArgs } from "node:util";
 
 import { readConfig } from "../../lib/hookConfig.js";
-import { acquireWatcherLock, releaseWatcherLock } from "../../lib/watcherLock.js";
-import { claudeSessionIsLive, findClaudeSession } from "../lib/claudeSessions.js";
+import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../lib/watcherLock.js";
+import { type ClaudeSession, claudeSessionIsLive, findClaudeSession } from "../lib/claudeSessions.js";
 import { codexThreadIsLive, listCodexThreads } from "../lib/codexThreads.js";
 import { discoverRepos } from "../lib/localRepos.js";
 import { type RehomeAgent, rehomeLockFile } from "../lib/rehomeLedger.js";
@@ -98,28 +98,48 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
 
 const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const sessionStillLive = async (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
+const NOT_LIVE = (): boolean => false;
+
+// Another watcher may move the session while this one waits, so a transcript that is gone is looked up again.
+const currentClaudeSession = (request: { readonly homeRoot: string; readonly session: ClaudeSession }) =>
+  existsSync(request.session.transcriptFile)
+    ? request.session
+    : findClaudeSession({ homeRoot: request.homeRoot, sessionId: request.session.sessionId });
+
+// Finding the session reads every project folder and listing Codex threads opens its database, so the ended session
+// is looked up once and each poll only asks whether its agent has let go.
+const liveCheckFor = async (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
   const { homeRoot, options } = request;
   const claudeSession = options.agents.includes("claude-code")
     ? findClaudeSession({ homeRoot, sessionId: options.sessionId })
     : undefined;
   if (claudeSession) {
-    return claudeSessionIsLive({ homeRoot, session: claudeSession, quietSeconds: ENDED_SESSION_QUIET_SECONDS });
+    return () => {
+      const session = currentClaudeSession({ homeRoot, session: claudeSession });
+      return (
+        session !== undefined && claudeSessionIsLive({ homeRoot, session, quietSeconds: ENDED_SESSION_QUIET_SECONDS })
+      );
+    };
   }
 
   const codexThread = options.agents.includes("codex")
     ? (await listCodexThreads(homeRoot)).find((thread) => thread.threadId === options.sessionId)
     : undefined;
-  return codexThread
-    ? codexThreadIsLive({ homeRoot, thread: codexThread, quietSeconds: ENDED_SESSION_QUIET_SECONDS })
-    : false;
+  if (!codexThread) {
+    return NOT_LIVE;
+  }
+
+  return () => codexThreadIsLive({ homeRoot, thread: codexThread, quietSeconds: ENDED_SESSION_QUIET_SECONDS });
 };
 
-// SessionEnd runs before the agent's last writes and exit, so the hand-over waits for the agent to let go.
+// SessionEnd runs before the agent's last writes and exit, so the hand-over waits for the agent to let go. While
+// another watcher holds the lock this one cannot act anyway, so it does not look at the session until the lock frees.
 const waitUntilReady = async (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
   const deadline = Date.now() + WAIT_LIMIT_MILLISECONDS;
+  const isSessionLive = await liveCheckFor(request);
   while (Date.now() < deadline) {
-    if (!(await sessionStillLive(request)) && acquireWatcherLock(rehomeLockFile())) {
+    const isLockFree = !isWatcherLockHeldByOther(rehomeLockFile());
+    if (isLockFree && !(await isSessionLive()) && acquireWatcherLock(rehomeLockFile())) {
       return true;
     }
     await pause(WAIT_POLL_MILLISECONDS);

@@ -15,9 +15,10 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import { unfinishedClaudeJobStates } from "../../lib/claudeJobs.js";
 import { claudeConfigRoots, liveClaudeSessionIds } from "../../lib/claudeLiveSessions.js";
 import { claudeScratchRoots } from "../../lib/claudeScratchRoots.js";
-import { appendJsonLine, decodeJsonLine, isRecord } from "../../lib/jsonLines.js";
+import { appendJsonLine, decodeJsonLine } from "../../lib/jsonLines.js";
 import { readTranscriptHead, readTranscriptTail } from "../../lib/transcriptReader.js";
 
 export type ClaudeSession = {
@@ -99,38 +100,17 @@ export const findClaudeSession = (request: {
   return { sessionId: request.sessionId, transcriptFile, projectFolder, homeFolder: homeFolderOf(transcriptFile) };
 };
 
-const readJsonFile = (file: string): Record<string, unknown> => {
-  try {
-    const candidate: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return isRecord(candidate) ? candidate : {};
-  } catch {
-    return {};
-  }
-};
-
-const jsonFilesIn = (folder: string): ReadonlyArray<string> => {
-  try {
-    return readdirSync(folder, { recursive: true, encoding: "utf8" })
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => path.join(folder, name));
-  } catch {
-    return [];
-  }
-};
-
-// A running Claude process holds its session, and a background job's state.json points at its transcript by absolute
-// path, so moving either would break a live owner. Each Claude account keeps both under its own config root.
+// A running Claude process holds its session, and an unfinished background job's state.json points at its transcript
+// by absolute path, so moving either would break a live owner. Each Claude account keeps both under its own config root.
 export const claudeSessionIsLive = (request: {
   readonly homeRoot: string;
   readonly session: ClaudeSession;
   readonly quietSeconds: number;
 }): boolean => {
   const heldByProcess = liveClaudeSessionIds(request.homeRoot).has(request.session.sessionId);
-  const ownedByJob = claudeConfigRoots(request.homeRoot)
-    .flatMap((configRoot) => jsonFilesIn(path.join(configRoot, "jobs")))
-    .filter((file) => path.basename(file) === "state.json")
-    .map(readJsonFile)
-    .some((state) => state.sessionId === request.session.sessionId);
+  const ownedByJob = unfinishedClaudeJobStates(request.homeRoot).some(
+    (jobState) => jobState.sessionId === request.session.sessionId,
+  );
   const recentlyWritten = Date.now() - statSync(request.session.transcriptFile).mtimeMs < request.quietSeconds * 1_000;
   return heldByProcess || ownedByJob || recentlyWritten;
 };
