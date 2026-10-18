@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,7 +30,8 @@ const git = (request: { readonly folder: string; readonly command: ReadonlyArray
   return execution.stdout.trim();
 };
 
-// ~/Desktop/Code/app with one feature worktree holding a commit its remote lacks.
+// ~/Desktop/Code/app with one two-hour-old feature worktree holding a commit its remote lacks, which the ended
+// session's transcript names.
 const createFeatureWorktree = () => {
   const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-hook-"));
   workspaces.push(homeRoot);
@@ -45,6 +47,13 @@ const createFeatureWorktree = () => {
   git({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
   git({ folder: repo, command: ["worktree", "add", "--quiet", "-b", "feature", feature] });
   git({ folder: feature, command: ["commit", "--quiet", "--allow-empty", "--message", "feature work"] });
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+  utimesSync(path.join(feature, ".git"), twoHoursAgo, twoHoursAgo);
+  const projectFolder = path.join(homeRoot, ".claude", "projects", "-app");
+  const toolUse = { type: "tool_use", name: "Bash", input: { command: "git worktree add .worktrees/feature" } };
+  const transcriptLine = { type: "assistant", cwd: repo, message: { content: [toolUse] } };
+  mkdirSync(projectFolder, { recursive: true });
+  writeFileSync(path.join(projectFolder, `${endedSessionId}.jsonl`), `${JSON.stringify(transcriptLine)}\n`);
   return { homeRoot, remote, feature };
 };
 
@@ -74,10 +83,12 @@ const runHook = (request: { readonly homeRoot: string; readonly hookInput: strin
     },
   });
 
-const waitUntilGone = async (entry: string) => {
-  for (let attempt = 0; attempt < 60 && existsSync(entry); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+// The detached watcher outlives the hook, so a test fails rather than deleting its workspace under a running watcher.
+const waitUntil = async (isDone: () => boolean) => {
+  for (let attempt = 0; attempt < 60 && !isDone(); attempt += 1) {
+    await delay(250);
   }
+  expect(isDone()).toBe(true);
 };
 
 afterEach(() => {
@@ -91,25 +102,26 @@ describe("cleanUpEndedSession process boundary", { timeout: 30_000 }, () => {
     const { homeRoot, remote, feature } = createFeatureWorktree();
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: endedSessionId }) });
-    await waitUntilGone(feature);
+    await waitUntil(() => !existsSync(feature));
     // The watcher holds its lock until it is done, so the workspace is only removed after it exits.
-    await waitUntilGone(path.join(homeRoot, "disk-cleanup-state", "watcher.lock"));
+    await waitUntil(() => !existsSync(path.join(homeRoot, "disk-cleanup-state", "watcher.lock")));
 
     expect(execution.status).toBe(0);
     expect(existsSync(feature)).toBe(false);
     expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
   });
 
-  it("still cleans up after a session whose ID is not a UUID, as Grok's are, without naming it", async () => {
-    const { homeRoot, remote, feature } = createFeatureWorktree();
+  it("only cleans the caches after a session whose ID is not a UUID, as Grok's are, since it owns no worktree", async () => {
+    const { homeRoot, feature } = createFeatureWorktree();
+    const cacheStamp = path.join(homeRoot, "disk-cleanup-state", "last-cache-cleanup");
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: "../grok-session" }) });
-    await waitUntilGone(feature);
-    await waitUntilGone(path.join(homeRoot, "disk-cleanup-state", "watcher.lock"));
+    await waitUntil(() => existsSync(cacheStamp));
+    await waitUntil(() => !existsSync(path.join(homeRoot, "disk-cleanup-state", "watcher.lock")));
 
     expect(execution.status).toBe(0);
-    expect(existsSync(feature)).toBe(false);
-    expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
+    expect(existsSync(cacheStamp)).toBe(true);
+    expect(existsSync(feature)).toBe(true);
   });
 
   it("exits cleanly on input that is not JSON", () => {

@@ -1,5 +1,6 @@
 export type WorktreeFacts = {
   readonly inUse: boolean;
+  readonly createdRecently: boolean;
   readonly locked: boolean;
   /** Every git question about the worktree was answered. */
   readonly readable: boolean;
@@ -16,6 +17,7 @@ export type WorktreeFacts = {
 
 export type KeepReason =
   | "in-use"
+  | "recently-created"
   | "locked"
   | "unreadable"
   | "detached-work"
@@ -31,11 +33,16 @@ export type WorktreeCleanupDecision =
 const keep = (reason: KeepReason): WorktreeCleanupDecision => ({ _tag: "keep", reason });
 
 // Work left in a worktree is committed and pushed to a branch of the same name before the folder goes. Work that
-// has no such branch to go to, or that a live session may still be writing, stays.
+// has no such branch to go to, or that a live session may still be writing, stays. A worktree another session has just
+// made may show no use yet, so one less than an hour old stays too.
 export const decideWorktreeCleanup = (facts: WorktreeFacts): WorktreeCleanupDecision => {
   const hasWork = facts.hasChanges || facts.hasUnpushedCommits;
   if (facts.inUse) {
     return keep("in-use");
+  }
+
+  if (facts.createdRecently) {
+    return keep("recently-created");
   }
 
   if (facts.locked) {

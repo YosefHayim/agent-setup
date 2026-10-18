@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Detached watcher behind the disk-cleanup hook, and the command for a manual pass:
-//   node cleanupWatcher.js [--session <id>] [--wait] [--dry-run]
-// --session names a session that no longer counts as live; --wait first waits for that session to end.
+//   node cleanupWatcher.js [--session <id>] [--wait] [--caches-only] [--dry-run]
+// --session names the ended session: only the worktrees it created or worked in are looked at, and it no longer counts
+// as live. Without it every worktree is looked at. --wait first waits for that session to end. --caches-only looks at
+// no worktree, for an agent whose sessions own none.
 // Fails open: a crash leaves every worktree and cache where it was.
 
 import { writeSync } from "node:fs";
@@ -16,7 +18,12 @@ import { cacheCleanupStampFile, cleanupLockFile } from "../lib/cleanupState.js";
 import { isSessionLive } from "../lib/liveSessions.js";
 import { cleanUpWorktrees } from "../lib/worktreeCleanup.js";
 
-type WatcherOptions = { readonly sessionId: string; readonly wait: boolean; readonly dryRun: boolean };
+type WatcherOptions = {
+  readonly sessionId: string;
+  readonly wait: boolean;
+  readonly cachesOnly: boolean;
+  readonly dryRun: boolean;
+};
 
 const WAIT_POLL_MILLISECONDS = 2_000;
 const WAIT_LIMIT_MILLISECONDS = 10 * 60 * 1_000;
@@ -29,11 +36,17 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
     options: {
       session: { type: "string", default: "" },
       wait: { type: "boolean", default: false },
+      "caches-only": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
     },
     strict: true,
   });
-  return { sessionId: values.session, wait: values.wait, dryRun: values["dry-run"] };
+  return {
+    sessionId: values.session,
+    wait: values.wait,
+    cachesOnly: values["caches-only"],
+    dryRun: values["dry-run"],
+  };
 };
 
 const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -76,7 +89,8 @@ const runWatcher = async (): Promise<void> => {
 
   try {
     const cleanupRequest = { homeRoot, endedSessionId: options.sessionId, dryRun: options.dryRun };
-    const worktreeLines = cleanUpWorktrees({ ...cleanupRequest, rootFolders: readConfig().diskCleanupRoots });
+    const rootFolders = readConfig().diskCleanupRoots;
+    const worktreeLines = options.cachesOnly ? [] : cleanUpWorktrees({ ...cleanupRequest, rootFolders });
     const cacheLines = isCacheCleanupDue(options) ? cleanUpCaches(cleanupRequest) : [];
     const reportLines = [...worktreeLines, ...cacheLines];
     writeSync(1, reportLines.map((line) => `${line}\n`).join(""));

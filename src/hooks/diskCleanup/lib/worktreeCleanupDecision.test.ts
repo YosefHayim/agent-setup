@@ -4,6 +4,7 @@ import { decideWorktreeCleanup, type WorktreeFacts } from "./worktreeCleanupDeci
 
 const finishedFeature: WorktreeFacts = {
   inUse: false,
+  createdRecently: false,
   locked: false,
   readable: true,
   detached: false,
@@ -34,7 +35,8 @@ describe("decideWorktreeCleanup", () => {
   });
 
   it.each([
-    [{ inUse: true, locked: true }, "in-use"],
+    [{ inUse: true, createdRecently: true }, "in-use"],
+    [{ createdRecently: true, locked: true }, "recently-created"],
     [{ locked: true, readable: false }, "locked"],
     [{ readable: false }, "unreadable"],
     [{ detached: true, hasUnpushedCommits: true }, "detached-work"],

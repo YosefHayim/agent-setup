@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -21,8 +22,11 @@ const watcherPath = fileURLToPath(new URL("./cleanupWatcher.ts", import.meta.url
 const packageRoot = path.resolve(path.dirname(watcherPath), "../../../..");
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const liveSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
+const otherSessionId = "0b6f1d2e-3c4a-4e5f-8a9b-1c2d3e4f5a6b";
+const codexThreadId = "019a2c41-7d3e-7b10-9c2a-5e4f6a7b8c9d";
 const PRUNE_TOOLS = ["xcrun", "pnpm", "uv", "docker"];
 const MONTH_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+const TWO_HOURS_AGO = new Date(Date.now() - 2 * 60 * 60 * 1_000);
 const workspaces: Array<string> = [];
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
@@ -91,20 +95,45 @@ const createCodeHome = (options: { readonly dockerRunning: boolean } = { dockerR
   return { homeRoot, remote, repo, toolCallsFile };
 };
 
+const appendTranscriptLine = (request: {
+  readonly home: CodeHome;
+  readonly sessionId: string;
+  readonly transcriptLine: Record<string, unknown>;
+}) => {
+  const projectFolder = path.join(request.home.homeRoot, ".claude", "projects", "-app");
+  mkdirSync(projectFolder, { recursive: true });
+  const transcriptFile = path.join(projectFolder, `${request.sessionId}.jsonl`);
+  appendFileSync(transcriptFile, `${JSON.stringify(request.transcriptLine)}\n`);
+};
+
+// The creator's transcript names the worktree only by the relative path its git worktree add took, and the worktree
+// is two hours old, past the hour a fresh one is kept.
 const addWorktree = (request: {
   readonly home: CodeHome;
   readonly name: string;
   readonly checkoutOptions: ReadonlyArray<string>;
   readonly startPoint: ReadonlyArray<string>;
+  readonly creatorId: string;
 }): string => {
-  const folder = path.join(request.home.repo, ".worktrees", request.name);
+  const relativeFolder = path.join(".worktrees", request.name);
+  const folder = path.join(request.home.repo, relativeFolder);
   const addCommand = ["worktree", "add", "--quiet", ...request.checkoutOptions, folder, ...request.startPoint];
   git({ folder: request.home.repo, command: addCommand });
+  utimesSync(path.join(folder, ".git"), TWO_HOURS_AGO, TWO_HOURS_AGO);
+  const toolUse = { type: "tool_use", name: "Bash", input: { command: `git worktree add ${relativeFolder}` } };
+  const transcriptLine = { type: "assistant", cwd: request.home.repo, message: { content: [toolUse] } };
+  appendTranscriptLine({ home: request.home, sessionId: request.creatorId, transcriptLine });
   return folder;
 };
 
 const addBranchWorktree = (request: { readonly home: CodeHome; readonly branch: string }) =>
-  addWorktree({ home: request.home, name: request.branch, checkoutOptions: ["-b", request.branch], startPoint: [] });
+  addWorktree({
+    home: request.home,
+    name: request.branch,
+    checkoutOptions: ["-b", request.branch],
+    startPoint: [],
+    creatorId: endedSessionId,
+  });
 
 const watcherEnvironment = (home: CodeHome): NodeJS.ProcessEnv => ({
   ...process.env,
@@ -121,6 +150,12 @@ const runWatcher = (request: { readonly home: CodeHome; readonly watcherArgument
     encoding: "utf8",
     env: watcherEnvironment(request.home),
   });
+
+// A folder that links to itself cannot be listed even by root, which ignores file modes.
+const linkToItself = (folder: string) => {
+  mkdirSync(path.dirname(folder), { recursive: true });
+  symlinkSync(folder, folder);
+};
 
 const cleanUpAfterSession = (home: CodeHome) => runWatcher({ home, watcherArguments: ["--session", endedSessionId] });
 
@@ -169,10 +204,22 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
 
   it("keeps worktrees whose work has no safe branch to go to, or holds files that must not be pushed", () => {
     const home = createCodeHome();
-    const detached = addWorktree({ home, name: "detached", checkoutOptions: ["--detach"], startPoint: [] });
+    const detached = addWorktree({
+      home,
+      name: "detached",
+      checkoutOptions: ["--detach"],
+      startPoint: [],
+      creatorId: endedSessionId,
+    });
     commitFile({ workTree: detached, fileName: "experiment.ts" });
     git({ folder: home.repo, command: ["switch", "--quiet", "--create", "trunk"] });
-    const onMain = addWorktree({ home, name: "on-main", checkoutOptions: [], startPoint: ["main"] });
+    const onMain = addWorktree({
+      home,
+      name: "on-main",
+      checkoutOptions: [],
+      startPoint: ["main"],
+      creatorId: endedSessionId,
+    });
     writeFileSync(path.join(onMain, "README.md"), "changed on main\n");
     const withKey = addBranchWorktree({ home, branch: "with-key" });
     writeFileSync(path.join(withKey, "signing.pem"), "private key\n");
@@ -239,9 +286,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const busy = addBranchWorktree({ home, branch: "busy" });
     const finished = addBranchWorktree({ home, branch: "finished" });
     const configRoot = path.join(home.homeRoot, ".claude");
-    const projectFolder = path.join(configRoot, "projects", "-app");
     mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
-    mkdirSync(projectFolder, { recursive: true });
     for (const [sessionId, worktree] of [
       [liveSessionId, busy],
       [endedSessionId, finished],
@@ -250,7 +295,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
       const toolUse = { type: "tool_use", input: { file_path: path.join(worktree, "src", "app.ts") } };
       const transcriptLine = { type: "assistant", cwd: home.repo, message: { content: [toolUse] } };
       writeFileSync(path.join(configRoot, "sessions", `${sessionId}.json`), JSON.stringify(registryEntry));
-      writeFileSync(path.join(projectFolder, `${sessionId}.jsonl`), `${JSON.stringify(transcriptLine)}\n`);
+      appendTranscriptLine({ home, sessionId, transcriptLine });
     }
 
     const run = cleanUpAfterSession(home);
@@ -258,6 +303,32 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: run.stdout, target: busy })).toMatch(/^kept +in-use +\//);
     expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^removed +nothing to push +\//);
     expect(existsSync(busy)).toBe(true);
+  });
+
+  it("keeps every worktree while a live session's transcript folder cannot be listed", () => {
+    const home = createCodeHome();
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    const configRoot = path.join(home.homeRoot, ".claude");
+    mkdirSync(path.join(configRoot, "sessions"), { recursive: true });
+    const registryEntry = { pid: process.pid, sessionId: liveSessionId };
+    writeFileSync(path.join(configRoot, "sessions", `${liveSessionId}.json`), JSON.stringify(registryEntry));
+    linkToItself(path.join(configRoot, "projects", "-app", liveSessionId, "subagents"));
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^kept +in-use +\//);
+    expect(existsSync(finished)).toBe(true);
+  });
+
+  it("keeps every worktree while the Codex lock folder cannot be listed", () => {
+    const home = createCodeHome();
+    const finished = addBranchWorktree({ home, branch: "finished" });
+    linkToItself(path.join(home.homeRoot, ".codex", "thread-writer-locks"));
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: finished })).toMatch(/^kept +in-use +\//);
+    expect(existsSync(finished)).toBe(true);
   });
 
   it("keeps a worktree a process holds a file in, or names on its command line, from another folder", async () => {
@@ -282,6 +353,61 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
       fileHolder.kill();
       folderNamer.kill();
     }
+  });
+
+  it("leaves a worktree another session made to that session, while a manual pass looks at it too", () => {
+    const home = createCodeHome();
+    const othersWorktree = addWorktree({
+      home,
+      name: "others",
+      checkoutOptions: ["-b", "others"],
+      startPoint: [],
+      creatorId: otherSessionId,
+    });
+
+    const sessionRun = cleanUpAfterSession(home);
+    const isKeptAfterSession = existsSync(othersWorktree);
+    const manualRun = runWatcher({ home, watcherArguments: [] });
+
+    expect(reportLineFor({ report: sessionRun.stdout, target: othersWorktree })).toBe("");
+    expect(isKeptAfterSession).toBe(true);
+    expect(reportLineFor({ report: manualRun.stdout, target: othersWorktree })).toMatch(
+      /^removed +nothing to push +\//,
+    );
+  });
+
+  it("removes the worktree an ended Codex session made, which its rollout names", () => {
+    const home = createCodeHome();
+    const codexWorktree = addWorktree({
+      home,
+      name: "codex-task",
+      checkoutOptions: ["-b", "codex-task"],
+      startPoint: [],
+      creatorId: otherSessionId,
+    });
+    const rolloutFolder = path.join(home.homeRoot, ".codex", "sessions", "2026", "10", "18");
+    const rolloutFile = path.join(rolloutFolder, `rollout-2026-10-18T08-00-00-${codexThreadId}.jsonl`);
+    const command = ["/bin/zsh", "-lc", "git worktree add .worktrees/codex-task"];
+    const commandItem = { type: "CommandExecution", cwd: `file://${home.repo}`, command };
+    const rolloutLine = { type: "event_msg", payload: { type: "item_completed", item: commandItem } };
+    mkdirSync(rolloutFolder, { recursive: true });
+    writeFileSync(rolloutFile, `${JSON.stringify(rolloutLine)}\n`);
+
+    const run = runWatcher({ home, watcherArguments: ["--session", codexThreadId] });
+
+    expect(reportLineFor({ report: run.stdout, target: codexWorktree })).toMatch(/^removed +nothing to push +\//);
+  });
+
+  it("keeps a worktree less than an hour old, even the ended session's own", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(existsSync(fresh)).toBe(true);
   });
 
   it("drops git's record of a worktree whose folder is already gone", () => {
@@ -429,6 +555,24 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
     expect(run.stdout).toBe("");
     expect(existsSync(goneProject)).toBe(true);
     expect(toolCalls(home)).toBe("");
+  });
+
+  it("looks at no worktree with --caches-only, as after a Grok session, and still cleans the caches", () => {
+    const home = createCodeHome();
+    const feature = addWorktree({
+      home,
+      name: "feature",
+      checkoutOptions: ["-b", "feature"],
+      startPoint: [],
+      creatorId: endedSessionId,
+    });
+    const staleNpx = createNpxEntry({ home, name: "stale", touched: MONTH_AGO });
+
+    const run = runWatcher({ home, watcherArguments: ["--caches-only"] });
+
+    expect(reportLineFor({ report: run.stdout, target: feature })).toBe("");
+    expect(existsSync(feature)).toBe(true);
+    expect(existsSync(staleNpx)).toBe(false);
   });
 
   it("skips Docker while its engine is stopped", () => {
