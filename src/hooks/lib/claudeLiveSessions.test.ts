@@ -101,4 +101,24 @@ describe("liveClaudeSessionIds", () => {
 
     expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
   });
+
+  it("fails while a file stands where a registry folder belongs", () => {
+    const homeRoot = createHomeRoot();
+    mkdirSync(path.join(homeRoot, ".claude"));
+    writeFileSync(path.join(homeRoot, ".claude", "sessions"), "");
+
+    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+  });
+
+  it("skips a file whose name looks like a config root", () => {
+    const homeRoot = createHomeRoot();
+    writeFileSync(path.join(homeRoot, ".claude-notes"), "notes\n");
+    registerSession({
+      configRoot: path.join(homeRoot, ".claude"),
+      sessionId: runningSessionId,
+      processId: process.pid,
+    });
+
+    expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(true);
+  });
 });
