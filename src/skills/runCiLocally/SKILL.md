@@ -15,9 +15,9 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 
 - Docker is running with enough memory for the heaviest job. A leg killed with exit 137 means Docker needs more memory.
 - `act` is installed. Read its config file (`~/.actrc`, or `~/Library/Application Support/act/actrc` on macOS) for the runner image, for example `-P ubuntu-latest=catthehacker/ubuntu:act-latest`.
-- On Apple silicon, use an arm64 runner image and pass `--container-architecture linux/arm64`. A config that pins `linux/amd64` runs every job under emulation, several times slower.
+- Pass the host's own architecture as `--container-architecture linux/<arch>`: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. A config that pins `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
 - `gh auth status` works. The token goes in as a secret, never into a file.
-- Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
+- Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`, with every `/` in the branch turned into `-`, because the name goes into `sed` and `perl` patterns and into container names. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
 
 ## Workflow
 
@@ -29,7 +29,7 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    git clone --single-branch --branch <branch> <repo-path> "<scratchpad>/$CI_NAME"
    ```
 
-   Commit in the repository and clone again; never commit inside the clone. `dorny/paths-filter` diffs against `origin/<branch>` when it exists, so it misses a commit made only in the clone.
+   Run every later command from inside the clone (`cd "<scratchpad>/$CI_NAME"`), so the relative paths never edit the repository's own workflows. Commit in the repository and clone again; never commit inside the clone. `dorny/paths-filter` diffs against `origin/<branch>` when it exists, so it misses a commit made only in the clone.
 
 2. **GitHub origin.** act reads `github.repository` from the clone's origin; a file-path origin breaks actions such as `dorny/paths-filter`.
 
@@ -57,10 +57,12 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    cp -cR ~/.cache/act "<scratchpad>/$CI_NAME-cache-<job>"   # macOS copy-on-write; use cp -R elsewhere
    ```
 
-6. **Event file.** For `pull_request`, write the event JSON to the scratchpad with the base and head of the branch, so changed-file tools (`dorny/paths-filter`, `vitest --changed`, `biome check --changed`) see the same diff as on GitHub:
+   When `~/.cache/act` lacks an action the workflow uses (a fresh setup, or a new action), run one leg once without `--action-offline-mode` and copy the caches after it.
+
+6. **Event file.** For `pull_request`, write the event JSON to the scratchpad with the pull request's number, base and head, so changed-file tools (`dorny/paths-filter`, `vitest --changed`, `biome check --changed`) see the same diff as on GitHub. `gh pr view <branch> --json number,baseRefName` gives the number and the base branch. The single-branch clone has no `origin/<base>`, so run `git fetch origin <base>:refs/remotes/origin/<base>` first:
 
    ```json
-   {"pull_request":{"number":1,"head":{"ref":"<branch>","sha":"<git rev-parse HEAD>"},"base":{"ref":"main","sha":"<git merge-base origin/main HEAD>"}}}
+   {"pull_request":{"number":<number>,"head":{"ref":"<branch>","sha":"<git rev-parse HEAD>"},"base":{"ref":"<base>","sha":"<git merge-base origin/<base> HEAD>"}}}
    ```
 
 ### Node missing after a PATH step
@@ -80,7 +82,7 @@ Build it once as `act-runner-node:<date>` and run with `-P ubuntu-latest=act-run
 `--pull=false` also skips images named in a job's `container:`. Pull each one once for the runner's platform, and keep it like a runner image:
 
 ```bash
-docker pull --platform linux/arm64 mcr.microsoft.com/playwright:<version>
+docker pull --platform linux/<arch> mcr.microsoft.com/playwright:<version>
 ```
 
 ### Run
@@ -88,12 +90,15 @@ docker pull --platform linux/arm64 mcr.microsoft.com/playwright:<version>
 Start every leg in the background, then wait for all of them:
 
 ```bash
-act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> -e "<scratchpad>/$CI_NAME-event.json" --rm \
-  -P ubuntu-latest=act-runner-node:<date> --pull=false --container-architecture linux/arm64 \
+GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> \
+  -e "<scratchpad>/$CI_NAME-event.json" --rm \
+  -P ubuntu-latest=act-runner-node:<date> --pull=false --container-architecture linux/<arch> \
   --action-cache-path "<scratchpad>/$CI_NAME-cache-<job>" --action-offline-mode \
-  -s GITHUB_TOKEN="$(gh auth token)" \
+  -s GITHUB_TOKEN \
   > "<scratchpad>/$CI_NAME-<job>.log" 2>&1
 ```
+
+- `-s GITHUB_TOKEN` without a value reads the variable, so the token stays out of act's arguments in the process list.
 
 - Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
 - Run about 6 legs at once at most, and keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine. Rerun one failed leg alone with `--matrix <key>:<value>`.
