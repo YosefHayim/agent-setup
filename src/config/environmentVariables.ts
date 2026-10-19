@@ -42,13 +42,15 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
   },
   {
     name: "AGENT_SETUP_REHOME_STATE_DIR",
-    defaultValue: "~/.claude/agent-setup/state/session-rehome",
+    defaultValue:
+      "~/.claude/agent-setup/state/session-rehome for a global install, .claude/agent-setup/state/session-rehome for a project install",
     purpose:
       "Folder for session-rehome's ledger of moved, kept, and deleted sessions, its watcher lock, and its sweep stamp. Tests point it at a temporary folder.",
   },
   {
     name: "AGENT_SETUP_DISK_CLEANUP_STATE_DIR",
-    defaultValue: "~/.claude/agent-setup/state/disk-cleanup",
+    defaultValue:
+      "~/.claude/agent-setup/state/disk-cleanup for a global install, .claude/agent-setup/state/disk-cleanup for a project install",
     purpose:
       "Folder for disk-cleanup's watcher lock, the stamp that limits the cache cleanup to once a day, the list of kept worktrees to look at again, and the log of what each pass did. Tests point it at a temporary folder.",
   },

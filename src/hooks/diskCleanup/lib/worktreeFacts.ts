@@ -22,7 +22,7 @@ const IGNORED_SECRET_QUERY = [
   "--ignored",
   "--exclude-standard",
   "--",
-  ...SECRET_FILE_GLOBS.map((glob) => `:(glob)**/${glob}`),
+  ...SECRET_FILE_GLOBS.map((glob) => `:(glob,icase)**/${glob}`),
 ];
 // Installed packages ship test keys of their own, e.g. node_modules/some-lib/test/server.pem.
 const DEPENDENCY_FOLDERS = new Set(["node_modules", ".venv", "Pods"]);

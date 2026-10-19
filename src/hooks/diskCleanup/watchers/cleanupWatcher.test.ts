@@ -287,6 +287,8 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     writeFileSync(path.join(onMain, "README.md"), "changed on main\n");
     const withKey = addBranchWorktree({ home, branch: "with-key" });
     writeFileSync(path.join(withKey, "signing.pem"), "private key\n");
+    const withUpperKey = addBranchWorktree({ home, branch: "with-upper-key" });
+    writeFileSync(path.join(withUpperKey, "Signing.PEM"), "private key\n");
     const committedKey = addBranchWorktree({ home, branch: "committed-key" });
     commitFile({ workTree: committedKey, fileName: "server.key" });
     commitFile({ workTree: committedKey, fileName: "routes.ts" });
@@ -299,9 +301,11 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: run.stdout, target: detached })).toMatch(/^kept +detached-work +\//);
     expect(reportLineFor({ report: run.stdout, target: onMain })).toMatch(/^kept +default-branch-work +\//);
     expect(reportLineFor({ report: run.stdout, target: withKey })).toMatch(/^kept +risky-files +\//);
+    expect(reportLineFor({ report: run.stdout, target: withUpperKey })).toMatch(/^kept +risky-files +\//);
     expect(reportLineFor({ report: run.stdout, target: committedKey })).toMatch(/^kept +risky-files +\//);
     expect(reportLineFor({ report: run.stdout, target: locked })).toMatch(/^kept +locked +\//);
-    expect([detached, onMain, withKey, committedKey, locked].every((folder) => existsSync(folder))).toBe(true);
+    const keptFolders = [detached, onMain, withKey, withUpperKey, committedKey, locked];
+    expect(keptFolders.every((folder) => existsSync(folder))).toBe(true);
     expect(remoteBranches(home)).toBe("main");
   });
 
@@ -319,7 +323,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(remoteBranches(home)).toBe("main");
   });
 
-  it("keeps an ignored secret file the main worktree lacks, and drops one it holds too", () => {
+  it("keeps an ignored secret file the main worktree lacks, whatever the case of its name, and drops one it holds too", () => {
     const home = createCodeHome();
     writeFileSync(path.join(home.repo, ".gitignore"), "*.pem\nbuild/\nnode_modules/\n");
     git({ folder: home.repo, command: ["add", ".gitignore"] });
@@ -336,11 +340,15 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const buildKey = addBranchWorktree({ home, branch: "build-key" });
     mkdirSync(path.join(buildKey, "build"));
     writeFileSync(path.join(buildKey, "build", "signing.p12"), "only in the build folder\n");
+    const upperBuildKey = addBranchWorktree({ home, branch: "upper-build-key" });
+    mkdirSync(path.join(upperBuildKey, "build"));
+    writeFileSync(path.join(upperBuildKey, "build", "Signing.P12"), "only in the build folder\n");
 
     const run = cleanUpAfterSession(home);
 
     expect(reportLineFor({ report: run.stdout, target: ownKey })).toMatch(/^kept +risky-files +\//);
     expect(reportLineFor({ report: run.stdout, target: buildKey })).toMatch(/^kept +risky-files +\//);
+    expect(reportLineFor({ report: run.stdout, target: upperBuildKey })).toMatch(/^kept +risky-files +\//);
     expect(reportLineFor({ report: run.stdout, target: sharedKey })).toMatch(/^removed +nothing to push +\//);
     expect(readFileSync(path.join(ownKey, "own.pem"), "utf8")).toBe("only here\n");
   });
@@ -698,6 +706,7 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
     const home = createCodeHome();
     commitFile({ workTree: home.repo, fileName: "hotfix.ts" });
     addBranch({ home, branch: "committed-key", fileName: "server.key" });
+    addBranch({ home, branch: "committed-upper-key", fileName: "Server.KEY" });
     git({ folder: home.repo, command: ["switch", "--quiet", "--create", "large-file"] });
     writeFileSync(path.join(home.repo, "model.bin"), Buffer.alloc(50 * 1024 * 1024 + 1));
     git({ folder: home.repo, command: ["add", "model.bin"] });
@@ -711,6 +720,9 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
       /^kept +default-branch-work +\//,
     );
     expect(reportLineFor({ report: run.stdout, target: `${home.repo} committed-key` })).toMatch(
+      /^kept +risky-files +\//,
+    );
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} committed-upper-key` })).toMatch(
       /^kept +risky-files +\//,
     );
     expect(reportLineFor({ report: run.stdout, target: `${home.repo} large-file` })).toMatch(/^kept +risky-files +\//);

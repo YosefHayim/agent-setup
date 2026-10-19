@@ -2,7 +2,8 @@ import path from "node:path";
 
 import { escapeForPattern } from "../../lib/patternEscape.js";
 
-// Environment files, keys, certificates, and SSH identities, e.g. server.pem, signing.p12, id_ed25519.
+// Environment files, keys, certificates, and SSH identities, e.g. server.pem, signing.p12, id_ed25519. Names match in
+// any case, so Server.PEM counts too.
 export const SECRET_FILE_GLOBS = [
   ".env",
   ".env.*",
@@ -17,6 +18,7 @@ export const SECRET_FILE_GLOBS = [
   "id_ecdsa*",
   "id_dsa*",
 ];
+// Only the usual lowercase names are shared; one with any capitals still counts as a secret.
 const SHAREABLE_ENV_FILE = /^\.env\.(?:example|sample|template)$/u;
 // GitHub refuses files over 100 MB; one this big is a build or a download, not work.
 export const LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -25,7 +27,7 @@ export const COMMITTED_FILE_FORMAT = ["--format=", "--name-only", "--diff-filter
 
 const globPattern = (glob: string): RegExp => {
   const literalParts = glob.split("*").map(escapeForPattern);
-  return new RegExp(`^${literalParts.join(".*")}$`, "u");
+  return new RegExp(`^${literalParts.join(".*")}$`, "iu");
 };
 
 const SECRET_FILE_PATTERNS = SECRET_FILE_GLOBS.map(globPattern);
