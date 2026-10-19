@@ -25,10 +25,12 @@ const packageRoot = path.resolve(path.dirname(watcherPath), "../../../..");
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const liveSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const otherSessionId = "0b6f1d2e-3c4a-4e5f-8a9b-1c2d3e4f5a6b";
+const laterSessionId = "9e8d7c6b-5a49-4382-a716-5f4e3d2c1b0a";
 const codexThreadId = "019a2c41-7d3e-7b10-9c2a-5e4f6a7b8c9d";
 const PRUNE_TOOLS = ["xcrun", "pnpm", "uv", "docker"];
 const MONTH_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
 const TWO_HOURS_AGO = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+const realGitPath = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 const workspaces: Array<string> = [];
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
@@ -204,6 +206,22 @@ const remoteSubjects = (request: { readonly home: CodeHome; readonly branch: str
 
 const cleanupLogFile = (home: CodeHome): string => path.join(home.homeRoot, "disk-cleanup-state", "cleanup.log");
 
+// Stands in for git on the watcher's path, and first runs the shell step for each call whose arguments hold the words.
+const interceptGit = (request: { readonly home: CodeHome; readonly words: string; readonly step: string }): string => {
+  const gitStub = path.join(request.home.homeRoot, "stub-tools", "git");
+  const stubLines = [
+    "#!/bin/sh",
+    `case " $* " in *" ${request.words} "*) ${request.step} ;; esac`,
+    `exec "${realGitPath}" "$@"`,
+  ];
+  writeFileSync(gitStub, `${stubLines.join("\n")}\n`);
+  chmodSync(gitStub, 0o755);
+  return gitStub;
+};
+
+const upstreamOf = (request: { readonly home: CodeHome; readonly branch: string }): string =>
+  git({ folder: request.home.repo, command: ["rev-parse", "--abbrev-ref", `${request.branch}@{upstream}`] });
+
 const reportLineFor = (request: { readonly report: string; readonly target: string }): string =>
   request.report.split("\n").find((line) => line.endsWith(` ${request.target}`)) || "";
 
@@ -234,6 +252,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const pushedSubjects = git({ folder: home.remote, command: ["log", "--format=%s", "feature"] });
     expect(pushedSubjects.split("\n")).toEqual(["chore: save work left in worktree", "add login.ts", "add README.md"]);
     expect(git({ folder: home.repo, command: ["branch", "--list", "feature"] })).toContain("feature");
+    expect(upstreamOf({ home, branch: "feature" })).toBe("origin/feature");
   });
 
   it("removes a worktree whose work is already on the remote without pushing", () => {
@@ -551,6 +570,55 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(fresh)).toBe(false);
   });
 
+  it("reports a repo whose worktrees git cannot list, and still looks again at the ones kept before", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+    const endedRun = cleanUpAfterSession(home);
+    workInRepo({ home, sessionId: otherSessionId });
+    const gitStub = interceptGit({ home, words: "worktree list", step: "exit 1" });
+
+    const unreadableRun = runWatcher({ home, watcherArguments: ["--session", otherSessionId] });
+    rmSync(gitStub);
+    utimesSync(path.join(fresh, ".git"), TWO_HOURS_AGO, TWO_HOURS_AGO);
+    const laterRun = runWatcher({ home, watcherArguments: ["--session", otherSessionId] });
+
+    expect(reportLineFor({ report: endedRun.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: unreadableRun.stdout, target: home.repo })).toMatch(
+      /^kept +worktree list failed +\//,
+    );
+    expect(reportLineFor({ report: unreadableRun.stdout, target: fresh })).toBe("");
+    expect(reportLineFor({ report: laterRun.stdout, target: fresh })).toMatch(/^removed +nothing to push +\//);
+    expect(existsSync(fresh)).toBe(false);
+  });
+
+  it("does not take a worktree made later in a kept worktree's folder, for another branch, for the kept one", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+    const endedRun = cleanUpAfterSession(home);
+    git({ folder: home.repo, command: ["worktree", "remove", "--force", fresh] });
+    addWorktree({ home, name: "fresh", checkoutOptions: ["-b", "remade"], startPoint: [], creatorId: otherSessionId });
+
+    const laterRun = runWatcher({ home, watcherArguments: ["--session", laterSessionId] });
+
+    expect(reportLineFor({ report: endedRun.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: laterRun.stdout, target: fresh })).toBe("");
+    expect(existsSync(fresh)).toBe(true);
+  });
+
+  it("leaves a kept list it cannot read as it is, and still cleans up", () => {
+    const home = createCodeHome();
+    const feature = addBranchWorktree({ home, branch: "feature" });
+    mkdirSync(path.join(home.homeRoot, "disk-cleanup-state", "kept-worktrees"), { recursive: true });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: feature })).toMatch(/^removed +nothing to push +\//);
+  });
+
   it("drops git's record of a worktree whose folder is already gone", () => {
     const home = createCodeHome();
     const gone = addBranchWorktree({ home, branch: "gone" });
@@ -588,6 +656,42 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
 
     expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(/^pushed +to origin +\//);
     expect(remoteSubjects({ home, branch: "login" })).toBe("add login.ts\nadd README.md");
+    expect(upstreamOf({ home, branch: "login" })).toBe("origin/login");
+  });
+
+  it("pushes the commit whose files it checked, while one committed during the push waits for a later pass", () => {
+    const home = createCodeHome();
+    git({ folder: home.repo, command: ["switch", "--quiet", "--create", "current"] });
+    commitFile({ workTree: home.repo, fileName: "current.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    const keyCommit = [
+      `echo key > "${home.repo}/server.key"`,
+      `"${realGitPath}" -C "${home.repo}" add server.key`,
+      `"${realGitPath}" -C "${home.repo}" commit --quiet --message "add server.key"`,
+    ].join(" && ");
+    interceptGit({ home, words: "push", step: keyCommit });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} current` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "current" })).toBe("add current.ts\nadd README.md");
+    const unpushedSubjects = git({
+      folder: home.repo,
+      command: ["log", "--format=%s", "current", "--not", "--remotes"],
+    });
+    expect(unpushedSubjects).toBe("add server.key");
+  });
+
+  it("reports a repo whose branches git cannot list", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    interceptGit({ home, words: "for-each-ref", step: "exit 1" });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: home.repo })).toMatch(/^kept +branch list failed +\//);
+    expect(remoteBranches(home)).toBe("main");
   });
 
   it("keeps unpushed work on the default branch, and branches that bring files that must not be pushed", () => {

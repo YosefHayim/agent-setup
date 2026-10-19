@@ -1,4 +1,4 @@
-import { gitFindsNothing, gitSucceeds } from "../../lib/gitAnswers.js";
+import { gitAnswerLines, gitFindsNothing, gitSucceeds } from "../../lib/gitAnswers.js";
 import { pushBranch } from "./branchPush.js";
 import type { LinkedWorktree } from "./linkedWorktrees.js";
 
@@ -11,11 +11,21 @@ export type WorktreeRemoval =
 const SAVE_COMMIT_MESSAGE = "chore: save work left in worktree";
 const NOT_SAVED_QUERY = ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"];
 const NOT_PUSHED_QUERY = ["log", "HEAD", "--not", "--remotes", "--max-count=1", "--format=%H"];
+const HEAD_COMMIT_QUERY = ["rev-parse", "--verify", "HEAD"];
 
 // --no-verify skips commit hooks: the commit only keeps work safe, and a lint failure must not lose it.
 const saveChanges = (folder: string): boolean =>
   gitSucceeds({ folder, query: ["add", "--all"] }) &&
   gitSucceeds({ folder, query: ["commit", "--no-verify", "--quiet", "--message", SAVE_COMMIT_MESSAGE] });
+
+const headCommit = (folder: string): string => {
+  const headLines = gitAnswerLines({ folder, query: HEAD_COMMIT_QUERY });
+  if (!headLines) {
+    return "";
+  }
+
+  return headLines[0];
+};
 
 const isSavedAndPushed = (worktree: LinkedWorktree): boolean => {
   const isSaved = gitFindsNothing({ folder: worktree.folder, query: NOT_SAVED_QUERY });
@@ -35,7 +45,8 @@ export const removeWorktree = (request: {
     return { _tag: "failed", step: "save" };
   }
 
-  const branchPush = { folder: worktree.folder, remote: request.remote, branch: worktree.branch };
+  const commit = headCommit(worktree.folder);
+  const branchPush = { folder: worktree.folder, remote: request.remote, branch: worktree.branch, commit };
   if (request.push && !pushBranch(branchPush)) {
     return { _tag: "failed", step: "push" };
   }

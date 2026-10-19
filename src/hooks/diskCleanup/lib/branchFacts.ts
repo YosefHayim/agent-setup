@@ -14,13 +14,15 @@ const LARGE_BLOB_QUERY = [
 ];
 const OMITTED_OBJECT_MARK = "~";
 
+// The commits are read from the tip the branch had when listed, which is also the commit pushed.
 export const readBranchFacts = (request: {
   readonly folder: string;
   readonly branch: string;
+  readonly tip: string;
   readonly inUse: boolean;
 }): BranchFacts => {
   const { folder, branch } = request;
-  const unpushedRange = [`refs/heads/${branch}`, "--not", "--remotes"];
+  const unpushedRange = [request.tip, "--not", "--remotes"];
   const committedFiles = gitAnswerLines({ folder, query: ["log", ...unpushedRange, ...COMMITTED_FILE_FORMAT] });
   const unpushedObjects = gitAnswerLines({ folder, query: [...LARGE_BLOB_QUERY, ...unpushedRange] });
   const hasLargeFile = (unpushedObjects || []).some((line) => line.startsWith(OMITTED_OBJECT_MARK));

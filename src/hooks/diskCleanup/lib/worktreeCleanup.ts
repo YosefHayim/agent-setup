@@ -1,9 +1,7 @@
-import { existsSync } from "node:fs";
-
 import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
 import { gitSucceeds } from "../../lib/gitAnswers.js";
 import { folderPaths, isInsideAnyFolder } from "./folderPaths.js";
-import { readKeptWorktrees, saveKeptWorktrees } from "./keptWorktrees.js";
+import { keptWorktreeLine, readKeptWorktrees, saveKeptWorktrees } from "./keptWorktrees.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linkedWorktrees.js";
 import { reportLine } from "./reportLine.js";
 import { foldersOwnedBy } from "./sessionTranscripts.js";
@@ -81,18 +79,22 @@ const pruneGoneWorktrees = (request: {
     .map((worktree) => reportLine({ action, detail: "folder gone", target: worktree.folder }));
 };
 
-// Whatever is still there was kept, and the next session's end looks at it again.
+// The next session's end looks again at whatever this pass kept.
 const rememberKeptWorktrees = (request: {
-  readonly worktreeFolders: ReadonlyArray<string>;
+  readonly lookedAtWorktrees: ReadonlyArray<LinkedWorktree>;
+  readonly listedFolders: ReadonlyArray<string>;
+  readonly earlierKeptLines: ReadonlyArray<string> | undefined;
   readonly dryRun: boolean;
 }): void => {
   if (request.dryRun) {
     return;
   }
 
-  const keptFolders = request.worktreeFolders.filter(existsSync);
-  saveKeptWorktrees(keptFolders);
+  saveKeptWorktrees(request);
 };
+
+const reportUnreadableRepos = (repoRoots: ReadonlyArray<string>): ReadonlyArray<string> =>
+  repoRoots.map((repoRoot) => reportLine({ action: "kept", detail: "worktree list failed", target: repoRoot }));
 
 // Only worktrees under the code roots, by either path a root goes by, are touched; ones in scratch, job, or agent
 // folders belong to whoever made them. Besides the ended session's own worktrees, each pass looks again at the ones an
@@ -101,21 +103,32 @@ export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray
   const roots = codeRootFolders(request);
   const repoRoots = repoRootsUnder(roots);
   const rootPaths = roots.flatMap((root) => folderPaths({ folder: root, roots: [] }).paths);
-  const worktrees = listLinkedWorktrees(repoRoots).filter((worktree) =>
+  const worktreeListing = listLinkedWorktrees(repoRoots);
+  const unreadableRepoRoots = foldersOwnedBy({ ...request, folders: worktreeListing.unreadableRepoRoots, roots });
+  const worktrees = worktreeListing.worktrees.filter((worktree) =>
     isInsideAnyFolder({ candidate: worktree.folder, folders: rootPaths }),
   );
   const presentWorktrees = worktrees.filter((worktree) => !worktree.prunable);
   const presentFolders = presentWorktrees.map((worktree) => worktree.folder);
   const sessionFolders = foldersOwnedBy({ ...request, folders: presentFolders, roots });
-  const keptFolders = readKeptWorktrees();
-  const ownedWorktrees = presentWorktrees.filter(
-    (worktree) => sessionFolders.includes(worktree.folder) || keptFolders.includes(worktree.folder),
-  );
+  const earlierKeptLines = readKeptWorktrees();
+  const keptLines = earlierKeptLines || [];
+  const ownedWorktrees = presentWorktrees.filter((worktree) => {
+    const keptLine = keptWorktreeLine(worktree);
+    return sessionFolders.includes(worktree.folder) || keptLines.includes(keptLine);
+  });
   const worktreeFolders = ownedWorktrees.map((worktree) => worktree.folder);
   const usedFolders = worktreesInUse({ ...request, worktreeFolders, roots });
   const worktreeLines = ownedWorktrees.map((worktree) =>
     cleanUpWorktree({ worktree, inUse: usedFolders.has(worktree.folder), dryRun: request.dryRun }),
   );
-  rememberKeptWorktrees({ worktreeFolders, dryRun: request.dryRun });
-  return [...worktreeLines, ...pruneGoneWorktrees({ worktrees, dryRun: request.dryRun })];
+  rememberKeptWorktrees({
+    lookedAtWorktrees: ownedWorktrees,
+    listedFolders: presentFolders,
+    earlierKeptLines,
+    dryRun: request.dryRun,
+  });
+  const unreadableLines = reportUnreadableRepos(unreadableRepoRoots);
+  const pruneLines = pruneGoneWorktrees({ worktrees, dryRun: request.dryRun });
+  return [...worktreeLines, ...unreadableLines, ...pruneLines];
 };
