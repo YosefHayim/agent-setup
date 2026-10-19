@@ -51,6 +51,8 @@ export const gitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | u
   return git.stdout.split("\n").filter((line) => line !== "");
 };
 
+export const gitSucceeds = (question: GitQuestion): boolean => gitAnswerLines(question) !== undefined;
+
 // A git call that fails cannot vouch for the work tree, so only a successful empty answer counts as nothing.
 export const gitFindsNothing = (question: GitQuestion): boolean => {
   const answerLines = gitAnswerLines(question);

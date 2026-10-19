@@ -8,3 +8,7 @@ const stateFolder = (): string =>
 export const cleanupLockFile = (): string => path.join(stateFolder(), "watcher.lock");
 
 export const cacheCleanupStampFile = (): string => path.join(stateFolder(), "last-cache-cleanup");
+
+export const keptWorktreesFile = (): string => path.join(stateFolder(), "kept-worktrees");
+
+export const cleanupLogFile = (): string => path.join(stateFolder(), "cleanup.log");

@@ -6,7 +6,7 @@ import { codexHome } from "../../lib/codexHome.js";
 import { folderEntries } from "../../lib/folderEntries.js";
 import { createPathMatcher } from "../../lib/pathMatcher.js";
 import { readClaudeEvidence, readCodexEvidence } from "../../lib/sessionEvidence.js";
-import type { FolderPaths } from "./folderPaths.js";
+import { type FolderPaths, folderPaths } from "./folderPaths.js";
 
 type SessionTranscript = { readonly transcriptFile: string; readonly readEvidence: typeof readClaudeEvidence };
 
@@ -84,4 +84,26 @@ export const foldersNamedIn = (request: {
   } catch {
     return undefined;
   }
+};
+
+// A session owns the folders its transcripts name: the ones it created or worked in. One whose transcripts cannot be
+// read owns none, and a manual pass, which names no session, looks at every folder.
+export const foldersOwnedBy = (request: {
+  readonly homeRoot: string;
+  readonly endedSessionId: string;
+  readonly folders: ReadonlyArray<string>;
+  readonly roots: ReadonlyArray<string>;
+}): ReadonlyArray<string> => {
+  if (!request.endedSessionId || request.folders.length === 0) {
+    return request.folders;
+  }
+
+  const sessionIds = [request.endedSessionId];
+  const transcripts =
+    sessionTranscripts({ homeRoot: request.homeRoot, claudeSessionIds: sessionIds, codexThreadIds: sessionIds }) || [];
+  const ownedPaths = request.folders.map((folder) => folderPaths({ folder, roots: request.roots }));
+  const namedFolders = transcripts.flatMap(
+    (transcript) => foldersNamedIn({ transcript, folders: ownedPaths, homeRoot: request.homeRoot }) || [],
+  );
+  return request.folders.filter((folder) => namedFolders.includes(folder));
 };

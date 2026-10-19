@@ -129,7 +129,7 @@ session-rehome's append-only record of every decision (moved, stayed, uncertain,
 _Avoid_: "log", "history" (Claude Code's `history.jsonl` is a different file).
 
 **disk-cleanup**
-Feature that, when a session ends, pushes and removes the finished git worktrees under the code folders that no open session uses, and once a day runs the **cache cleanup**. Branches always stay, and a worktree it cannot push safely stays too.
+Feature that, when a session ends, pushes and removes the finished git worktrees under the code folders that no open session uses, pushes the unpushed branches no worktree holds, and once a day runs the **cache cleanup**. Branches always stay, and a worktree or branch it cannot push safely stays too, until a later session's end looks at it again.
 _Avoid_: "garbage collection", "sweep" (session-rehome's word).
 
 **cache cleanup**

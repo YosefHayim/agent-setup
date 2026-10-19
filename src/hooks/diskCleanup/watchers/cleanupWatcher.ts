@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Detached watcher behind the disk-cleanup hook, and the command for a manual pass:
 //   node cleanupWatcher.js [--session <id>] [--wait] [--caches-only] [--dry-run]
-// --session names the ended session: only the worktrees it created or worked in are looked at, and it no longer counts
-// as live. Without it every worktree is looked at. --wait first waits for that session to end. --caches-only looks at
-// no worktree, for an agent whose sessions own none.
-// Fails open: a crash leaves every worktree and cache where it was.
+// --session names the ended session: only the worktrees it created or worked in, and the unpushed branches of the repos
+// it named, are looked at, and it no longer counts as live. Without it every worktree and repo is looked at. --wait
+// first waits for that session to end. --caches-only looks at no worktree or branch, for an agent whose sessions own
+// none. Each pass that is not a dry run adds what it did to the cleanup log.
+// Fails open: a crash leaves every worktree, branch, and cache where it was.
 
 import { writeSync } from "node:fs";
 import os from "node:os";
@@ -14,8 +15,10 @@ import { readConfig } from "../../lib/hookConfig.js";
 import { claimIntervalSlot } from "../../lib/intervalStamp.js";
 import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../lib/watcherLock.js";
 import { cleanUpCaches } from "../lib/cacheCleanup.js";
+import { appendToCleanupLog } from "../lib/cleanupLog.js";
 import { cacheCleanupStampFile, cleanupLockFile } from "../lib/cleanupState.js";
 import { isSessionLive } from "../lib/liveSessions.js";
+import { pushUnpushedBranches } from "../lib/unpushedBranches.js";
 import { cleanUpWorktrees } from "../lib/worktreeCleanup.js";
 
 type WatcherOptions = {
@@ -91,9 +94,13 @@ const runWatcher = async (): Promise<void> => {
     const cleanupRequest = { homeRoot, endedSessionId: options.sessionId, dryRun: options.dryRun };
     const rootFolders = readConfig().diskCleanupRoots;
     const worktreeLines = options.cachesOnly ? [] : cleanUpWorktrees({ ...cleanupRequest, rootFolders });
+    const branchLines = options.cachesOnly ? [] : pushUnpushedBranches({ ...cleanupRequest, rootFolders });
     const cacheLines = isCacheCleanupDue(options) ? cleanUpCaches(cleanupRequest) : [];
-    const reportLines = [...worktreeLines, ...cacheLines];
+    const reportLines = [...worktreeLines, ...branchLines, ...cacheLines];
     writeSync(1, reportLines.map((line) => `${line}\n`).join(""));
+    if (!options.dryRun) {
+      appendToCleanupLog(reportLines);
+    }
   } finally {
     releaseWatcherLock(cleanupLockFile());
   }
