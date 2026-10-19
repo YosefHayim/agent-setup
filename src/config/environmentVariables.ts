@@ -50,6 +50,6 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
     name: "AGENT_SETUP_DISK_CLEANUP_STATE_DIR",
     defaultValue: "~/.claude/agent-setup/state/disk-cleanup",
     purpose:
-      "Folder for disk-cleanup's watcher lock and the stamp that limits the cache cleanup to once a day. Tests point it at a temporary folder.",
+      "Folder for disk-cleanup's watcher lock, the stamp that limits the cache cleanup to once a day, the list of kept worktrees to look at again, and the log of what each pass did. Tests point it at a temporary folder.",
   },
 ]);

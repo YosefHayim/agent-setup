@@ -35,9 +35,21 @@ const linkedWorktreeFrom = (request: { readonly block: ReadonlyArray<string>; re
   };
 };
 
-const linkedWorktreesOf = (repoRoot: string): ReadonlyArray<LinkedWorktree> => {
-  const listLines = gitAnswerLines({ folder: repoRoot, query: WORKTREE_LIST_QUERY }) || [];
-  const [mainBlock, ...linkedBlocks] = worktreeBlocks(listLines);
+type RepoWorktreeList = { readonly repoRoot: string; readonly listLines: ReadonlyArray<string> | undefined };
+
+// A repo git cannot list is named, rather than taken for one without worktrees.
+export type LinkedWorktreeListing = {
+  readonly worktrees: ReadonlyArray<LinkedWorktree>;
+  readonly unreadableRepoRoots: ReadonlyArray<string>;
+};
+
+const readWorktreeList = (repoRoot: string): RepoWorktreeList => {
+  const listLines = gitAnswerLines({ folder: repoRoot, query: WORKTREE_LIST_QUERY });
+  return { repoRoot, listLines };
+};
+
+const linkedWorktreesOf = (worktreeList: RepoWorktreeList): ReadonlyArray<LinkedWorktree> => {
+  const [mainBlock, ...linkedBlocks] = worktreeBlocks(worktreeList.listLines || []);
   if (!mainBlock) {
     return [];
   }
@@ -47,8 +59,11 @@ const linkedWorktreesOf = (repoRoot: string): ReadonlyArray<LinkedWorktree> => {
 };
 
 // A repo root can itself be a linked worktree, so the same worktree can come up from several roots.
-export const listLinkedWorktrees = (repoRoots: ReadonlyArray<string>): ReadonlyArray<LinkedWorktree> => {
-  const worktrees = repoRoots.flatMap(linkedWorktreesOf);
+export const listLinkedWorktrees = (repoRoots: ReadonlyArray<string>): LinkedWorktreeListing => {
+  const worktreeLists = repoRoots.map(readWorktreeList);
+  const worktrees = worktreeLists.flatMap(linkedWorktreesOf);
   const worktreeByFolder = new Map(worktrees.map((worktree) => [worktree.folder, worktree]));
-  return [...worktreeByFolder.values()];
+  const unreadableLists = worktreeLists.filter((worktreeList) => !worktreeList.listLines);
+  const unreadableRepoRoots = unreadableLists.map((worktreeList) => worktreeList.repoRoot);
+  return { worktrees: [...worktreeByFolder.values()], unreadableRepoRoots };
 };

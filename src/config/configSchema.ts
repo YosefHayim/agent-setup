@@ -89,7 +89,7 @@ export const configSchema = Schema.Struct({
   diskCleanupRoots: withDefault(Schema.Array(Schema.NonEmptyTrimmedString), CODE_ROOT_FOLDERS).annotations({
     title: "disk cleanup roots",
     description:
-      "Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove. Repos are found one and two levels deep.",
+      "Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove, and for unpushed branches to push. Repos are found one and two levels deep.",
   }),
   debugLogs: withDefault(Schema.Boolean, false).annotations({
     title: "debug logs",

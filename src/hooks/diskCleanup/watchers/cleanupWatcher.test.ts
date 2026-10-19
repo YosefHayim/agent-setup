@@ -25,10 +25,12 @@ const packageRoot = path.resolve(path.dirname(watcherPath), "../../../..");
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const liveSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const otherSessionId = "0b6f1d2e-3c4a-4e5f-8a9b-1c2d3e4f5a6b";
+const laterSessionId = "9e8d7c6b-5a49-4382-a716-5f4e3d2c1b0a";
 const codexThreadId = "019a2c41-7d3e-7b10-9c2a-5e4f6a7b8c9d";
 const PRUNE_TOOLS = ["xcrun", "pnpm", "uv", "docker"];
 const MONTH_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
 const TWO_HOURS_AGO = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+const realGitPath = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 const workspaces: Array<string> = [];
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
@@ -63,23 +65,21 @@ type CodeHome = {
   readonly toolCallsFile: string;
 };
 
-// Each stub logs its call; docker's "info" fails when the engine is meant to be stopped.
-const writePruneToolStubs = (request: { readonly homeRoot: string; readonly dockerRunning: boolean }) => {
-  const stubsFolder = path.join(request.homeRoot, "stub-tools");
-  const toolCallsFile = path.join(request.homeRoot, "tool-calls.log");
-  const engineCheckExitCode = request.dockerRunning ? 0 : 1;
+// Each stub logs its call. Docker is stubbed too, so a call to it would show.
+const writePruneToolStubs = (homeRoot: string) => {
+  const stubsFolder = path.join(homeRoot, "stub-tools");
+  const toolCallsFile = path.join(homeRoot, "tool-calls.log");
   mkdirSync(stubsFolder);
   for (const tool of PRUNE_TOOLS) {
     const stub = path.join(stubsFolder, tool);
-    const engineCheck = tool === "docker" ? `[ "$1" = info ] && exit ${engineCheckExitCode}\n` : "";
-    writeFileSync(stub, `#!/bin/sh\n${engineCheck}echo "${tool} $*" >> "${toolCallsFile}"\n`);
+    writeFileSync(stub, `#!/bin/sh\necho "${tool} $*" >> "${toolCallsFile}"\n`);
     chmodSync(stub, 0o755);
   }
   return toolCallsFile;
 };
 
 // A fake home with ~/Desktop/Code/app, cloned from a bare remote outside the code folders.
-const createCodeHome = (options: { readonly dockerRunning: boolean } = { dockerRunning: true }): CodeHome => {
+const createCodeHome = (): CodeHome => {
   const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-"));
   workspaces.push(homeRoot);
   // The watcher's own commits take their author from the home's git config.
@@ -93,7 +93,7 @@ const createCodeHome = (options: { readonly dockerRunning: boolean } = { dockerR
   git({ folder: repo, command: ["push", "--quiet", "origin", "main"] });
   // A clone of a repository that already has commits learns the remote's default branch the same way.
   git({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
-  const toolCallsFile = writePruneToolStubs({ homeRoot, dockerRunning: options.dockerRunning });
+  const toolCallsFile = writePruneToolStubs(homeRoot);
   return { homeRoot, remote, repo, toolCallsFile };
 };
 
@@ -180,6 +180,48 @@ const holdFileOpen = (request: { readonly home: CodeHome; readonly heldFile: str
 
 const cleanUpAfterSession = (home: CodeHome) => runWatcher({ home, watcherArguments: ["--session", endedSessionId] });
 
+// The session edits a file in the repo's own folder, which names the repo and none of its worktrees.
+const workInRepo = (request: { readonly home: CodeHome; readonly sessionId: string }) => {
+  const toolUse = { type: "tool_use", input: { file_path: path.join(request.home.repo, "src", "app.ts") } };
+  const transcriptLine = { type: "assistant", cwd: request.home.repo, message: { content: [toolUse] } };
+  appendTranscriptLine({ home: request.home, sessionId: request.sessionId, transcriptLine });
+};
+
+const registerLiveSession = (request: { readonly home: CodeHome; readonly sessionId: string }) => {
+  const sessionsFolder = path.join(request.home.homeRoot, ".claude", "sessions");
+  const registryEntry = { pid: process.pid, sessionId: request.sessionId };
+  mkdirSync(sessionsFolder, { recursive: true });
+  writeFileSync(path.join(sessionsFolder, `${request.sessionId}.json`), JSON.stringify(registryEntry));
+};
+
+// The branch gets one commit of its own, and the repo's folder goes back to main.
+const addBranch = (request: { readonly home: CodeHome; readonly branch: string; readonly fileName: string }) => {
+  git({ folder: request.home.repo, command: ["switch", "--quiet", "--create", request.branch] });
+  commitFile({ workTree: request.home.repo, fileName: request.fileName });
+  git({ folder: request.home.repo, command: ["switch", "--quiet", "main"] });
+};
+
+const remoteSubjects = (request: { readonly home: CodeHome; readonly branch: string }): string =>
+  git({ folder: request.home.remote, command: ["log", "--format=%s", request.branch] });
+
+const cleanupLogFile = (home: CodeHome): string => path.join(home.homeRoot, "disk-cleanup-state", "cleanup.log");
+
+// Stands in for git on the watcher's path, and first runs the shell step for each call whose arguments hold the words.
+const interceptGit = (request: { readonly home: CodeHome; readonly words: string; readonly step: string }): string => {
+  const gitStub = path.join(request.home.homeRoot, "stub-tools", "git");
+  const stubLines = [
+    "#!/bin/sh",
+    `case " $* " in *" ${request.words} "*) ${request.step} ;; esac`,
+    `exec "${realGitPath}" "$@"`,
+  ];
+  writeFileSync(gitStub, `${stubLines.join("\n")}\n`);
+  chmodSync(gitStub, 0o755);
+  return gitStub;
+};
+
+const upstreamOf = (request: { readonly home: CodeHome; readonly branch: string }): string =>
+  git({ folder: request.home.repo, command: ["rev-parse", "--abbrev-ref", `${request.branch}@{upstream}`] });
+
 const reportLineFor = (request: { readonly report: string; readonly target: string }): string =>
   request.report.split("\n").find((line) => line.endsWith(` ${request.target}`)) || "";
 
@@ -210,6 +252,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const pushedSubjects = git({ folder: home.remote, command: ["log", "--format=%s", "feature"] });
     expect(pushedSubjects.split("\n")).toEqual(["chore: save work left in worktree", "add login.ts", "add README.md"]);
     expect(git({ folder: home.repo, command: ["branch", "--list", "feature"] })).toContain("feature");
+    expect(upstreamOf({ home, branch: "feature" })).toBe("origin/feature");
   });
 
   it("removes a worktree whose work is already on the remote without pushing", () => {
@@ -512,6 +555,70 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(fresh)).toBe(true);
   });
 
+  it("looks again at a worktree an earlier session's end kept, at a later session's end", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+    const endedRun = cleanUpAfterSession(home);
+    utimesSync(path.join(fresh, ".git"), TWO_HOURS_AGO, TWO_HOURS_AGO);
+
+    const laterRun = runWatcher({ home, watcherArguments: ["--session", otherSessionId] });
+
+    expect(reportLineFor({ report: endedRun.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: laterRun.stdout, target: fresh })).toMatch(/^removed +nothing to push +\//);
+    expect(existsSync(fresh)).toBe(false);
+  });
+
+  it("reports a repo whose worktrees git cannot list, and still looks again at the ones kept before", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+    const endedRun = cleanUpAfterSession(home);
+    workInRepo({ home, sessionId: otherSessionId });
+    const gitStub = interceptGit({ home, words: "worktree list", step: "exit 1" });
+
+    const unreadableRun = runWatcher({ home, watcherArguments: ["--session", otherSessionId] });
+    rmSync(gitStub);
+    utimesSync(path.join(fresh, ".git"), TWO_HOURS_AGO, TWO_HOURS_AGO);
+    const laterRun = runWatcher({ home, watcherArguments: ["--session", otherSessionId] });
+
+    expect(reportLineFor({ report: endedRun.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: unreadableRun.stdout, target: home.repo })).toMatch(
+      /^kept +worktree list failed +\//,
+    );
+    expect(reportLineFor({ report: unreadableRun.stdout, target: fresh })).toBe("");
+    expect(reportLineFor({ report: laterRun.stdout, target: fresh })).toMatch(/^removed +nothing to push +\//);
+    expect(existsSync(fresh)).toBe(false);
+  });
+
+  it("does not take a worktree made later in a kept worktree's folder, for another branch, for the kept one", () => {
+    const home = createCodeHome();
+    const fresh = addBranchWorktree({ home, branch: "fresh" });
+    const now = new Date();
+    utimesSync(path.join(fresh, ".git"), now, now);
+    const endedRun = cleanUpAfterSession(home);
+    git({ folder: home.repo, command: ["worktree", "remove", "--force", fresh] });
+    addWorktree({ home, name: "fresh", checkoutOptions: ["-b", "remade"], startPoint: [], creatorId: otherSessionId });
+
+    const laterRun = runWatcher({ home, watcherArguments: ["--session", laterSessionId] });
+
+    expect(reportLineFor({ report: endedRun.stdout, target: fresh })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: laterRun.stdout, target: fresh })).toBe("");
+    expect(existsSync(fresh)).toBe(true);
+  });
+
+  it("leaves a kept list it cannot read as it is, and still cleans up", () => {
+    const home = createCodeHome();
+    const feature = addBranchWorktree({ home, branch: "feature" });
+    mkdirSync(path.join(home.homeRoot, "disk-cleanup-state", "kept-worktrees"), { recursive: true });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: feature })).toMatch(/^removed +nothing to push +\//);
+  });
+
   it("drops git's record of a worktree whose folder is already gone", () => {
     const home = createCodeHome();
     const gone = addBranchWorktree({ home, branch: "gone" });
@@ -535,6 +642,190 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(existsSync(feature)).toBe(true);
     expect(remoteBranches(home)).toBe("main");
     expect(toolCalls(home)).not.toContain("prune");
+    expect(existsSync(cleanupLogFile(home))).toBe(false);
+  });
+});
+
+describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
+  it("pushes an unpushed branch no worktree has checked out to a branch of the same name", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "login" })).toBe("add login.ts\nadd README.md");
+    expect(upstreamOf({ home, branch: "login" })).toBe("origin/login");
+  });
+
+  it("pushes the commit whose files it checked, while one committed during the push waits for a later pass", () => {
+    const home = createCodeHome();
+    git({ folder: home.repo, command: ["switch", "--quiet", "--create", "current"] });
+    commitFile({ workTree: home.repo, fileName: "current.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    const keyCommit = [
+      `echo key > "${home.repo}/server.key"`,
+      `"${realGitPath}" -C "${home.repo}" add server.key`,
+      `"${realGitPath}" -C "${home.repo}" commit --quiet --message "add server.key"`,
+    ].join(" && ");
+    interceptGit({ home, words: "push", step: keyCommit });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} current` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "current" })).toBe("add current.ts\nadd README.md");
+    const unpushedSubjects = git({
+      folder: home.repo,
+      command: ["log", "--format=%s", "current", "--not", "--remotes"],
+    });
+    expect(unpushedSubjects).toBe("add server.key");
+  });
+
+  it("reports a repo whose branches git cannot list", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    interceptGit({ home, words: "for-each-ref", step: "exit 1" });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: home.repo })).toMatch(/^kept +branch list failed +\//);
+    expect(remoteBranches(home)).toBe("main");
+  });
+
+  it("keeps unpushed work on the default branch, and branches that bring files that must not be pushed", () => {
+    const home = createCodeHome();
+    commitFile({ workTree: home.repo, fileName: "hotfix.ts" });
+    addBranch({ home, branch: "committed-key", fileName: "server.key" });
+    git({ folder: home.repo, command: ["switch", "--quiet", "--create", "large-file"] });
+    writeFileSync(path.join(home.repo, "model.bin"), Buffer.alloc(50 * 1024 * 1024 + 1));
+    git({ folder: home.repo, command: ["add", "model.bin"] });
+    git({ folder: home.repo, command: ["commit", "--quiet", "--message", "add model.bin"] });
+    git({ folder: home.repo, command: ["switch", "--quiet", "main"] });
+    workInRepo({ home, sessionId: endedSessionId });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} main` })).toMatch(
+      /^kept +default-branch-work +\//,
+    );
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} committed-key` })).toMatch(
+      /^kept +risky-files +\//,
+    );
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} large-file` })).toMatch(/^kept +risky-files +\//);
+    expect(remoteBranches(home)).toBe("main");
+    expect(remoteSubjects({ home, branch: "main" })).toBe("add README.md");
+  });
+
+  it("leaves a branch checked out in a worktree to the worktree pass", () => {
+    const home = createCodeHome();
+    const othersWorktree = addWorktree({
+      home,
+      name: "others",
+      checkoutOptions: ["-b", "others"],
+      startPoint: [],
+      creatorId: otherSessionId,
+    });
+    commitFile({ workTree: othersWorktree, fileName: "others.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} others` })).toBe("");
+    expect(remoteBranches(home)).toBe("main");
+  });
+
+  it("looks at a repo's branches once, though a worktree of it sits straight in a code folder", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    const sibling = path.join(path.dirname(home.repo), "app-sibling");
+    git({ folder: home.repo, command: ["worktree", "add", "--quiet", "-b", "sibling", sibling] });
+    commitFile({ workTree: sibling, fileName: "sibling.ts" });
+
+    const run = runWatcher({ home, watcherArguments: [] });
+
+    expect(run.stdout.match(/ login$/gm)).toHaveLength(1);
+    expect(reportLineFor({ report: run.stdout, target: sibling })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: run.stdout, target: `${sibling} sibling` })).toBe("");
+    expect(remoteBranches(home)).toBe("login\nmain");
+  });
+
+  it("leaves a repo the ended session never named, while a manual pass pushes its branches", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+
+    const sessionRun = cleanUpAfterSession(home);
+    const remoteAfterSession = remoteBranches(home);
+    const manualRun = runWatcher({ home, watcherArguments: [] });
+
+    expect(reportLineFor({ report: sessionRun.stdout, target: `${home.repo} login` })).toBe("");
+    expect(remoteAfterSession).toBe("main");
+    expect(reportLineFor({ report: manualRun.stdout, target: `${home.repo} login` })).toMatch(/^pushed +to origin +\//);
+  });
+
+  it("keeps the branch checked out in the repo's folder while a live session works there, and pushes it after", () => {
+    const home = createCodeHome();
+    git({ folder: home.repo, command: ["switch", "--quiet", "--create", "current"] });
+    commitFile({ workTree: home.repo, fileName: "current.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    workInRepo({ home, sessionId: liveSessionId });
+    registerLiveSession({ home, sessionId: liveSessionId });
+
+    const busyRun = cleanUpAfterSession(home);
+    rmSync(path.join(home.homeRoot, ".claude", "sessions", `${liveSessionId}.json`));
+    const freeRun = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: busyRun.stdout, target: `${home.repo} current` })).toMatch(/^kept +in-use +\//);
+    expect(reportLineFor({ report: freeRun.stdout, target: `${home.repo} current` })).toMatch(/^pushed +to origin +\//);
+    expect(git({ folder: home.repo, command: ["branch", "--show-current"] })).toBe("current");
+  });
+
+  it("keeps a branch whose remote branch has moved on, since the push is never forced", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    git({ folder: home.repo, command: ["push", "--quiet", "origin", "login"] });
+    git({ folder: home.repo, command: ["switch", "--quiet", "login"] });
+    git({ folder: home.repo, command: ["commit", "--quiet", "--amend", "--message", "rework login"] });
+    git({ folder: home.repo, command: ["switch", "--quiet", "main"] });
+    workInRepo({ home, sessionId: endedSessionId });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(/^kept +push failed +\//);
+    expect(remoteSubjects({ home, branch: "login" })).toBe("add login.ts\nadd README.md");
+  });
+
+  it("only reports in a dry run", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+
+    const run = runWatcher({ home, watcherArguments: ["--session", endedSessionId, "--dry-run"] });
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(/^would push +to origin +\//);
+    expect(remoteBranches(home)).toBe("main");
+  });
+});
+
+describe("cleanupWatcher log", { timeout: 30_000 }, () => {
+  it("adds each pass's report after when it ran, and keeps only the latest thousand lines", () => {
+    const home = createCodeHome();
+    const earlierLines = Array.from({ length: 1_000 }, (_, lineNumber) => `earlier line ${lineNumber}`);
+    mkdirSync(path.dirname(cleanupLogFile(home)), { recursive: true });
+    writeFileSync(cleanupLogFile(home), `${earlierLines.join("\n")}\n`);
+    addBranchWorktree({ home, branch: "feature" });
+
+    const run = cleanUpAfterSession(home);
+
+    const reportLines = run.stdout.split("\n").filter(Boolean);
+    const logLines = readFileSync(cleanupLogFile(home), "utf8").split("\n").filter(Boolean);
+    const passLines = logLines.slice(-reportLines.length);
+    expect(reportLines.length).toBeGreaterThan(1);
+    expect(logLines).toHaveLength(1_000);
+    expect(logLines[0]).toBe(`earlier line ${reportLines.length}`);
+    expect(passLines.every((line) => /^\d{4}-\d\d-\d\dT\S+Z /.test(line))).toBe(true);
+    expect(passLines.map((line) => line.slice(line.indexOf(" ") + 1))).toEqual(reportLines);
   });
 });
 
@@ -642,7 +933,7 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
     expect(toolCalls(home)).toContain("xcrun simctl delete unavailable\n");
     expect(toolCalls(home)).toContain("pnpm store prune\n");
     expect(toolCalls(home)).toContain("uv cache prune\n");
-    expect(toolCalls(home)).toContain("docker system prune --force --filter until=168h\n");
+    expect(toolCalls(home)).not.toContain("docker");
   });
 
   it("keeps a stale npx package a process holds a file in, after the npm folder was moved and linked back", async () => {
@@ -700,14 +991,5 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: run.stdout, target: feature })).toBe("");
     expect(existsSync(feature)).toBe(true);
     expect(existsSync(staleNpx)).toBe(false);
-  });
-
-  it("skips Docker while its engine is stopped", () => {
-    const home = createCodeHome({ dockerRunning: false });
-
-    cleanUpAfterSession(home);
-
-    expect(toolCalls(home)).toContain("pnpm store prune\n");
-    expect(toolCalls(home)).not.toContain("docker system");
   });
 });

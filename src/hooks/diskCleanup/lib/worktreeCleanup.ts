@@ -1,9 +1,10 @@
 import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
-import { gitAnswerLines } from "../../lib/gitAnswers.js";
+import { gitSucceeds } from "../../lib/gitAnswers.js";
 import { folderPaths, isInsideAnyFolder } from "./folderPaths.js";
+import { keptWorktreeLine, readKeptWorktrees, saveKeptWorktrees } from "./keptWorktrees.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linkedWorktrees.js";
 import { reportLine } from "./reportLine.js";
-import { foldersNamedIn, sessionTranscripts } from "./sessionTranscripts.js";
+import { foldersOwnedBy } from "./sessionTranscripts.js";
 import { decideWorktreeCleanup, type WorktreeCleanupDecision } from "./worktreeCleanupDecision.js";
 import { readWorktreeFacts } from "./worktreeFacts.js";
 import { removeWorktree } from "./worktreeRemoval.js";
@@ -71,52 +72,63 @@ const pruneGoneWorktrees = (request: {
   const mainFolders = [...new Set(goneWorktrees.map((worktree) => worktree.mainFolder))];
   const prunedMainFolders = request.dryRun
     ? mainFolders
-    : mainFolders.filter((folder) => gitAnswerLines({ folder, query: ["worktree", "prune"] }) !== undefined);
+    : mainFolders.filter((folder) => gitSucceeds({ folder, query: ["worktree", "prune"] }));
   const action = request.dryRun ? "would prune" : "pruned";
   return goneWorktrees
     .filter((worktree) => prunedMainFolders.includes(worktree.mainFolder))
     .map((worktree) => reportLine({ action, detail: "folder gone", target: worktree.folder }));
 };
 
-// A session owns the worktrees its transcripts name: the ones it created or worked in. One whose transcripts cannot be
-// read owns none, and a manual pass, which names no session, looks at every worktree.
-const worktreesOwnedBy = (request: {
-  readonly homeRoot: string;
-  readonly endedSessionId: string;
-  readonly worktrees: ReadonlyArray<LinkedWorktree>;
-  readonly roots: ReadonlyArray<string>;
-}): ReadonlyArray<LinkedWorktree> => {
-  if (!request.endedSessionId || request.worktrees.length === 0) {
-    return request.worktrees;
+// The next session's end looks again at whatever this pass kept.
+const rememberKeptWorktrees = (request: {
+  readonly lookedAtWorktrees: ReadonlyArray<LinkedWorktree>;
+  readonly listedFolders: ReadonlyArray<string>;
+  readonly earlierKeptLines: ReadonlyArray<string> | undefined;
+  readonly dryRun: boolean;
+}): void => {
+  if (request.dryRun) {
+    return;
   }
 
-  const sessionIds = [request.endedSessionId];
-  const transcripts =
-    sessionTranscripts({ homeRoot: request.homeRoot, claudeSessionIds: sessionIds, codexThreadIds: sessionIds }) || [];
-  const worktreePaths = request.worktrees.map((worktree) =>
-    folderPaths({ folder: worktree.folder, roots: request.roots }),
-  );
-  const ownedFolders = transcripts.flatMap(
-    (transcript) => foldersNamedIn({ transcript, folders: worktreePaths, homeRoot: request.homeRoot }) || [],
-  );
-  return request.worktrees.filter((worktree) => ownedFolders.includes(worktree.folder));
+  saveKeptWorktrees(request);
 };
 
+const reportUnreadableRepos = (repoRoots: ReadonlyArray<string>): ReadonlyArray<string> =>
+  repoRoots.map((repoRoot) => reportLine({ action: "kept", detail: "worktree list failed", target: repoRoot }));
+
 // Only worktrees under the code roots, by either path a root goes by, are touched; ones in scratch, job, or agent
-// folders belong to whoever made them.
+// folders belong to whoever made them. Besides the ended session's own worktrees, each pass looks again at the ones an
+// earlier pass kept.
 export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray<string> => {
   const roots = codeRootFolders(request);
   const repoRoots = repoRootsUnder(roots);
   const rootPaths = roots.flatMap((root) => folderPaths({ folder: root, roots: [] }).paths);
-  const worktrees = listLinkedWorktrees(repoRoots).filter((worktree) =>
+  const worktreeListing = listLinkedWorktrees(repoRoots);
+  const unreadableRepoRoots = foldersOwnedBy({ ...request, folders: worktreeListing.unreadableRepoRoots, roots });
+  const worktrees = worktreeListing.worktrees.filter((worktree) =>
     isInsideAnyFolder({ candidate: worktree.folder, folders: rootPaths }),
   );
   const presentWorktrees = worktrees.filter((worktree) => !worktree.prunable);
-  const ownedWorktrees = worktreesOwnedBy({ ...request, worktrees: presentWorktrees, roots });
+  const presentFolders = presentWorktrees.map((worktree) => worktree.folder);
+  const sessionFolders = foldersOwnedBy({ ...request, folders: presentFolders, roots });
+  const earlierKeptLines = readKeptWorktrees();
+  const keptLines = earlierKeptLines || [];
+  const ownedWorktrees = presentWorktrees.filter((worktree) => {
+    const keptLine = keptWorktreeLine(worktree);
+    return sessionFolders.includes(worktree.folder) || keptLines.includes(keptLine);
+  });
   const worktreeFolders = ownedWorktrees.map((worktree) => worktree.folder);
   const usedFolders = worktreesInUse({ ...request, worktreeFolders, roots });
   const worktreeLines = ownedWorktrees.map((worktree) =>
     cleanUpWorktree({ worktree, inUse: usedFolders.has(worktree.folder), dryRun: request.dryRun }),
   );
-  return [...worktreeLines, ...pruneGoneWorktrees({ worktrees, dryRun: request.dryRun })];
+  rememberKeptWorktrees({
+    lookedAtWorktrees: ownedWorktrees,
+    listedFolders: presentFolders,
+    earlierKeptLines,
+    dryRun: request.dryRun,
+  });
+  const unreadableLines = reportUnreadableRepos(unreadableRepoRoots);
+  const pruneLines = pruneGoneWorktrees({ worktrees, dryRun: request.dryRun });
+  return [...worktreeLines, ...unreadableLines, ...pruneLines];
 };

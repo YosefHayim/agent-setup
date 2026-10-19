@@ -61,7 +61,7 @@ const createFeatureWorktree = () => {
 const writeStoppedPruneTools = (homeRoot: string) => {
   const stubsFolder = path.join(homeRoot, "stub-tools");
   mkdirSync(stubsFolder);
-  for (const tool of ["xcrun", "pnpm", "uv", "docker"]) {
+  for (const tool of ["xcrun", "pnpm", "uv"]) {
     writeFileSync(path.join(stubsFolder, tool), "#!/bin/sh\nexit 1\n");
     chmodSync(path.join(stubsFolder, tool), 0o755);
   }
