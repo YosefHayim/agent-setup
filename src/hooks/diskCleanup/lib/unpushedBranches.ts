@@ -1,3 +1,6 @@
+import { statSync } from "node:fs";
+import path from "node:path";
+
 import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
 import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import { readBranchFacts } from "./branchFacts.js";
@@ -20,6 +23,16 @@ type LocalBranch = { readonly repoFolder: string; readonly branch: string; reado
 
 // e.g. "login\t/Users/me/Code/app/.worktrees/login"
 const LOCAL_BRANCH_QUERY = ["for-each-ref", "--format=%(refname:lstrip=2)%09%(worktreepath)", "refs/heads/"];
+
+// A linked worktree placed straight in a code folder looks like a repo too, but its .git is a file. The branches it
+// shares are looked at from the main checkout, and its own goes with the worktree.
+const isMainCheckout = (repoFolder: string): boolean => {
+  try {
+    return statSync(path.join(repoFolder, ".git")).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 const localBranchesOf = (repoFolder: string): ReadonlyArray<LocalBranch> => {
   const branchLines = gitAnswerLines({ folder: repoFolder, query: LOCAL_BRANCH_QUERY }) || [];
@@ -72,7 +85,7 @@ const pushUnpushedBranch = (request: {
 // looked at, and a manual pass looks at every repo under the code roots.
 export const pushUnpushedBranches = (request: BranchCleanupRequest): ReadonlyArray<string> => {
   const roots = codeRootFolders(request);
-  const repoFolders = repoRootsUnder(roots);
+  const repoFolders = repoRootsUnder(roots).filter(isMainCheckout);
   const ownedRepoFolders = foldersOwnedBy({ ...request, folders: repoFolders, roots });
   const unpushedBranches = ownedRepoFolders
     .flatMap(localBranchesOf)

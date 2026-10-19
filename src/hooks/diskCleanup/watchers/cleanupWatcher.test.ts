@@ -632,6 +632,21 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
     expect(remoteBranches(home)).toBe("main");
   });
 
+  it("looks at a repo's branches once, though a worktree of it sits straight in a code folder", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    const sibling = path.join(path.dirname(home.repo), "app-sibling");
+    git({ folder: home.repo, command: ["worktree", "add", "--quiet", "-b", "sibling", sibling] });
+    commitFile({ workTree: sibling, fileName: "sibling.ts" });
+
+    const run = runWatcher({ home, watcherArguments: [] });
+
+    expect(run.stdout.match(/ login$/gm)).toHaveLength(1);
+    expect(reportLineFor({ report: run.stdout, target: sibling })).toMatch(/^kept +recently-created +\//);
+    expect(reportLineFor({ report: run.stdout, target: `${sibling} sibling` })).toBe("");
+    expect(remoteBranches(home)).toBe("login\nmain");
+  });
+
   it("leaves a repo the ended session never named, while a manual pass pushes its branches", () => {
     const home = createCodeHome();
     addBranch({ home, branch: "login", fileName: "login.ts" });
