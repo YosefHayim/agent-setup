@@ -18,7 +18,8 @@ export const SECRET_FILE_GLOBS = [
   "id_ecdsa*",
   "id_dsa*",
 ];
-const SHAREABLE_ENV_FILE = /^\.env\.(?:example|sample|template)$/iu;
+// Only the usual lowercase names are shared; one with any capitals still counts as a secret.
+const SHAREABLE_ENV_FILE = /^\.env\.(?:example|sample|template)$/u;
 // GitHub refuses files over 100 MB; one this big is a build or a download, not work.
 export const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 // Every file an unpushed commit adds or changes; a deleted one has nothing left to push.
