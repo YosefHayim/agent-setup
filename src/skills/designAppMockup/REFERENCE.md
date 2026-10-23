@@ -107,7 +107,7 @@ Every app gets these states, not only the happy path:
 - loading with real progress and a skeleton of the result;
 - the result, with what is ready and what is missing shown up front;
 - detail with steps;
-- paywall with a free path, the usage count, restore, and terms;
+- paywall, when the app has a paid tier: a free path, the usage count, restore, and terms;
 - saved or history, with filters and an empty filter state;
 - account: subscription, preferences, privacy, help, log out.
 
@@ -131,7 +131,7 @@ Section order, taken from App Land on Framer:
 6. A split: copy with 3 checks next to a photo card with floating UI cards.
 7. Features as a 3+3 bento grid with one dark card.
 8. Facts: true product facts only (what the app does in numbers), one dark card.
-9. Pricing: a free card and a dark paid card, a billing toggle, and placeholder prices.
+9. Pricing, shaped by the pricing model from the brief: for free plus paid, a free card and a dark paid card with placeholder prices, and a billing toggle only when there are monthly and yearly plans. A free app skips this section.
 10. FAQ: a two-column accordion with real questions: account, wrong results, safety, what paid adds.
 11. A dark CTA band with a photo and the launch CTA.
 12. Footer with the legal line.
