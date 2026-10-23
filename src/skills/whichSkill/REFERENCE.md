@@ -65,6 +65,14 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | Chrome Web Store listing SEO | `chrome-store-seo` |
 | mobile store release | `release-mobile-app` |
 
+## Design
+
+| You say… | Primary |
+|----------|---------|
+| design my app idea, mock up this idea, premium UI, Framer-level mockup, wireframes then final UI | `design-app-mockup` |
+| easier flows in an existing app, fewer clicks, UX audit | `improve-ux` |
+| this screenshot or design as exact code | `image-to-code` |
+
 ## Agent artifact paths (anti-slop)
 
 Run records are **not** product SSOT. Each run gets one new folder outside every repo, **`${XDG_STATE_HOME:-~/.local/state}/agent-setup/runs/<repo>/<skill>/<YYYY-MM-DD-HHMM>/`**, with one `report.md` that holds the run as `##` sections. Separate files only for assets that are not Markdown. Resume uses the run folder the user gives, else the newest one; there is no pointer file. Parallel lanes share the orchestrator's `RUN_DIR`. Never write run records to:
