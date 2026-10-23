@@ -1,6 +1,6 @@
 ---
 name: improve-ux
-description: Use when you want user flows to be easier — fewer clicks and steps, and better forms, empty, error, and loading states. It maps the flows, shows before and after designs for you to pick, then builds your picks in PRs. Say "improve UX", "reduce clicks", "UX audit", or "redesign this flow".
+description: Use when you want user flows to be easier — fewer clicks and steps, and better forms, empty, error, and loading states. It maps the flows, shows before and after designs for you to pick, then builds your picks in PRs. Say "improve UX", "reduce clicks", "UX audit", or "redesign this flow". For a new app idea with no code yet, use design-app-mockup.
 type: flow
 ---
 
