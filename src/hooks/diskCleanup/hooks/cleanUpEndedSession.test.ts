@@ -19,7 +19,9 @@ const isolatedGitEnvironment = (): NodeJS.ProcessEnv => {
 
 const git = (request: { readonly folder: string; readonly command: ReadonlyArray<string> }): string => {
   const identity = ["-c", "user.name=Cleanup Test", "-c", "user.email=cleanup@example.test"];
-  const execution = spawnSync("git", [...identity, "-c", "init.defaultBranch=main", ...request.command], {
+  // Git's background maintenance after a commit would hold the repo while a pass looks for folders in use.
+  const settings = [...identity, "-c", "init.defaultBranch=main", "-c", "maintenance.auto=false"];
+  const execution = spawnSync("git", [...settings, ...request.command], {
     cwd: request.folder,
     encoding: "utf8",
     env: isolatedGitEnvironment(),
@@ -33,8 +35,11 @@ const git = (request: { readonly folder: string; readonly command: ReadonlyArray
 // ~/Desktop/Code/app with one two-hour-old feature worktree holding a commit its remote lacks, which the ended
 // session's transcript names.
 const createFeatureWorktree = () => {
-  const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-hook-"));
-  workspaces.push(homeRoot);
+  const workspace = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-hook-"));
+  workspaces.push(workspace);
+  // Spotlight skips a *.noindex folder, so it opens no file there while a pass looks for folders in use.
+  const homeRoot = path.join(workspace, "home.noindex");
+  mkdirSync(homeRoot);
   writeFileSync(path.join(homeRoot, ".gitconfig"), "[user]\n\tname = Cleanup Test\n\temail = cleanup@example.test\n");
   const remote = path.join(homeRoot, "remotes", "app.git");
   const repo = path.join(homeRoot, "Desktop", "Code", "app");

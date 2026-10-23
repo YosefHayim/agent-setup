@@ -9,14 +9,23 @@ export type WorktreeRemoval =
   | { readonly _tag: "failed"; readonly step: RemovalStep };
 
 const SAVE_COMMIT_MESSAGE = "chore: save work left in worktree";
+// --no-verify skips commit hooks: the commit only keeps work safe, and a lint failure must not lose it. Git's
+// background maintenance after a commit would hold the folder, and the branch pass would then keep the repo as in use.
+const SAVE_COMMIT_QUERY = [
+  "-c",
+  "maintenance.auto=false",
+  "commit",
+  "--no-verify",
+  "--quiet",
+  "--message",
+  SAVE_COMMIT_MESSAGE,
+];
 const NOT_SAVED_QUERY = ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"];
 const NOT_PUSHED_QUERY = ["log", "HEAD", "--not", "--remotes", "--max-count=1", "--format=%H"];
 const HEAD_COMMIT_QUERY = ["rev-parse", "--verify", "HEAD"];
 
-// --no-verify skips commit hooks: the commit only keeps work safe, and a lint failure must not lose it.
 const saveChanges = (folder: string): boolean =>
-  gitSucceeds({ folder, query: ["add", "--all"] }) &&
-  gitSucceeds({ folder, query: ["commit", "--no-verify", "--quiet", "--message", SAVE_COMMIT_MESSAGE] });
+  gitSucceeds({ folder, query: ["add", "--all"] }) && gitSucceeds({ folder, query: SAVE_COMMIT_QUERY });
 
 const headCommit = (folder: string): string => {
   const headLines = gitAnswerLines({ folder, query: HEAD_COMMIT_QUERY });
