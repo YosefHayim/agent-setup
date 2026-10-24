@@ -16,14 +16,14 @@ const isMarkedFinished = (metaFile: string): boolean => {
   }
 };
 
-// A subagent that stopped asks for no tool in its last turn; one cut off mid-run is still waiting on a tool, or never
-// got to answer at all.
+// A subagent that stopped ended its last turn; one cut off mid-run is still waiting on a tool, never got to answer, or
+// left a turn with no stop reason written yet. A folder kept by mistake still goes once it sits unchanged for a day.
 const isCutOffMidRun = (transcriptFile: string): boolean => {
   const assistantTurns = readTranscriptTail(transcriptFile)
     .map(decodeTranscriptLine)
     .filter((entry) => entry?.type === "assistant");
   const lastTurn = assistantTurns.at(-1);
-  return !lastTurn || lastTurn.stopReason === "tool_use";
+  return lastTurn?.stopReason !== "end_turn";
 };
 
 const isRunning = (metaFile: string): boolean => {

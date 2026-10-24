@@ -32,7 +32,7 @@ const writeSubagent = (request: {
   writeFileSync(path.join(subagentFolder, `${request.agentName}.jsonl`), transcript);
 };
 
-const assistantTurn = (stopReason: string) => ({
+const assistantTurn = (stopReason: string | null) => ({
   type: "assistant",
   message: { role: "assistant", stop_reason: stopReason },
 });
@@ -71,6 +71,18 @@ describe("hasRunningSubagents", () => {
       agentName: "agent-a1",
       meta: { agentType: "general-purpose" },
       transcriptLines: [toolAnswer],
+    });
+
+    expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(true);
+  });
+
+  it("counts a subagent whose last turn has no stop reason yet", () => {
+    const homeRoot = createHomeRoot();
+    writeSubagent({
+      configRoot: path.join(homeRoot, ".claude"),
+      agentName: "agent-a1",
+      meta: { agentType: "general-purpose" },
+      transcriptLines: [assistantTurn("tool_use"), toolAnswer, assistantTurn(null)],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(true);
