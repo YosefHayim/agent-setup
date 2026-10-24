@@ -64,6 +64,26 @@ const registerRunningSession = (request: { readonly homeRoot: string; readonly s
   );
 };
 
+// A subagent whose last turn asked for a tool was cut off mid-run; Claude Code marks only some ended ones finished.
+const writeSubagent = (request: {
+  readonly homeRoot: string;
+  readonly sessionId: string;
+  readonly lastStopReason: string;
+}) => {
+  const subagentFolder = path.join(
+    request.homeRoot,
+    ".claude",
+    "projects",
+    "-Users-me-repo",
+    request.sessionId,
+    "subagents",
+  );
+  mkdirSync(subagentFolder, { recursive: true });
+  writeFileSync(path.join(subagentFolder, "agent-a1.meta.json"), JSON.stringify({ agentType: "general-purpose" }));
+  const lastTurn = { type: "assistant", message: { role: "assistant", stop_reason: request.lastStopReason } };
+  writeFileSync(path.join(subagentFolder, "agent-a1.jsonl"), `${JSON.stringify(lastTurn)}\n`);
+};
+
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
 const linkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
@@ -134,6 +154,39 @@ describe("scratchWatcher process boundary", () => {
     expect(execution.status).toBe(0);
     expect(existsSync(endedFolder)).toBe(false);
     expect(existsSync(path.join(otherFolder, "scratchpad", "notes.txt"))).toBe(true);
+  });
+
+  it("keeps the ended session's folder while one of its subagents is cut off mid-run", () => {
+    const homeRoot = createHomeRoot();
+    const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
+    writeSubagent({ homeRoot, sessionId: endedSessionId, lastStopReason: "tool_use" });
+
+    const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
+
+    expect(execution.status).toBe(0);
+    expect(existsSync(path.join(endedFolder, "scratchpad", "notes.txt"))).toBe(true);
+  });
+
+  it("removes the ended session's folder once its subagents stopped, though none is marked finished", () => {
+    const homeRoot = createHomeRoot();
+    const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
+    writeSubagent({ homeRoot, sessionId: endedSessionId, lastStopReason: "end_turn" });
+
+    const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
+
+    expect(execution.status).toBe(0);
+    expect(existsSync(endedFolder)).toBe(false);
+  });
+
+  it("keeps the ended session's folder while its subagent folders cannot be listed", () => {
+    const homeRoot = createHomeRoot();
+    const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
+    linkToItself(path.join(homeRoot, ".claude", "projects"));
+
+    const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
+
+    expect(execution.status).toBe(0);
+    expect(existsSync(path.join(endedFolder, "scratchpad", "notes.txt"))).toBe(true);
   });
 
   it("removes the folder a killed session left once nothing in it changed for a day", () => {
