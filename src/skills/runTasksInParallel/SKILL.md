@@ -108,7 +108,7 @@ For each task:
    - **opus**: design, unclear bugs, cross-cutting refactors, or a lane that failed on sonnet.
    - Split a lane that would need more than about 100 tool calls. Every call re-reads the whole lane context.
    - Re-run a lane one model up when its checks stay red or it reports a gap it did not fix. An opus lane that still fails gets split or a sharper brief.
-5. Run at most 8 lanes at once and start the next task as one finishes. More lanes do not finish sooner: with 11 to 20 agents running, file reads and shell steps get several times slower on one machine.
+5. Run at most `max-lanes` lanes at once (8 unless the user sets another number) and start the next task as one finishes. More lanes do not finish sooner: with 11 to 20 agents running, file reads and shell steps get several times slower on one machine.
 
 #### 3. Per-agent SDLC mandate (every lane)
 
