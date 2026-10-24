@@ -108,6 +108,7 @@ For each task:
    - **opus**: design, unclear bugs, cross-cutting refactors, or a lane that failed on sonnet.
    - Split a lane that would need more than about 100 tool calls. Every call re-reads the whole lane context.
    - Re-run a lane one model up when its checks stay red or it reports a gap it did not fix. An opus lane that still fails gets split or a sharper brief.
+5. Run at most 8 lanes at once and start the next task as one finishes. More lanes do not finish sooner: with 11 to 20 agents running, file reads and shell steps get several times slower on one machine.
 
 #### 3. Per-agent SDLC mandate (every lane)
 
@@ -123,6 +124,7 @@ Each agent must complete **only its task**:
 8. **act / CI** when workflows exist — red blocks merge.
 9. **Merge** only if orchestrator authorized and confidence ≥ 6; else stop at open PR.
 10. **Do not** delete remotes; do not touch other lanes.
+11. **Lane habits** from the brief: waits that end on failure too, deletes by literal path, heavy tools stopped when done.
 
 #### 4. Orchestrator after lanes
 
@@ -131,7 +133,7 @@ Each agent must complete **only its task**:
 3. Optional reinstall/smoke on default tip when user asked full ship (see REFERENCE).
 4. Done receipt (Verification section). Unfinished lanes stay open.
 
-Flags: `no-merge` (default without merge language), `merge` / `to-main`, `no-cmux`, `headed`, `agent=grok|claude|codex`, `max-lanes=N` (default all, soft cap 8).
+Flags: `no-merge` (default without merge language), `merge` / `to-main`, `no-cmux`, `headed`, `agent=grok|claude|codex`, `max-lanes=N` (default 8 running at once).
 
 ### Mode: setup-lanes
 
