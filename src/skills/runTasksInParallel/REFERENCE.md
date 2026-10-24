@@ -93,6 +93,13 @@ Merge authorized: false | true
 8. Do NOT merge unless Merge authorized: true and conf ≥ 6.
 9. Do NOT delete remotes. Do NOT touch other lanes.
 
+## Lane habits (required)
+- Long command: start the command itself in the background and wait for its exit notice. Never watch it with a separate loop that waits only for success: a failed or killed job never prints the success line.
+- A wait loop you must write has a deadline, stops on failure too, and ends with a check that fails unless the run passed: `for attempt in $(seq 120); do grep -q -e PASS -e FAIL <log> && break; sleep 5; done; grep -q PASS <log>`.
+- On a failure, stop and fix or report it at once. Do not wait for the rest of the run.
+- Delete with literal absolute paths you have looked at (`rm -r /abs/path/build`). An `rm` of `$VAR` or a glob shows no clear target and waits for a human to approve it.
+- Stop what you started once you no longer need it: simulators, emulators, VMs, Gradle daemons (`./gradlew --stop`), dev servers. They slow every other lane on the machine.
+
 ## Style
 Follow AGENTS.md, CODE-STYLE.md at repo root of this worktree.
 
