@@ -56,6 +56,8 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    perl -pi -e "s/^name: /name: $CI_NAME-/" .github/workflows/*.yml
    ```
 
+   A test that checks a workflow is byte-identical to a copy elsewhere in the repository fails after this rename. Rename that copy the same way in the clone.
+
 4. **One act process per job.** Jobs in one act process race on the action cache. Run each job as its own leg with `-j <job>`. act also runs the jobs it `needs` in that leg, so give each leg its own workflow copy, or the shared jobs collide:
 
    ```bash
