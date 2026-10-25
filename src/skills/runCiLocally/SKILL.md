@@ -14,7 +14,7 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 - Never print or store the GitHub token; pass it only as an act secret.
 
 - Docker is running with enough memory for the heaviest job. A leg killed with exit 137 means Docker needs more memory.
-- `act` is installed, and its config file `~/.actrc` holds the machine defaults, so no leg passes them. act also reads `~/Library/Application Support/act/actrc` on macOS before it, and the repository's own `.actrc` after it, which wins.
+- `act` is installed, and its config file `~/.actrc` holds the machine defaults, so no leg passes them. act also reads `~/Library/Application Support/act/actrc` on macOS before it, and the repository's own `.actrc` after it, which wins. So a repository `.actrc` holds only settings for that repository, never the runner image, the architecture or the pnpm store.
 
   ```text
   -P ubuntu-latest=act-runner-node:<date>

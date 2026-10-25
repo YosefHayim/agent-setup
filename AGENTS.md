@@ -110,4 +110,4 @@ pnpm --dir src/skills/imageToCode/scripts typecheck
 ## Local CI
 
 Run `act workflow_dispatch -W .github/workflows/ci.yml` before opening a PR.
-The root `.actrc` selects the local Docker runner and keeps the pnpm store outside the workspace.
+The machine's `~/.actrc` selects the Docker runner and the shared pnpm store, as the run-ci-locally skill describes. The repository has no `.actrc`, because act reads it last and it would override those machine settings.
