@@ -14,8 +14,21 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 - Never print or store the GitHub token; pass it only as an act secret.
 
 - Docker is running with enough memory for the heaviest job. A leg killed with exit 137 means Docker needs more memory.
-- `act` is installed. Read its config file (`~/.actrc`, or `~/Library/Application Support/act/actrc` on macOS) for the runner image, for example `-P ubuntu-latest=catthehacker/ubuntu:act-latest`.
-- Pass the host's own architecture as `--container-architecture linux/<arch>`: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. A config that pins `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
+- `act` is installed, and its config file `~/.actrc` holds the machine defaults, so no leg passes them. act also reads `~/Library/Application Support/act/actrc` on macOS before it, and the repository's own `.actrc` after it, which wins. So a repository `.actrc` holds only settings for that repository, never the runner image, the architecture or the pnpm store.
+
+  ```text
+  -P ubuntu-latest=act-runner-node:<date>
+  --pull=false
+  --container-architecture=linux/<arch>
+  --no-cache-server
+  --container-options -v act-pnpm-store:/pnpm-store -v act-npm-cache:/root/.npm
+  --env=npm_config_store_dir=/pnpm-store
+  --env=pnpm_config_store_dir=/pnpm-store
+  ```
+
+  - The architecture is the host's own: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
+  - The Docker volume `act-pnpm-store` is one pnpm store for every run, so an install only links packages. Without it pnpm keeps its store inside the clone, whose path changes every run, so `actions/cache` never finds an earlier save: every leg downloads everything and saves another 600 MB entry to `~/.cache/actcache`. `--no-cache-server` turns those cache steps into quick misses. pnpm 10 reads `npm_config_*` and pnpm 11 only `pnpm_config_*`, so both are set. A bind mount of the host's own pnpm store is slower than the volume on macOS.
+  - The Docker volume `act-npm-cache` is npm's download cache, so `npm ci` and the pnpm that `pnpm/action-setup` installs with npm download once, not in every leg. On a slow network, six legs each downloading pnpm time out.
 - `gh auth status` works. The token goes in as a secret, never into a file.
 - Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`, with every `/` in the branch turned into `-`, because the name goes into `sed` and `perl` patterns and into container names. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
 
@@ -42,6 +55,8 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
    ```bash
    perl -pi -e "s/^name: /name: $CI_NAME-/" .github/workflows/*.yml
    ```
+
+   A test that checks a workflow is byte-identical to a copy elsewhere in the repository fails after this rename. Rename that copy the same way in the clone.
 
 4. **One act process per job.** Jobs in one act process race on the action cache. Run each job as its own leg with `-j <job>`. act also runs the jobs it `needs` in that leg, so give each leg its own workflow copy, or the shared jobs collide:
 
@@ -75,7 +90,7 @@ RUN NODE_BIN=$(ls -d /opt/acttoolcache/node/*/*/bin | tail -n 1) \
  && for tool in node npm npx corepack; do ln -sf "$NODE_BIN/$tool" "/usr/local/bin/$tool"; done
 ```
 
-Build it once as `act-runner-node:<date>` and run with `-P ubuntu-latest=act-runner-node:<date> --pull=false`.
+Build it once as `act-runner-node:<date>` and name it in the config's `-P` line.
 
 ### Job containers
 
@@ -92,7 +107,6 @@ Start every leg in the background, then wait for all of them:
 ```bash
 GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> \
   -e "<scratchpad>/$CI_NAME-event.json" --rm \
-  -P ubuntu-latest=act-runner-node:<date> --pull=false --container-architecture linux/<arch> \
   --action-cache-path "<scratchpad>/$CI_NAME-cache-<job>" --action-offline-mode \
   -s GITHUB_TOKEN \
   > "<scratchpad>/$CI_NAME-<job>.log" 2>&1
@@ -101,6 +115,7 @@ GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-
 - `-s GITHUB_TOKEN` without a value reads the variable, so the token stays out of act's arguments in the process list.
 
 - Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
+- On cold caches (a new pnpm version or lockfile), run one leg alone first and start the rest after it, so they reuse its downloads.
 - Run about 6 legs at once at most, and keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine. Rerun one failed leg alone with `--matrix <key>:<value>`.
 - Scripts inside the container write temp files to `$RUNNER_TEMP`, not the system temp folder.
 - act has no artifact server, so `actions/upload-artifact` fails with `Unable to get the ACTIONS_RUNTIME_TOKEN`. When it runs only on failure, the first failing step above it is the cause.
@@ -116,7 +131,7 @@ for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume 
 ```
 
 - **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
-- **Shared volumes.** Keep `act-toolcache` and any volume without `CI_NAME` in its name.
+- **Shared volumes.** Keep `act-toolcache`, `act-pnpm-store`, `act-npm-cache` and any volume without `CI_NAME` in its name.
 - **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.
 
 Check that `docker ps -a --filter "name=$CI_NAME"` and `docker volume ls --filter "name=$CI_NAME"` print nothing.
