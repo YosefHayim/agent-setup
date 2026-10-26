@@ -1,18 +1,8 @@
 import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import type { BranchFacts } from "./branchPushDecision.js";
 import { isDefaultBranch, remoteDefaultBranch, remoteFor } from "./branchRemote.js";
-import { COMMITTED_FILE_FORMAT, hasRiskyName, LARGE_FILE_BYTES } from "./riskyFiles.js";
-
-// Lists every object the unpushed commits bring, and "~<id>" for each blob it leaves out for its size. The branch is
-// not checked out, so its files cannot be measured on disk.
-const LARGE_BLOB_QUERY = [
-  "rev-list",
-  "--objects",
-  "--no-object-names",
-  `--filter=blob:limit=${LARGE_FILE_BYTES}`,
-  "--filter-print-omitted",
-];
-const OMITTED_OBJECT_MARK = "~";
+import { hasLargeBlob, readLargeBlobLines } from "./largeBlobs.js";
+import { COMMITTED_FILE_FORMAT, hasRiskyName } from "./riskyFiles.js";
 
 // The commits are read from the tip the branch had when listed, which is also the commit pushed.
 export const readBranchFacts = (request: {
@@ -24,14 +14,14 @@ export const readBranchFacts = (request: {
   const { folder, branch } = request;
   const unpushedRange = [request.tip, "--not", "--remotes"];
   const committedFiles = gitAnswerLines({ folder, query: ["log", ...unpushedRange, ...COMMITTED_FILE_FORMAT] });
-  const unpushedObjects = gitAnswerLines({ folder, query: [...LARGE_BLOB_QUERY, ...unpushedRange] });
-  const hasLargeFile = (unpushedObjects || []).some((line) => line.startsWith(OMITTED_OBJECT_MARK));
+  const largeBlobLines = readLargeBlobLines({ folder, range: unpushedRange });
+  const hasLargeFile = hasLargeBlob(largeBlobLines || []);
   const hasRiskyNamedFile = (committedFiles || []).some(hasRiskyName);
   const remote = remoteFor({ folder, branch });
   const remoteDefault = remoteDefaultBranch({ folder, remote });
   return {
     inUse: request.inUse,
-    readable: committedFiles !== undefined && unpushedObjects !== undefined,
+    readable: committedFiles !== undefined && largeBlobLines !== undefined,
     isDefaultBranch: isDefaultBranch({ branch, remoteDefault }),
     knowsDefaultBranch: remoteDefault !== "",
     hasRiskyFiles: hasLargeFile || hasRiskyNamedFile,

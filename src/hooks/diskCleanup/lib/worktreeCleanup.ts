@@ -41,7 +41,7 @@ const applyRemoval = (request: {
 
   const removal = removeWorktree({ worktree, remote: request.remote, saveChanges: plan.saveChanges, push: plan.push });
   if (removal._tag === "failed") {
-    return reportLine({ action: "kept", detail: `${removal.step} failed`, target: worktree.folder });
+    return reportLine({ action: "kept", detail: removal.detail, target: worktree.folder });
   }
 
   const donePush = pushDetail({ pushVerb: "pushed", push: removal.pushed, branch: worktree.branch });
@@ -63,7 +63,8 @@ const cleanUpWorktree = (request: {
   }
 };
 
-// A worktree whose folder is already gone leaves only git's record of it, which prune drops.
+// A worktree whose folder is already gone leaves only git's record of it, which prune drops, wherever the folder was.
+// Prune keeps the record of a locked worktree.
 const pruneGoneWorktrees = (request: {
   readonly worktrees: ReadonlyArray<LinkedWorktree>;
   readonly dryRun: boolean;
@@ -129,6 +130,6 @@ export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray
     dryRun: request.dryRun,
   });
   const unreadableLines = reportUnreadableRepos(unreadableRepoRoots);
-  const pruneLines = pruneGoneWorktrees({ worktrees, dryRun: request.dryRun });
+  const pruneLines = pruneGoneWorktrees({ worktrees: worktreeListing.worktrees, dryRun: request.dryRun });
   return [...worktreeLines, ...unreadableLines, ...pruneLines];
 };

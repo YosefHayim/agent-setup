@@ -1,6 +1,6 @@
 // Facts about a local branch with commits no remote holds.
 export type BranchFacts = {
-  // It is checked out in the repo's own folder, and a live session or a running process uses that folder.
+  // It is checked out in a folder that still exists, and a live session or a running process uses that folder.
   readonly inUse: boolean;
   // Every git question about the branch was answered.
   readonly readable: boolean;
