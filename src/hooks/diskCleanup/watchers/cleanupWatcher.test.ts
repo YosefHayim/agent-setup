@@ -14,6 +14,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const watcherPath = fileURLToPath(new URL("./cleanupWatcher.ts", import.meta.url));
 const packageRoot = path.resolve(path.dirname(watcherPath), "../../../..");
+// Spotlight and editors index and open files in the repo folder, and the watcher counts any open file as a folder in use.
+const scratchParent = realpathSync(tmpdir());
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const liveSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const otherSessionId = "0b6f1d2e-3c4a-4e5f-8a9b-1c2d3e4f5a6b";
@@ -80,7 +83,7 @@ const writePruneToolStubs = (homeRoot: string) => {
 
 // A fake home with ~/Desktop/Code/app, cloned from a bare remote outside the code folders.
 const createCodeHome = (): CodeHome => {
-  const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-"));
+  const homeRoot = mkdtempSync(path.join(scratchParent, "disk-cleanup-"));
   workspaces.push(homeRoot);
   // The watcher's own commits take their author from the home's git config.
   writeFileSync(path.join(homeRoot, ".gitconfig"), "[user]\n\tname = Cleanup Test\n\temail = cleanup@example.test\n");
