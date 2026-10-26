@@ -599,7 +599,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     title: "Run CI locally",
     summary:
       "Run the repo's GitHub Actions workflows in Docker with act when Actions cannot run, then remove everything the run made.",
-    shippedPaths: ["SKILL.md"],
+    shippedPaths: ["SKILL.md", "scripts"],
   }),
   skillFeature({
     id: "reuse-before-build",

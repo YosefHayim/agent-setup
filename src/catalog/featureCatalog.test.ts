@@ -230,7 +230,7 @@ describe("featureCatalog", () => {
       ["organize-commits", ["SKILL.md", "REFERENCE.md"]],
       ["finish-and-push", ["SKILL.md"]],
       ["run-local-and-check", ["SKILL.md"]],
-      ["run-ci-locally", ["SKILL.md"]],
+      ["run-ci-locally", ["SKILL.md", "scripts"]],
       ["reuse-before-build", ["SKILL.md"]],
       ["find-repeated-prompts", ["SKILL.md", "scripts"]],
       ["install-skills", ["SKILL.md", "agents"]],

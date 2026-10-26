@@ -113,7 +113,8 @@ docker pull --platform linux/<arch> mcr.microsoft.com/playwright:<version>
 Start every leg in the background, then wait for all of them:
 
 ```bash
-GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> \
+GITHUB_TOKEN="$(gh auth token)" node "<skill directory>/scripts/holdActSlot.mjs" -- \
+  act pull_request -W ".github/workflows/$CI_NAME-<job>.yml" -j <job> \
   -e "<scratchpad>/$CI_NAME-event.json" --rm \
   --action-cache-path "<scratchpad>/$CI_NAME-cache-<job>" --action-offline-mode \
   -s GITHUB_TOKEN \
@@ -124,7 +125,9 @@ GITHUB_TOKEN="$(gh auth token)" act pull_request -W ".github/workflows/$CI_NAME-
 
 - Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
 - On cold caches (a new pnpm version or lockfile), run one leg alone first and start the rest after it, so they reuse its downloads.
-- Run about 6 legs at once at most, and keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine. Rerun one failed leg alone with `--matrix <key>:<value>`.
+- The slots are shared by every session and account on the machine, so start all legs in the background and let the script queue them. It waits for a free slot (6 by default, `--slots <n>`), runs act, frees the slot when act exits, and exits with act's exit code. Do not cap the legs yourself.
+- A job with a matrix (for example Playwright shards) runs one leg per entry with `--matrix <key>:<value>`, each leg with its own workflow copy, action cache and slot. Rerun one failed leg the same way.
+- Keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine.
 - Scripts inside the container write temp files to `$RUNNER_TEMP`, not the system temp folder.
 - act has no artifact server, so `actions/upload-artifact` fails with `Unable to get the ACTIONS_RUNTIME_TOKEN`. When it runs only on failure, the first failing step above it is the cause.
 - A step that cannot work under act (an action with broken outputs, a deploy) gets a stand-in step in the workflow copy that runs the same tool directly. List every stand-in in the report.
@@ -138,6 +141,7 @@ for container in $(docker ps -aq --filter "name=$CI_NAME"); do docker rm -f "$co
 for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume rm "$volume"; done
 ```
 
+- **Slots.** Each slot is a local port from 28731 up that the script listens on while act runs, so the system frees it when the script exits or is killed. There is nothing to remove.
 - **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
 - **Shared volumes.** Keep `act-toolcache`, `act-pnpm-store`, `act-npm-cache`, `act-playwright` and any volume without `CI_NAME` in its name.
 - **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.
