@@ -665,6 +665,49 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(git({ folder: home.repo, command: ["worktree", "list", "--porcelain"] })).not.toContain(gone);
   });
 
+  it("drops git's record of a worktree whose folder is gone, though it was outside the code folders", () => {
+    const home = createCodeHome();
+    const outside = path.join(home.homeRoot, "scratch", "outside");
+    git({ folder: home.repo, command: ["worktree", "add", "--quiet", "-b", "outside", outside] });
+    rmSync(outside, { recursive: true, force: true });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: outside })).toMatch(/^pruned +folder gone +\//);
+    expect(git({ folder: home.repo, command: ["worktree", "list", "--porcelain"] })).not.toContain(outside);
+  });
+
+  it("keeps the record of a locked worktree whose folder is gone", () => {
+    const home = createCodeHome();
+    const gone = addBranchWorktree({ home, branch: "gone" });
+    git({ folder: home.repo, command: ["worktree", "lock", gone] });
+    rmSync(gone, { recursive: true, force: true });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(run.stdout).not.toMatch(/^pruned/m);
+    expect(git({ folder: home.repo, command: ["worktree", "list", "--porcelain"] })).toContain(gone);
+  });
+
+  it("does not take a file the unpushed commits added and deleted for a risky one, but still keeps a large committed file", () => {
+    const home = createCodeHome();
+    const addedAndDeleted = addBranchWorktree({ home, branch: "added-and-deleted" });
+    commitFile({ workTree: addedAndDeleted, fileName: "scratch.ts" });
+    git({ folder: addedAndDeleted, command: ["rm", "--quiet", "scratch.ts"] });
+    git({ folder: addedAndDeleted, command: ["commit", "--quiet", "--message", "remove scratch.ts"] });
+    const large = addBranchWorktree({ home, branch: "large" });
+    writeFileSync(path.join(large, "model.bin"), Buffer.alloc(50 * 1024 * 1024 + 1));
+    git({ folder: large, command: ["add", "model.bin"] });
+    git({ folder: large, command: ["commit", "--quiet", "--message", "add model.bin"] });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: addedAndDeleted })).toMatch(
+      /^removed +pushed added-and-deleted +\//,
+    );
+    expect(reportLineFor({ report: run.stdout, target: large })).toMatch(/^kept +risky-files +\//);
+  });
+
   it("only reports in a dry run", () => {
     const home = createCodeHome();
     const feature = addBranchWorktree({ home, branch: "feature" });

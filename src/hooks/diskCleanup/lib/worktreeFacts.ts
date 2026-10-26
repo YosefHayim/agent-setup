@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import { isDefaultBranch, remoteDefaultBranch, remoteFor } from "./branchRemote.js";
+import { hasLargeBlob, readLargeBlobLines } from "./largeBlobs.js";
 import type { LinkedWorktree } from "./linkedWorktrees.js";
 import {
   COMMITTED_FILE_FORMAT,
@@ -41,7 +42,7 @@ const fileBytes = (file: string): number => {
   }
 };
 
-const isRiskyToPush = (request: { readonly folder: string; readonly relativePath: string }): boolean => {
+const isRiskyChangeToPush = (request: { readonly folder: string; readonly relativePath: string }): boolean => {
   const isLarge = fileBytes(path.join(request.folder, request.relativePath)) > LARGE_FILE_BYTES;
   return isLarge || hasRiskyName(request.relativePath);
 };
@@ -92,16 +93,17 @@ export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; 
     folder: worktree.folder,
     query: ["log", ...unpushedRange, ...COMMITTED_FILE_FORMAT],
   });
-  const pathsToPush = [...changedPaths(changeLines || []), ...(committedFiles || [])];
-  const hasRiskyFileToPush = pathsToPush.some((relativePath) =>
-    isRiskyToPush({ folder: worktree.folder, relativePath }),
+  const largeBlobLines = readLargeBlobLines({ folder: worktree.folder, range: unpushedRange });
+  const hasRiskyChange = changedPaths(changeLines || []).some((relativePath) =>
+    isRiskyChangeToPush({ folder: worktree.folder, relativePath }),
   );
+  const hasRiskyCommit = (committedFiles || []).some(hasRiskyName) || hasLargeBlob(largeBlobLines || []);
   const hasUniqueIgnoredSecret = (ignoredSecrets || []).some((relativePath) =>
     isUniqueIgnoredSecret({ worktree, relativePath }),
   );
   const remote = remoteFor(worktree);
   const remoteDefault = remoteDefaultBranch({ folder: worktree.folder, remote });
-  const gitAnswers = [changeLines, ignoredSecrets, unpushedCommits, committedFiles];
+  const gitAnswers = [changeLines, ignoredSecrets, unpushedCommits, committedFiles, largeBlobLines];
   const facts: WorktreeFacts = {
     inUse: request.inUse,
     createdRecently: isCreatedRecently(worktree.folder),
@@ -112,7 +114,7 @@ export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; 
     knowsDefaultBranch: remoteDefault !== "",
     hasChanges: (changeLines || []).length > 0,
     hasUnpushedCommits: (unpushedCommits || []).length > 0,
-    hasRiskyFiles: hasRiskyFileToPush || hasUniqueIgnoredSecret,
+    hasRiskyFiles: hasRiskyChange || hasRiskyCommit || hasUniqueIgnoredSecret,
     remote,
   };
   return facts;
