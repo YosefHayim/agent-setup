@@ -68,7 +68,7 @@ Hard rules agents must hold every turn. Full prescription: [`CODE-STYLE.md`](COD
 - **Ownership** — inspect → plan → validate → apply → write receipt last. A receipt is the only deletion authority. Catalog-closed shipping: the feature catalog owns exact shipped paths.
 - **Shape** — capability-owned paths; camelCase authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
 - **Local tooling** — local `src/scripts/dev/` for personal/one-off scripts. All maintained build/verify tools live under `src/scripts/`, and product code never imports them.
-- **Git hooks** — pre-commit runs `pnpm verify`; hooks report drift and never rewrite or stage files.
+- **Git hooks** — pre-commit runs `pnpm verify`; pre-push runs lint, typecheck, style and the README check (CI runs only test and build, on Linux); a new worktree needs `pnpm install` before its first push. Hooks report drift and never rewrite or stage files.
 - **Branching** — never commit product work on `main`/default; use a topic branch (`feat/…`, `fix/…`, `refactor/…`, `chore/…`). Refinements to an existing feature still get their own branch.
 - **Remote branches** — do not delete remote branches unless the user explicitly asks; leave them for handoff/CI after push or PR.
 - **Parallel features** — one task per worktree under `.worktrees/`; issue + branch + PR to default with `Fixes #n` / `Closes #n`. Use `run-tasks-in-parallel` (setup-lanes / land-lanes).

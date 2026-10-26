@@ -1,92 +1,89 @@
 name: CI
 'on':
-  push:
-    branches:
-    - main
   pull_request:
     branches:
-    - main
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch: null
 permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   changes:
     name: Changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     outputs:
       since: ${{ steps.filter.outputs.everything != 'true' && github.event.pull_request.base.sha || '' }}
+      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
           token: ''
           filters: |
-            everything:
-              - pnpm-lock.yaml
-              - pnpm-workspace.yaml
+            everything: &everything
               - package.json
-              - biome.json
+              - pnpm-lock.yaml
               - 'tsconfig*.json'
-              - '*.config.ts'
-              - vitest.setup.ts
+              - '*.config.*'
+              - 'src/skills/**'
+              - 'src/templates/**'
               - '.github/**'
-              - '.husky/**'
-              - 'src/hooks/**'
-              - 'src/cli/**'
+            code:
+              - *everything
+              - '**/*.{ts,tsx,js,mjs,json,md,yml}'
+  check:
+    name: Test and build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install lsof
+        run: command -v lsof || (sudo apt-get update && sudo apt-get install -y lsof)
+      - name: Setup workspace
+        uses: ./.github/actions/setup
+      - name: Test everything
+        if: needs.changes.outputs.since == ''
+        run: pnpm test
+      - name: Test what the changes touch
+        if: needs.changes.outputs.since != ''
+        run: pnpm test --changed "$SINCE"
+        env:
+          SINCE: ${{ needs.changes.outputs.since }}
+      - name: Build
+        run: pnpm build
+  gate:
+    name: CI Gate
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    needs:
+      - changes
+      - check
+    if: always()
+    steps:
+      - name: Require every check to pass
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
   report-failure:
     name: Open issue on main failure
     needs:
-    - biome
-    - typecheck
-    - style
-    - test
-    - build
-    - readme
+      - gate
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
       actions: read
     uses: ./.github/workflows/report-failure.yml
-  biome:
-    needs: changes
-    uses: ./.github/workflows/biome.yml
-    with:
-      since: ${{ needs.changes.outputs.since }}
-  typecheck:
-    uses: ./.github/workflows/typecheck.yml
-  style:
-    uses: ./.github/workflows/style.yml
-  test:
-    needs: changes
-    uses: ./.github/workflows/test.yml
-    with:
-      since: ${{ needs.changes.outputs.since }}
-  build:
-    uses: ./.github/workflows/build.yml
-  readme:
-    uses: ./.github/workflows/readme.yml
-  gate:
-    name: CI Gate
-    runs-on: ubuntu-slim
-    timeout-minutes: 5
-    needs:
-    - changes
-    - biome
-    - typecheck
-    - style
-    - test
-    - build
-    - readme
-    if: always()
-    steps:
-    - name: Require every check to pass
-      run: test "${{ needs.changes.result }}" = "success" && test "${{ needs.biome.result }}" = "success" && test "${{ needs.typecheck.result }}" = "success" && test "${{ needs.style.result
-        }}" = "success" && test "${{ needs.test.result }}" = "success" && test "${{ needs.build.result }}" = "success" &&
-        test "${{ needs.readme.result }}" = "success"
