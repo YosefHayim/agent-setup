@@ -17,7 +17,7 @@ The craft rules here hold on every run. The values (colors, fonts, radii, motion
 
 **Sizes:** phone boards are 390x844. The landing page is one fluid file, shown at 1440 and at 390.
 
-**Checking a board yourself:** render a local copy with `scripts/captureTemplate.mjs --url file:///<path to board>` at each size, and look at the motion frames and every screen.
+**Checking a board yourself:** render a local copy with `scripts/captureTemplate.mjs --url file:///<path to board>` at each size, and look at the motion frames and every screen. Give each board `<meta name="viewport" content="width=device-width, initial-scale=1">` in its head, or the 390 render lays out at 980 and the phone styles never apply. For the still state, also render a copy with `prefers-reduced-motion: no-preference` changed to `reduce`: it shows what users who turn motion off see, and the accordion and panel at rest.
 
 ## Past mockups
 
