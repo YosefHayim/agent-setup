@@ -27,4 +27,4 @@ jobs:
         if: inputs.since != ''
         env:
           SINCE: ${{ inputs.since }}
-        run: pnpm exec vitest run --changed "$SINCE"
+        run: pnpm exec vitest run --changed "$SINCE" --passWithNoTests
