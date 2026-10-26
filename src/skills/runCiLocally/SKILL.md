@@ -135,6 +135,7 @@ GITHUB_TOKEN="$(gh auth token)" node "<skill directory>/scripts/holdActSlot.mjs"
 - On cold caches (a new pnpm version or lockfile), run one leg alone first and start the rest after it, so they reuse its downloads.
 - The slots are shared by every session and account on the machine, so start all legs in the background and let the script queue them. It waits for a free slot (6 by default, `--slots <n>`), runs act, frees the slot when act exits, and exits with act's exit code. Do not cap the legs yourself.
 - A job with a matrix (for example Playwright shards) runs one leg per entry with `--matrix <key>:<value>`, each leg with its own workflow copy, action cache and slot. Rerun one failed leg the same way.
+- A leg whose log prints `Job succeeded` and then exits 1 on `Error while stop job container: context deadline exceeded` passed. act allows one minute to remove the job container and its volumes, and a busy Docker takes longer. Do not rerun it: the cleanup below removes what it left.
 - Keep test workers moderate (for example 4 Playwright workers under `ACT`). More causes CPU contention and test timeouts on a shared machine.
 - Scripts inside the container write temp files to `$RUNNER_TEMP`, not the system temp folder.
 - act has no artifact server, so `actions/upload-artifact` fails with `Unable to get the ACTIONS_RUNTIME_TOKEN`. When it runs only on failure, the first failing step above it is the cause.
