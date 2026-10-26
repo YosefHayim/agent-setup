@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { codeRootFolders, repoRootsUnder } from "../../lib/codeRepos.js";
@@ -6,7 +6,6 @@ import { gitAnswerLines } from "../../lib/gitAnswers.js";
 import { readBranchFacts } from "./branchFacts.js";
 import { pushBranch } from "./branchPush.js";
 import { decideBranchPush } from "./branchPushDecision.js";
-import { realFolder } from "./folderPaths.js";
 import { reportLine } from "./reportLine.js";
 import { foldersOwnedBy } from "./sessionTranscripts.js";
 import { worktreesInUse } from "./worktreesInUse.js";
@@ -18,7 +17,8 @@ type BranchCleanupRequest = {
   readonly dryRun: boolean;
 };
 
-// The checkout folder is "" for a branch no work tree has checked out.
+// The checkout folder is "" for a branch no work tree has checked out. git also names the folder of a work tree whose
+// folder is gone.
 type LocalBranch = {
   readonly repoFolder: string;
   readonly branch: string;
@@ -37,7 +37,7 @@ const LOCAL_BRANCH_QUERY = [
 ];
 
 // A linked worktree placed straight in a code folder looks like a repo too, but its .git is a file. The branches it
-// shares are looked at from the main checkout, and its own goes with the worktree.
+// shares, its own included, are looked at from the main checkout.
 const isMainCheckout = (repoFolder: string): boolean => {
   try {
     return statSync(path.join(repoFolder, ".git")).isDirectory();
@@ -58,13 +58,9 @@ const readBranchList = (repoFolder: string): RepoBranchList => {
 const reportUnreadableRepo = (branchList: RepoBranchList): string =>
   reportLine({ action: "kept", detail: "branch list failed", target: branchList.repoFolder });
 
-const isCheckedOut = (branch: LocalBranch): boolean => branch.checkoutFolder !== "";
-
-const isCheckedOutInRepoFolder = (branch: LocalBranch): boolean =>
-  isCheckedOut(branch) && realFolder(branch.checkoutFolder) === realFolder(branch.repoFolder);
-
-// A branch checked out in a linked worktree goes with that worktree, so the worktree pass decides about it.
-const isFreeOfWorktrees = (branch: LocalBranch): boolean => !isCheckedOut(branch) || isCheckedOutInRepoFolder(branch);
+// A work tree whose folder is gone no longer holds the branch, whatever git still lists.
+const isCheckedOut = (branch: LocalBranch): boolean =>
+  branch.checkoutFolder !== "" && existsSync(branch.checkoutFolder);
 
 // A branch whose commits cannot be listed counts as unpushed, so it is reported as kept rather than skipped unseen.
 const hasUnpushedCommits = (branch: LocalBranch): boolean => {
@@ -98,22 +94,20 @@ const pushUnpushedBranch = (request: {
   return reportLine({ action: "pushed", detail: `to ${facts.remote}`, target });
 };
 
-// Commits on a local branch that no remote holds are lost with the disk. Only repos the ended session named are
-// looked at, and a manual pass looks at every repo under the code roots.
+// Commits on a local branch that no remote holds are lost with the disk, whether the branch is checked out in a work
+// tree or not, and whether the worktree pass kept that work tree, left it alone, or never saw it. Only repos the ended
+// session named are looked at, and a manual pass looks at every repo under the code roots.
 export const pushUnpushedBranches = (request: BranchCleanupRequest): ReadonlyArray<string> => {
   const roots = codeRootFolders(request);
   const repoFolders = repoRootsUnder(roots).filter(isMainCheckout);
   const ownedRepoFolders = foldersOwnedBy({ ...request, folders: repoFolders, roots });
   const branchLists = ownedRepoFolders.map(readBranchList);
   const unreadableLines = branchLists.filter((branchList) => !branchList.branches).map(reportUnreadableRepo);
-  const unpushedBranches = branchLists
-    .flatMap((branchList) => branchList.branches || [])
-    .filter(isFreeOfWorktrees)
-    .filter(hasUnpushedCommits);
-  const worktreeFolders = unpushedBranches.filter(isCheckedOut).map((branch) => branch.repoFolder);
+  const unpushedBranches = branchLists.flatMap((branchList) => branchList.branches || []).filter(hasUnpushedCommits);
+  const worktreeFolders = unpushedBranches.filter(isCheckedOut).map((branch) => branch.checkoutFolder);
   const usedFolders = worktreesInUse({ ...request, worktreeFolders, roots });
   const branchLines = unpushedBranches.map((branch) => {
-    const inUse = isCheckedOut(branch) && usedFolders.has(branch.repoFolder);
+    const inUse = isCheckedOut(branch) && usedFolders.has(branch.checkoutFolder);
     return pushUnpushedBranch({ branch, inUse, dryRun: request.dryRun });
   });
   return [...unreadableLines, ...branchLines];

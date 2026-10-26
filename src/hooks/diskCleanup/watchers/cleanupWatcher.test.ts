@@ -333,7 +333,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: run.stdout, target: locked })).toMatch(/^kept +locked +\//);
     const keptFolders = [detached, onMain, withKey, withUpperKey, committedKey, locked];
     expect(keptFolders.every((folder) => existsSync(folder))).toBe(true);
-    expect(remoteBranches(home)).toBe("main");
+    expect(remoteBranches(home)).toBe("locked\nmain");
   });
 
   it("keeps a worktree with work to push while the remote's default branch is unknown", () => {
@@ -800,7 +800,7 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
     expect(remoteSubjects({ home, branch: "main" })).toBe("add README.md");
   });
 
-  it("leaves a branch checked out in a worktree to the worktree pass", () => {
+  it("pushes a branch checked out in a worktree the worktree pass leaves to its creator", () => {
     const home = createCodeHome();
     const othersWorktree = addWorktree({
       home,
@@ -814,8 +814,77 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
 
     const run = cleanUpAfterSession(home);
 
-    expect(reportLineFor({ report: run.stdout, target: `${home.repo} others` })).toBe("");
-    expect(remoteBranches(home)).toBe("main");
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} others` })).toMatch(/^pushed +to origin +\//);
+    expect(existsSync(othersWorktree)).toBe(true);
+    expect(remoteSubjects({ home, branch: "others" })).toBe("add others.ts\nadd README.md");
+  });
+
+  it("pushes a branch checked out in a worktree outside the code folders, and keeps it while a live session works there", () => {
+    const home = createCodeHome();
+    const scratchWorktree = path.join(home.homeRoot, "scratch", "login");
+    git({ folder: home.repo, command: ["worktree", "add", "--quiet", "-b", "login", scratchWorktree] });
+    commitFile({ workTree: scratchWorktree, fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    const toolUse = { type: "tool_use", input: { file_path: path.join(scratchWorktree, "login.ts") } };
+    const transcriptLine = { type: "assistant", cwd: scratchWorktree, message: { content: [toolUse] } };
+    appendTranscriptLine({ home, sessionId: liveSessionId, transcriptLine });
+    registerLiveSession({ home, sessionId: liveSessionId });
+
+    const busyRun = cleanUpAfterSession(home);
+    rmSync(path.join(home.homeRoot, ".claude", "sessions", `${liveSessionId}.json`));
+    const freeRun = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: busyRun.stdout, target: `${home.repo} login` })).toMatch(/^kept +in-use +\//);
+    expect(reportLineFor({ report: freeRun.stdout, target: `${home.repo} login` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "login" })).toBe("add login.ts\nadd README.md");
+    expect(existsSync(scratchWorktree)).toBe(true);
+  });
+
+  it("pushes the branch of a locked worktree the worktree pass keeps", () => {
+    const home = createCodeHome();
+    const locked = addBranchWorktree({ home, branch: "locked" });
+    for (const fileName of ["one.ts", "two.ts", "three.ts", "four.ts"]) {
+      commitFile({ workTree: locked, fileName });
+    }
+    git({ folder: home.repo, command: ["worktree", "lock", locked] });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: locked })).toMatch(/^kept +locked +\//);
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} locked` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "locked" }).split("\n")).toHaveLength(5);
+    expect(existsSync(locked)).toBe(true);
+  });
+
+  it("pushes the branch of a worktree kept only for an ignored secret file, and keeps the file", () => {
+    const home = createCodeHome();
+    writeFileSync(path.join(home.repo, ".gitignore"), "*.pem\n");
+    git({ folder: home.repo, command: ["add", ".gitignore"] });
+    git({ folder: home.repo, command: ["commit", "--quiet", "--message", "ignore keys"] });
+    git({ folder: home.repo, command: ["push", "--quiet", "origin", "main"] });
+    writeFileSync(path.join(home.repo, "local.pem"), "main key\n");
+    const withKey = addBranchWorktree({ home, branch: "with-key" });
+    writeFileSync(path.join(withKey, "local.pem"), "only here\n");
+    commitFile({ workTree: withKey, fileName: "feature.ts" });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: withKey })).toMatch(/^kept +risky-files +\//);
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} with-key` })).toMatch(/^pushed +to origin +\//);
+    expect(readFileSync(path.join(withKey, "local.pem"), "utf8")).toBe("only here\n");
+  });
+
+  it("pushes the branch of a locked worktree record whose folder is gone", () => {
+    const home = createCodeHome();
+    const gone = addBranchWorktree({ home, branch: "gone" });
+    commitFile({ workTree: gone, fileName: "gone.ts" });
+    git({ folder: home.repo, command: ["worktree", "lock", gone] });
+    rmSync(gone, { recursive: true, force: true });
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} gone` })).toMatch(/^pushed +to origin +\//);
+    expect(remoteSubjects({ home, branch: "gone" })).toBe("add gone.ts\nadd README.md");
   });
 
   it("looks at a repo's branches once, though a worktree of it sits straight in a code folder", () => {
@@ -830,7 +899,7 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
     expect(run.stdout.match(/ login$/gm)).toHaveLength(1);
     expect(reportLineFor({ report: run.stdout, target: sibling })).toMatch(/^kept +recently-created +\//);
     expect(reportLineFor({ report: run.stdout, target: `${sibling} sibling` })).toBe("");
-    expect(remoteBranches(home)).toBe("login\nmain");
+    expect(remoteBranches(home)).toBe("login\nmain\nsibling");
   });
 
   it("leaves a repo the ended session never named, while a manual pass pushes its branches", () => {
@@ -924,7 +993,7 @@ describe("cleanupWatcher log", { timeout: 30_000 }, () => {
     expect(reportLineFor({ report: secondRun.stdout, target: locked })).toMatch(/^kept +locked +\//);
     expect(lockedLines).toHaveLength(2);
     expect(lockedLines[0]).toMatch(/ kept +locked +\//);
-    expect(lockedLines[1]).toMatch(/ removed +pushed locked +\//);
+    expect(lockedLines[1]).toMatch(/ removed +nothing to push +\//);
   });
 
   it("adds each pass's report after when it ran, and keeps only the latest thousand lines", () => {
