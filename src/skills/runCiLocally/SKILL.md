@@ -131,6 +131,7 @@ GITHUB_TOKEN="$(gh auth token)" node "<skill directory>/scripts/holdActSlot.mjs"
 
 - Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
 - A repository's AGENTS.md can name options its legs need, such as `--input changed-files=<list>` for a `workflow_dispatch` input or `-P macos-26=-self-hosted` for a job that runs on this Mac. Pass them to every leg of that repository.
+- A self-hosted leg runs on the host, where the config's `/pnpm-store` does not exist, so `pnpm/action-setup` fails with `ENOENT: mkdir '/pnpm-store'`. Give that leg the host's own pnpm store, `~/Library/pnpm/store` on macOS: `--env npm_config_store_dir="$HOME/Library/pnpm/store" --env pnpm_config_store_dir="$HOME/Library/pnpm/store"`.
 - On cold caches (a new pnpm version or lockfile), run one leg alone first and start the rest after it, so they reuse its downloads.
 - The slots are shared by every session and account on the machine, so start all legs in the background and let the script queue them. It waits for a free slot (6 by default, `--slots <n>`), runs act, frees the slot when act exits, and exits with act's exit code. Do not cap the legs yourself.
 - A job with a matrix (for example Playwright shards) runs one leg per entry with `--matrix <key>:<value>`, each leg with its own workflow copy, action cache and slot. Rerun one failed leg the same way.
@@ -151,7 +152,7 @@ for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume 
 - **Slots.** Each slot is a local port from 28731 up that the script listens on while act runs, so the system frees it when the script exits or is killed. There is nothing to remove.
 - **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
 - **Shared volumes.** Keep `act-toolcache`, `act-pnpm-store`, `act-npm-cache`, `act-playwright`, `act-turbo-cache` and any volume without `CI_NAME` in its name.
-- **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.
+- **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written. A self-hosted leg's `pnpm/action-setup` installs pnpm into `~/setup-pnpm` on the host: delete it when this run created it.
 
 Check that `docker ps -a --filter "name=$CI_NAME"` and `docker volume ls --filter "name=$CI_NAME"` print nothing.
 
