@@ -12,8 +12,16 @@ const NAME_LINE = /^\s*(\d+)\s+(\d+)\s(.*)$/u;
 // e.g. "  412 /Applications/cmux.app/Contents/MacOS/cmux --flag"
 const COMMAND_LINE = /^\s*(\d+)\s(.*)$/u;
 
+// Full command lines of every process can pass Node's default 1 MiB output limit, which cuts the listing short.
+const PS_OUTPUT_LIMIT = 64 * 1024 * 1024;
+
+// A failed or cut-short listing throws, so the hook fails open instead of judging part of the table.
 const psLines = (columns: string): ReadonlyArray<string> => {
-  const listing = spawnSync("ps", ["-A", "-ww", "-o", columns], { encoding: "utf8" });
+  const listing = spawnSync("ps", ["-A", "-ww", "-o", columns], { encoding: "utf8", maxBuffer: PS_OUTPUT_LIMIT });
+  if (listing.error) {
+    throw listing.error;
+  }
+
   return listing.stdout.split("\n");
 };
 

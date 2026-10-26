@@ -41,6 +41,28 @@ describe("killTargetsIn", () => {
     expect(killTargetsIn("pgrep -f vite | xargs kill -9")).toHaveLength(1);
     expect(killTargetsIn("pgrep -fl vite")).toEqual([]);
     expect(killTargetsIn("pgrep -fl vite; kill 4242")).toEqual([]);
+    expect(killTargetsIn("pids=$(pgrep -f vite); kill $pids")).toHaveLength(1);
+    expect(killTargetsIn("pgrep -fl cat; kill $SERVER_PID")).toEqual([]);
+    expect(killTargetsIn("# kill the old server\npgrep -fl vite")).toEqual([]);
+  });
+
+  it("reads Linux long options like their short forms", () => {
+    const [killTarget] = killTargetsIn("pkill --signal KILL --euid root --full --ignore-case cat");
+
+    expect(killTarget).toMatchObject({ patterns: ["cat"], matchesFullCommand: true, ignoresCase: true });
+  });
+
+  it("judges a shell value in the pattern as matching any text", () => {
+    const [regex, exactName] = killTargetsIn('PATTERN=cat; pkill -f "$PATTERN-server"; killall "$APP.app"');
+
+    expect(regex).toMatchObject({ commandWords: "pkill -f $...-server", patterns: [".*-server"] });
+    expect(exactName).toMatchObject({ patterns: [".*\\.app"], matchesWholeText: true });
+  });
+
+  it("reads kills inside bash -c, zsh -lc, and eval", () => {
+    const killTargets = killTargetsIn(`bash -c 'pkill -f cat' && zsh -lc "killall Dock"; eval "pkill -f $P"`);
+
+    expect(killTargets.map((killTarget) => killTarget.patterns)).toEqual([["cat"], ["Dock"], [".*"]]);
   });
 
   it("ignores a kill without a pattern and text that only mentions pkill", () => {
