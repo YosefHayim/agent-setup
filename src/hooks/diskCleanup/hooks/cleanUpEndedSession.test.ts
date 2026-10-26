@@ -1,5 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -8,6 +18,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const hookPath = fileURLToPath(new URL("./cleanUpEndedSession.ts", import.meta.url));
 const packageRoot = path.resolve(path.dirname(hookPath), "../../../..");
+// Spotlight and editors index and open files in the repo folder, and the watcher counts any open file as a folder in use.
+const scratchParent = realpathSync(tmpdir());
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const workspaces: Array<string> = [];
 
@@ -33,7 +45,7 @@ const git = (request: { readonly folder: string; readonly command: ReadonlyArray
 // ~/Desktop/Code/app with one two-hour-old feature worktree holding a commit its remote lacks, which the ended
 // session's transcript names.
 const createFeatureWorktree = () => {
-  const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-disk-cleanup-hook-"));
+  const homeRoot = mkdtempSync(path.join(scratchParent, "disk-cleanup-hook-"));
   workspaces.push(homeRoot);
   writeFileSync(path.join(homeRoot, ".gitconfig"), "[user]\n\tname = Cleanup Test\n\temail = cleanup@example.test\n");
   const remote = path.join(homeRoot, "remotes", "app.git");
