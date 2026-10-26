@@ -114,6 +114,12 @@ Build it once as `act-runner-node:<date>` and name it in the config's `-P` line.
 docker pull --platform linux/<arch> mcr.microsoft.com/playwright:<version>
 ```
 
+The `act-playwright` volume also mounts over a Playwright image's own `/ms-playwright`, and Docker seeds a volume only once, so a newer image's browsers are hidden and the tests fail with "Executable doesn't exist". After each pull, copy that image's browsers into the volume:
+
+```bash
+docker run --rm --platform linux/<arch> -v act-playwright:/browsers mcr.microsoft.com/playwright:<version> cp -a --update=none /ms-playwright/. /browsers/
+```
+
 ### Run
 
 Start every leg in the background, then wait for all of them:
