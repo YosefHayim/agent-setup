@@ -374,6 +374,29 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     },
   },
   {
+    id: "process-kill-guard",
+    sourceDirectory: "processKillGuard",
+    installedSkill: { _tag: "none" },
+    title: "Process kill guard",
+    summary:
+      'Block pkill, killall, and pgrep-fed kill commands whose pattern would also stop a running Claude Code session, the terminal and shells it runs in, or an app in /Applications the pattern does not name — e.g. `pkill -f cat` matches every "/Applications" path and every session whose settings mention "notifications". The agent is told to kill only the pids it started.',
+    selectedByDefault: true,
+    dependencies: [],
+    platform: "any",
+    runtime: {
+      _tag: "hook",
+      sourceEntrypoint: "hooks/processKillGuard.ts",
+      registrations: [
+        {
+          event: "PreToolUse",
+          matcher: { _tag: "pattern", value: "Bash" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+      ],
+    },
+  },
+  {
     id: "session-rehome",
     sourceDirectory: "sessionRehome",
     installedSkill: { _tag: "none" },

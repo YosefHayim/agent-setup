@@ -23,7 +23,12 @@ const registryFilesIn = (configRoot: string): ReadonlyArray<string> => {
     .map((name) => path.join(registryFolder, name));
 };
 
-const liveSessionIdsIn = (registryFile: string): ReadonlyArray<string> => {
+type LiveSession = {
+  readonly sessionId: string;
+  readonly processId: number;
+};
+
+const liveSessionIn = (registryFile: string): ReadonlyArray<LiveSession> => {
   try {
     const registryEntry: unknown = JSON.parse(readFileSync(registryFile, "utf8"));
     if (!isRecord(registryEntry) || typeof registryEntry.sessionId !== "string") {
@@ -31,7 +36,7 @@ const liveSessionIdsIn = (registryFile: string): ReadonlyArray<string> => {
     }
 
     const processId = Number(registryEntry.pid);
-    return isProcessAlive(processId) ? [registryEntry.sessionId] : [];
+    return isProcessAlive(processId) ? [{ sessionId: registryEntry.sessionId, processId }] : [];
   } catch {
     // Claude Code removes its entry on exit, so one can vanish or be half-written while it is read.
     return [];
@@ -40,8 +45,17 @@ const liveSessionIdsIn = (registryFile: string): ReadonlyArray<string> => {
 
 // Claude Code writes <config root>/sessions/<pid>.json for every running process, naming the session it holds. A
 // registry that cannot be listed throws, since any session could be running.
-export const liveClaudeSessionIds = (homeRoot: string): ReadonlySet<string> => {
+const liveSessions = (homeRoot: string): ReadonlyArray<LiveSession> => {
   const registryFiles = claudeConfigRoots(homeRoot).flatMap(registryFilesIn);
-  const liveSessionIds = registryFiles.flatMap(liveSessionIdsIn);
+  return registryFiles.flatMap(liveSessionIn);
+};
+
+export const liveClaudeSessionIds = (homeRoot: string): ReadonlySet<string> => {
+  const liveSessionIds = liveSessions(homeRoot).map((liveSession) => liveSession.sessionId);
   return new Set(liveSessionIds);
+};
+
+export const liveClaudeProcessIds = (homeRoot: string): ReadonlySet<number> => {
+  const liveProcessIds = liveSessions(homeRoot).map((liveSession) => liveSession.processId);
+  return new Set(liveProcessIds);
 };
