@@ -23,6 +23,7 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
   --pull=false
   --container-architecture=linux/<arch>
   --no-cache-server
+  --network=bridge
   --container-options -v act-pnpm-store:/pnpm-store -v act-npm-cache:/root/.npm -v act-playwright:/ms-playwright
   --env=npm_config_store_dir=/pnpm-store
   --env=pnpm_config_store_dir=/pnpm-store
@@ -33,6 +34,7 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
 
   - Map every `runs-on` label the repositories use (`ubuntu-latest`, `ubuntu-slim`, `ubuntu-24.04`) to the runner image. An unmapped label falls back to a slow default image.
   - The architecture is the host's own: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
+  - `--network=bridge` gives each job container its own network. act's default puts every container on the Docker host network, so two legs that start a server on the same port fail with `EADDRINUSE`. A job with `services:` gets its own network either way. A step that needs a port published on the host (a database started outside act) reaches it at `host.docker.internal:<port>`.
   - The Docker volume `act-pnpm-store` is one pnpm store for every run, so an install only links packages. Without it pnpm keeps its store inside the clone, whose path changes every run, so `actions/cache` never finds an earlier save: every leg downloads everything and saves another 600 MB entry to `~/.cache/actcache`. `--no-cache-server` turns those cache steps into quick misses. pnpm 10 reads `npm_config_*` and pnpm 11 only `pnpm_config_*`, so both are set. A bind mount of the host's own pnpm store is slower than the volume on macOS.
   - The Docker volume `act-npm-cache` is npm's download cache, so `npm ci` and the pnpm that `pnpm/action-setup` installs with npm download once, not in every leg. On a slow network, six legs each downloading pnpm time out.
   - act runs jobs as root, and pnpm running lifecycle scripts as root sets `TMPDIR` to `<repo>/node_modules/.tmp`. In a deep checkout that makes socket paths too long (`tsx` in a `prepare` script fails with `listen EINVAL`). GitHub runners are not root, so `unsafe_perm=true` matches them.
