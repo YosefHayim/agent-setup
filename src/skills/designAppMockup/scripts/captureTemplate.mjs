@@ -106,6 +106,10 @@ const studyPage = () => {
   const textElements = [...document.querySelectorAll("body *")].filter(hasOwnText);
   const textStyles = textElements.map((element) => getComputedStyle(element));
   const allStyles = [...document.querySelectorAll("body *")].map((element) => getComputedStyle(element));
+  const isShown = (element) => {
+    const box = element.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+  };
   const describeType = (selector) => {
     const element = document.querySelector(selector);
     if (!element) return null;
@@ -120,18 +124,47 @@ const studyPage = () => {
       letterSpacing: style.letterSpacing,
     };
   };
+  const pieceTags = ["a", "button", "img", "svg", "input"];
+  const isPiece = (element) => {
+    const style = getComputedStyle(element);
+    const isFilled = style.backgroundColor !== "rgba(0, 0, 0, 0)" || style.borderRadius !== "0px";
+    const tag = element.tagName.toLowerCase();
+    return hasOwnText(element) || pieceTags.includes(tag) || isFilled;
+  };
+  const describePiece = (element, sectionBox) => {
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    const family = style.fontFamily.split(",")[0];
+    const text = hasOwnText(element) ? element.textContent.trim().slice(0, 40) : "";
+    return {
+      tag: element.tagName.toLowerCase(),
+      text,
+      box: [
+        Math.round(box.left - sectionBox.left),
+        Math.round(box.top - sectionBox.top),
+        Math.round(box.width),
+        Math.round(box.height),
+      ],
+      font: `${style.fontSize}/${style.lineHeight} ${style.fontWeight} ${style.letterSpacing} ${family}`,
+      color: style.color,
+      fill: style.backgroundColor,
+      radius: style.borderRadius,
+      padding: style.padding,
+    };
+  };
   const describeSection = (element) => {
     const heading = element.querySelector("h1, h2, h3");
     const headingText = heading ? heading.textContent.trim().slice(0, 90) : "";
     const box = element.getBoundingClientRect();
+    const shownPieces = [...element.querySelectorAll("*")].filter(isShown).filter(isPiece);
     return {
       name: element.dataset.framerName || element.id || element.tagName.toLowerCase(),
       heading: headingText,
       top: Math.round(box.top + window.scrollY),
       height: Math.round(box.height),
+      pieces: shownPieces.slice(0, 80).map((piece) => describePiece(piece, box)),
     };
   };
-  const isShown = (element) => element.getBoundingClientRect().height > 0;
   const sections = [...document.querySelectorAll("section, footer")].filter(isShown).map(describeSection);
   const describeVariant = (variant) => {
     const initial = variant.initial || {};

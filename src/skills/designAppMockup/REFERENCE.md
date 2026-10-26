@@ -49,7 +49,7 @@ It needs Node 22 or later and Chrome. Pass `--chrome-path` or set `CHROME_PATH` 
 
 - `motion-0.jpg` to `motion-3.jpg`: the load animation at about 0.35, 0.85, 1.55, and 2.75 seconds;
 - `screen-00.jpg` and on: the page one screen at a time, each after the scroll animations settle;
-- `study.json`: the type of h1, h2, h3, and body, the most used fonts, text colors, backgrounds, radii, and shadows, the section order with headings, and the load motion (Framer appear animations, split headlines, CSS animations, backdrop blurs).
+- `study.json`: the type of h1, h2, h3, and body, the most used fonts, text colors, backgrounds, radii, and shadows, the section order with headings, each section's pieces (the box, type, color, fill, radius, and padding of its text, links, buttons, images, and filled boxes), and the load motion (Framer appear animations, split headlines, CSS animations, backdrop blurs).
 
 Captures are for looking only. They stay in the scratchpad and are deleted at the end.
 
@@ -67,25 +67,29 @@ Write it in the scratchpad after looking at every screen. Keep it to what makes 
 
 See [Study note example](#study-note-example-sola-do-not-reuse).
 
-## Not a copy
+## Inspired or close match
 
-Keep the template's grammar and change its values. The page should feel like the same family of quality, never like the same site.
+Ask at the template stop which one the user wants. Inspired is the default. A user who loves a template often asks for the close match once they see an inspired page, so offer both.
 
-**Carries over:** the framing, the section rhythm, the density, the kinds of components, and the kind and pace of motion.
+**Both keep** the template's frame, spacing, type scale, density, component details, and the kind and pace of motion. The premium feel lives in these measured values. An inspired page that drifts from them looks cheaper, not more original.
 
-**The app's own:**
+**Inspired:** the same family of quality, never the same site. The app's own:
 
 - the palette: a different hue family for the brand ground and the accent;
 - the fonts: different families, even when they play the same roles;
 - the hero moment: the app's real product UI doing its job, never the template's dashboard;
 - one signature component the template does not have, built from what the app does;
-- the section mix: drop, merge, and add sections to fit the app's real content, never the template's full order 1:1;
+- the section mix: drop, merge, and add sections to fit the app's real content;
 - all copy, imagery, and icons;
 - the motion choreography: which things move and in what order. Timings may sit in the same range.
 
-**Never taken:** the template's code, files, images, illustrations, logos, or SVGs.
+Glance test: put each render next to the template's matching screen. If someone could mistake one for the other at a glance, change more. Start with the ground color, the hero layout, and the display font.
 
-**Glance test:** put each render next to the template's matching screen. If someone could mistake one for the other at a glance, change more. Start with the ground color, the hero layout, and the display font.
+**Close match:** the template's layout, adapted to the app. Keep its section order, each section's layout, sizes, spacing, type sizes, radii, borders, and motion, measured from the sections in its `study.json`. The app's own: the palette (the user's colors), all copy, the product UI inside each piece, imagery, and icons. Its fonts may stay when their license is free. For a script they lack, such as Hebrew, pair the closest free font for that script and keep the template's fonts for Latin text and numbers. Sections the app has no true content for become true content in the same layout ([Landing](#landing)). Mirror the layout for a right-to-left page.
+
+Match check: render the page with the capture script and put its `study.json` next to the template's. Each section's height and its heading, body, and button sizes should sit within about 10% of the template's, unless the content is a different length. Then compare each screen with the template's matching one, mirrored for right to left (`sips --flip horizontal <in> --out <out>` on macOS).
+
+**Never taken, in either mode:** the template's copy, code, files, images, illustrations, logos, or SVGs. Many Framer templates are paid. Say so, and that shipping a close match needs the template's license.
 
 ## Hi-fi bar
 
@@ -137,7 +141,7 @@ Never show:
 - every section in the same layout, or a shadow on everything;
 - more than one accent color, more than two font families, or more than three weights;
 - the template, font pair, or color set of a past mockup;
-- a 1:1 copy of the template ([Not a copy](#not-a-copy)).
+- an inspired page that could pass for the template at a glance, or anything taken from it that [Inspired or close match](#inspired-or-close-match) never allows.
 
 Normal Framer polish is welcome when it serves the page: hairline frames, pill buttons, a serif display, a dark brand block, soft shadows on floating product UI.
 
@@ -201,7 +205,7 @@ Rules:
 
 ## Landing
 
-Take the rhythm of the picked template and fill it with the app's own section mix. Whatever the order, the page has:
+Inspired: take the rhythm of the picked template and fill it with the app's own section mix. Close match: keep the template's section order. Whatever the order, the page has:
 
 - a nav with one CTA, and the launch CTA from the brief on every CTA;
 - a hero that shows the real product doing its job early, not a feature list;

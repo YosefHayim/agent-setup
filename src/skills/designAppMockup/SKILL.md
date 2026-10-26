@@ -1,6 +1,6 @@
 ---
 name: design-app-mockup
-description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows 3 real Framer templates that fit the idea for you to pick, studies the one you pick (layout, type, motion), and builds a high-fidelity landing page inspired by it, never a 1:1 copy. After you approve the page, it builds a UI library from it, then clickable app screens with custom icons and real photos. Say "design my app idea", "mock up this idea", "Framer-vibe landing page", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
+description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows 3 real Framer templates that fit the idea for you to pick, studies the one you pick (layout, type, motion), and builds a high-fidelity landing page from it: inspired by it, or a close match in your own colors and content when you ask, never with its copy, photos, or logos. After you approve the page, it builds a UI library from it, then clickable app screens with custom icons and real photos. Say "design my app idea", "mock up this idea", "Framer-vibe landing page", "match this template for my app", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
 type: flow
 ---
 
@@ -16,7 +16,7 @@ The taste rules live in [REFERENCE.md](REFERENCE.md). Follow the steps in order.
 
 - Mockups only. Write no app code and change no repo files.
 - Two stops: after the template pick (step 2) and after the landing page (step 4). Build nothing past a stop without the user's yes.
-- A template is inspiration, never a copy. Take its grammar: framing, rhythm, kinds of components, and the kind and pace of motion. Never take its palette, font set, copy, illustrations, photos, or files 1:1 ([REFERENCE.md → Not a copy](REFERENCE.md#not-a-copy)).
+- A template is never copied. Inspired, the default, keeps its frame, spacing, type scale, and kind of motion, and gives the app its own palette, fonts, hero, and section mix. A close match, only when the user asks, also keeps its layout, section order, and motion, and changes the colors, copy, product UI, and imagery. Never take its copy, photos, illustrations, logos, or files ([REFERENCE.md → Inspired or close match](REFERENCE.md#inspired-or-close-match)).
 - Keep every artifact private. Never share, deploy, or post it. Template captures stay in the scratchpad and never go into a board or an upload.
 - Photos: free licenses only. Use CC0 or public domain first, and CC BY only with the credit noted. Never use a brand's photos or logos, or a real person's likeness.
 - Never invent stats, reviews, testimonials, press logos, user counts, or prices. Use a placeholder such as `[YOUR PRICE]`.
@@ -47,24 +47,25 @@ For each one, give:
 - one line on why it fits the idea;
 - what would carry over: the layout, the motion, or the feel.
 
-Recommend one. Stop until the user picks. They may mix templates, such as "Sola's layout on Signal's dark ground".
+Recommend one. In the same card, ask whether the page should be inspired by it or a close match in the app's colors and content, and say which templates are paid ([REFERENCE.md → Inspired or close match](REFERENCE.md#inspired-or-close-match)). Stop until the user picks. They may mix templates, such as "Sola's layout on Signal's dark ground".
 
 ### 3. Study the template
 
 Capture the picked template screen by screen at 1440 and at 390 ([REFERENCE.md → Capturing a template](REFERENCE.md#capturing-a-template)). Look at every screen and every motion frame. Read `study.json` for the fonts, colors, radii, section order, and load motion. Write a study note in the scratchpad ([REFERENCE.md → Study note](REFERENCE.md#study-note)).
 
-Then write the "inspired, not copied" plan:
+Then write the plan for the picked mode:
 
-- what carries over: the grammar;
-- what is the app's own: the palette, the fonts, the hero moment, one signature component, the section mix, and all copy and imagery.
+- what carries over: the frame, spacing, type scale, and motion, plus the layout and section order for a close match;
+- what is the app's own: the palette and all copy and imagery, plus the fonts, the hero moment, one signature component, and the section mix when inspired;
+- for a close match, each template section and the app's true content that fills it.
 
-Check the plan against [REFERENCE.md → Not a copy](REFERENCE.md#not-a-copy).
+Check the plan against [REFERENCE.md → Inspired or close match](REFERENCE.md#inspired-or-close-match).
 
 ### 4. Landing page first — stop
 
 Build one fluid landing page at the template's level ([REFERENCE.md → Landing](REFERENCE.md#landing), [Hi-fi bar](REFERENCE.md#hi-fi-bar), [Motion](REFERENCE.md#motion)). It has the app's real copy, real product UI in the hero and in how it works, and motion. Every CTA is the launch CTA. Show it on the canvas at 1440 and 390 ([REFERENCE.md → Canvas](REFERENCE.md#canvas)).
 
-Render both sizes yourself, after the motion settles, and look at the renders. Put each one next to the template's matching screen. Fix what looks off, and change more where the two could be mistaken for each other, before you show the user anything.
+Render both sizes yourself, after the motion settles, and look at the renders. Put each one next to the template's matching screen and fix what looks off before you show the user anything. Inspired: run the glance test and change more where the two could be mistaken for each other. Close match: run the match check and fix each section that drifts from the template's measurements.
 
 Tell the user in 3 lines what carried over and what is the app's own. List the boards that come next: the library, icons, and every app screen. Stop until they approve or ask for changes.
 
@@ -102,7 +103,7 @@ Read every board against the landing page and the library ([REFERENCE.md → Con
 Report:
 
 - the canvas link (or local canvas path) and the template picked;
-- what carried over from the template and what is the app's own, with the Not a copy check passed;
+- the mode (inspired or close match), what carried over from the template and what is the app's own, with the glance test or the match check passed;
 - that the 1440 and 390 renders were checked by eye next to the template;
 - photo sources and licenses, and which need a credit line;
 - every placeholder left for the user, such as prices and store links;
