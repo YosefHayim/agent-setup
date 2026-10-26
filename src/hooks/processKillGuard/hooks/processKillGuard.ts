@@ -4,28 +4,13 @@
 
 import { readFileSync, writeSync } from "node:fs";
 import os from "node:os";
-
+import { shellCommandOf } from "../../lib/bashHookInput.js";
 import { liveClaudeProcessIds } from "../../lib/claudeLiveSessions.js";
 import { readConfig } from "../../lib/hookConfig.js";
 import { allowAndExit, printDecisionAndExit } from "../../lib/hookOutput.js";
-import { isRecord } from "../../lib/jsonLines.js";
 import { decideKill } from "../lib/killDecision.js";
 import { killTargetsIn } from "../lib/killTargets.js";
 import { runningProcesses } from "../lib/processTable.js";
-
-// Claude Code names the shell command "command"; Codex names it "cmd".
-const shellCommandOf = (hookInput: unknown): string => {
-  if (!isRecord(hookInput) || !isRecord(hookInput.tool_input)) {
-    return "";
-  }
-
-  const { command, cmd } = hookInput.tool_input;
-  if (typeof command === "string") {
-    return command;
-  }
-
-  return typeof cmd === "string" ? cmd : "";
-};
 
 const runProcessKillGuard = (): never => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
