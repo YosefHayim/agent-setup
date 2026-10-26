@@ -16,6 +16,7 @@ const expectedFeatureIds = [
   "autorun",
   "duplicate-code-guard",
   "scratch-folder-guard",
+  "process-kill-guard",
   "session-rehome",
   "disk-cleanup",
   "image-to-code",
@@ -73,6 +74,7 @@ const expectedSourceDirectories = [
   "autorun",
   "duplicateCodeGuard",
   "scratchFolderGuard",
+  "processKillGuard",
   "sessionRehome",
   "diskCleanup",
   "imageToCode",
@@ -185,7 +187,7 @@ describe("featureCatalog", () => {
   });
 
   it("derives defaults, installed skills, and exact shipped allowlists", () => {
-    expect(defaultFeatureIds).toEqual(["scratch-folder-guard"]);
+    expect(defaultFeatureIds).toEqual(["scratch-folder-guard", "process-kill-guard"]);
     expect(skillsForFeatures(["context-guard", "duplicate-code-guard"])).toEqual([]);
     expect(
       skillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => [skill.id, skill.shippedPaths]),
@@ -377,6 +379,19 @@ describe("featureCatalog", () => {
             event: "SessionEnd",
             matcher: { _tag: "none" },
             entrypoint: { _tag: "path", value: "hooks/clearSessionScratch.ts" },
+            readsAgentId: false,
+          },
+        ],
+      },
+      {
+        id: "process-kill-guard",
+        platform: "any",
+        sourceEntrypoint: "hooks/processKillGuard.ts",
+        registrations: [
+          {
+            event: "PreToolUse",
+            matcher: { _tag: "pattern", value: "Bash" },
+            entrypoint: { _tag: "featureDefault" },
             readsAgentId: false,
           },
         ],

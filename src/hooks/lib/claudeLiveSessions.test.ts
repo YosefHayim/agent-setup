@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { liveClaudeSessionIds } from "./claudeLiveSessions.js";
+import { liveClaudeProcessIds, liveClaudeSessionIds } from "./claudeLiveSessions.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const runningSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
@@ -125,5 +125,20 @@ describe("liveClaudeSessionIds", () => {
     });
 
     expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(true);
+  });
+});
+
+describe("liveClaudeProcessIds", () => {
+  it("lists the pid of each running session and skips one whose process exited", () => {
+    const homeRoot = createHomeRoot();
+    const configRoot = path.join(homeRoot, ".claude");
+    const exitedPid = exitedProcessId();
+    registerSession({ configRoot, sessionId: runningSessionId, processId: process.pid });
+    registerSession({ configRoot, sessionId: exitedSessionId, processId: exitedPid });
+
+    const liveProcessIds = liveClaudeProcessIds(homeRoot);
+
+    expect(liveProcessIds.has(process.pid)).toBe(true);
+    expect(liveProcessIds.has(exitedPid)).toBe(false);
   });
 });

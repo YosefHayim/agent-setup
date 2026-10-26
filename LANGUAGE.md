@@ -116,6 +116,10 @@ _Avoid_: "duplicate checker".
 Guard that denies agent writes into system temporary folders, asks the agent at the end of a turn to delete the files its session left in its scratch folder, and deletes an ended Claude Code session's own scratch folder. Code names say "scratch" because `temp`/`tmp` are forbidden name tokens.
 _Avoid_: "temp guard", "tmp hook".
 
+**process-kill-guard**
+Guard that denies a `pkill`, `killall`, or pgrep-fed `kill` whose pattern also matches a running Claude Code session, the terminal and shells it runs in, or an app the pattern does not name.
+_Avoid_: "kill blocker", "pkill hook".
+
 **session-rehome**
 Feature that moves an ended Claude Code session or Codex thread into the local repo its work was about, so that repo's `/resume` or `codex resume` lists it. "Rehome" is the verb for that move; a session's **home** is the folder its agent lists it under.
 _Avoid_: "migrate", "relocate" (Claude Code's own word for its worktree moves).
