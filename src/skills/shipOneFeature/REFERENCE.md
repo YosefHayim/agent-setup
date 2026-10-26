@@ -61,7 +61,7 @@ Fixes #<n>
 - [x] Unit: `pnpm test -- <path>` → pass
 - [x] E2E: `pnpm test:integration` → pass
 - [x] Full gate: `pnpm verify` → pass
-- [x] Local act: `act pull_request -W .github/workflows/ci.yml` → pass
+- [x] Local act (run-ci-locally, one leg per job) → pass
 
 ## Main safety
 - Base: main @ <sha>
@@ -71,21 +71,10 @@ Fixes #<n>
 
 ## Local act (Docker)
 
-Prereqs: [nektos/act](https://github.com/nektos/act), Docker running.
-
-```bash
-act --version
-docker info >/dev/null
-
-# Prefer repo docs. Common patterns:
-act pull_request -W .github/workflows/ci.yml
-act push -W .github/workflows/ci.yml
-act -l   # list jobs when unsure
-```
+Run the workflow files GitHub runs on PR/push with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow.
 
 Notes:
 
-- Match the workflow files GitHub actually runs on PR/push.
 - If act needs secrets, use repo-documented `.secrets` / `--secret-file` — never invent production secrets.
 - Platform-specific jobs may need `-P` runner images; record skips that are environmental vs real failures.
 - On failure: fix on the feature branch, push, re-run act; do not merge red.
