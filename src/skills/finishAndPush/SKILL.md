@@ -26,10 +26,19 @@ Close the whole delivery loop from the repository's real state. “Done” means
 5. Exercise the real behavior when the task has a user-visible or integration surface. Use `run-local-and-check` for browser flows and `deploy-and-check` only when deployment is authorized.
 6. Review the final diff for correctness, scope, secrets, accidental generated files, and migration or compatibility consequences.
 7. Use `organize-commits` when available. Otherwise apply the same essentials: stage by intent, inspect the index, write why/what/impact messages, and re-check status after hooks. Freeform “git commit push” still routes here as the outer loop; do not skip gates for short wording.
-8. Push only when requested (including implied by “git commit push” / “push to main” meaning **push the feature branch toward main**, not necessarily commit on main). Confirm the remote ref resolves to the shipped local commit. Open or update a PR to the default branch when that is the user's ship definition; link issues with `Fixes #n` when an issue exists. Monitor required hosted checks when ship includes them.
+8. Push only when requested (including implied by “git commit push” / “push to main” meaning **push the feature branch toward main**, not necessarily commit on main). Confirm the remote ref resolves to the shipped local commit. Open or update a PR to the default branch when that is the user's ship definition; link issues with `Fixes #n` when an issue exists. Then handle CI as **Hosted CI** below says.
 9. Leave a compact handoff: outcome, evidence, branch name, commits (SHAs), remote state, PR URL if any, remaining work, and any action requiring different authority. Completion means SHA + remote + gates — not “files changed.” Do not delete the remote feature branch after push/PR.
 
 If a gate cannot run, say exactly why and downgrade the completion claim. Do not replace current evidence with an older successful run.
+
+## Hosted CI
+
+Where CI runs depends on who pays for it. Check with `gh repo view --json visibility`.
+
+- **Public repository** (GitHub Actions minutes are free): CI runs on every PR. Watch it with `gh pr checks <n> --watch --fail-fast` as a background command. Red blocks merge.
+- **Private repository** (billed per minute): CI runs only on the default branch, never on PRs. The local gate is the pre-merge proof: the pre-push hook (lint, typecheck) when the repository has one, plus its tests and build. When merging is part of the job, merge the ready PRs back to back, then watch the one default-branch run with `gh run watch <id> --exit-status`. GitHub keeps one running and one pending run per workflow, so a burst of merges costs at most two runs. A red run is fixed at once in its own PR.
+- A private PR that changes `.github/**` gets one hosted run before merge: `gh workflow run <file> --ref <branch>`.
+- Run the workflows locally with `run-ci-locally` (act) only when GitHub Actions cannot run for the repository, or the user asks.
 
 ## Verification
 

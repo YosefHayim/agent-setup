@@ -89,7 +89,7 @@ Merge authorized: false | true
 4. If UI surface: run run-local-and-check checks; record evidence.
 5. organize-commits on this branch only. Never commit on default.
 6. finish-and-push: push + open PR with Fixes #<n>, Summary, Confidence N/10, test plan.
-7. act/CI when present — red blocks merge.
+7. CI as finish-and-push Hosted CI says (PR checks if public, local gate if private) — red blocks merge.
 8. Do NOT merge unless Merge authorized: true and conf ≥ 6.
 9. Do NOT delete remotes. Do NOT touch other lanes.
 
@@ -114,7 +114,7 @@ PR open with gates evidence. Orchestrator owns merge sequencing and campaign boa
 | 1–3 | Spec unclear / tests missing — **no merge** |
 | 4–5 | Narrow demo / weak e2e — **no merge** without human |
 | 6 | Happy-path unit + e2e green; min auto-merge |
-| 7–8 | Solid coverage + act/CI |
+| 7–8 | Solid coverage + CI green |
 | 9–10 | Rare; multi-surface hardened |
 
 **Caps:** unit without e2e (or reverse) → max 4 + block merge when stack exists. Thin smoke e2e only → max 7.
@@ -134,7 +134,7 @@ Fixes #<n>
 - [x] Unit: `<cmd>` → pass
 - [x] E2E: `<cmd>` → pass | skip:<why>
 - [x] QA: run-local-and-check → pass | N/A
-- [ ] act/CI: …
+- [ ] CI: PR checks → pass | private: local gate → pass, default-branch run after merge
 
 ## Main safety
 - Base: <default> @ <sha>
@@ -159,9 +159,9 @@ Fixes #<n>
 
 Happy path = primary success scenario. At least one unit and one e2e assertion should fail if the feature is removed.
 
-## act (when CI exists)
+## act (only when hosted CI cannot run)
 
-Run the workflows with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow. Red → fix on branch, push, re-run; do not merge.
+When GitHub Actions cannot run for the repository, or the user asks, run the workflows with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow. Red → fix on branch, push, re-run; do not merge.
 
 ## Reinstall / smoke (optional full ship)
 

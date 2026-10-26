@@ -194,7 +194,7 @@ Before merge eligibility:
    - green → full merge eligibility
    - skip (no API/sim) → merge only with **confidence cap** and explicit PR note (REFERENCE); or hold if user said e2e-required
 3. **Confidence** (1–10) on PR — same honesty as `ship-one-feature`. **&lt; 6 → do not merge** that lane.
-4. **act** / `gh pr checks` when CI exists — red blocks merge.
+4. **CI** as `finish-and-push` **Hosted CI** says (PR checks if public, local gate if private) — red blocks merge.
 
 ### 6. Merge sequence (orchestrator; authorized by default)
 

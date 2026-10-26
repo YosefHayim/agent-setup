@@ -1,6 +1,6 @@
 ---
 name: ship-one-feature
-description: Use when you want one feature or one GitHub issue done all the way — branch, code, tests, a PR with a confidence score, local CI, merge, and reinstall. Say "ship this feature", "implement this issue fully", or "feature to main". For many tasks, use run-tasks-in-parallel.
+description: Use when you want one feature or one GitHub issue done all the way — branch, code, tests, a PR with a confidence score, CI, merge, and reinstall. Say "ship this feature", "implement this issue fully", or "feature to main". For many tasks, use run-tasks-in-parallel.
 type: flow
 ---
 
@@ -10,11 +10,11 @@ type: flow
 
 Slash: **`/ship-one-feature`**, then either freeform feature text **or** an existing issue (`#2`, full URL, `Fixes #2`).
 
-**Done** means: issue linked, topic branch/worktree, happy-path **unit** + **e2e** green, PR with short **Summary** + **Confidence 1–10**, local **act** green when CI exists, **merged** to default, product **reinstalled/proven**, done receipt. “PR open” alone is **not** done for this skill.
+**Done** means: issue linked, topic branch/worktree, happy-path **unit** + **e2e** green, PR with short **Summary** + **Confidence 1–10**, **CI** green as `finish-and-push` **Hosted CI** says, **merged** to default, product **reinstalled/proven**, done receipt. “PR open” alone is **not** done for this skill.
 
 ## Reuse first (mandatory)
 
-This skill **must not** reinvent sibling workflows. Before any step, **load the sibling `SKILL.md` and follow it** for that concern. Only implement glue those skills do not own (test hard-gates, confidence score, act, merge, reinstall, done receipt).
+This skill **must not** reinvent sibling workflows. Before any step, **load the sibling `SKILL.md` and follow it** for that concern. Only implement glue those skills do not own (test hard-gates, confidence score, CI, merge, reinstall, done receipt).
 
 | Concern | Load and follow |
 |---------|-----------------|
@@ -37,7 +37,7 @@ If a sibling skill already defines a command, branch naming, safety rule, or ver
 | **A — New feature** | Feature description only | Create issue (via setup-lanes / `gh issue create`) with acceptance criteria | Same pipeline |
 | **B — Existing issue** | `#N`, issue URL, or “implement issue N” | **Do not** create a duplicate. `gh issue view N`; acceptance = issue body + comments | Same pipeline |
 
-Mode B is not a shortcut that skips worktrees, tests, act, or merge gates. It only skips issue creation.
+Mode B is not a shortcut that skips worktrees, tests, CI, or merge gates. It only skips issue creation.
 
 ```text
 /ship-one-feature add restore-on-launch for packed sessions
@@ -51,7 +51,7 @@ Optional freeform flags:
 | Flag | Meaning |
 |------|---------|
 | (default) | Full pipeline including merge + reinstall |
-| `no-merge` | Stop after green PR + act |
+| `no-merge` | Stop after green PR + CI |
 | `no-reinstall` | Merge ok; skip global reinstall |
 | `no-cmux` | No cmux; implement in this session’s worktree |
 | `agent=grok\|claude\|codex` | Lane CLI when cmux is used |
@@ -61,7 +61,7 @@ Optional freeform flags:
 - Invoking this skill **authorizes** merge to default + product reinstall **after** hard gates. It does **not** authorize force-push of protected refs, remote branch deletion, secret exposure, or unrelated deploys.
 - Never commit product work on the default branch (same as `finish-and-push` / `run-tasks-in-parallel`).
 - **Hard stop** if unit or e2e happy paths are missing/failing — no “test later.”
-- **Hard stop** if `act` fails when workflows + Docker/`act` exist. If tooling is missing, report and **do not merge** without an explicit override this turn.
+- **Hard stop** if CI is red. If no CI can run (no hosted run and no `act`), report and **do not merge** without an explicit override this turn.
 - Never delete remote branches unless the user separately asks.
 - Own only the feature worktree; foreign dirty trees are user-owned.
 - Confidence must be honest (see [REFERENCE.md](REFERENCE.md)). Cap rules there apply.
@@ -90,7 +90,7 @@ Optional freeform flags:
 - `LANE-BRIEF.md` in the worktree
 - host: cmux (default when available) or in-process / `no-cmux`
 
-Do **not** invent alternate worktree roots or branch schemes when the sibling already defines them. Brief must include: issue URL, acceptance criteria, unit + e2e happy-path requirement, style doc paths, “no main commits,” “orchestrator owns act/merge/reinstall.”
+Do **not** invent alternate worktree roots or branch schemes when the sibling already defines them. Brief must include: issue URL, acceptance criteria, unit + e2e happy-path requirement, style doc paths, “no main commits,” “orchestrator owns CI/merge/reinstall.”
 
 ### 3. Implement (in the lane only)
 
@@ -108,23 +108,23 @@ No PR marked ready / no merge until Gate A passes.
 
 - Commits: **load `organize-commits`** — intent-split messages, topic branch only.
 - Verify + push + open/update PR: **load `finish-and-push`** for status ledger, gates, push confirmation, PR open/update, leftover hygiene.
-- Extend the PR body (this skill’s only PR extras) with **Summary**, **Confidence N/10**, and test-plan lines for unit/e2e/act (template in REFERENCE.md). Always `Fixes #<n>` / `Closes #<n>`.
+- Extend the PR body (this skill’s only PR extras) with **Summary**, **Confidence N/10**, and test-plan lines for unit/e2e/CI (template in REFERENCE.md). Always `Fixes #<n>` / `Closes #<n>`.
 
 **Confidence (1–10):** honest belief correctness **and** repo-pattern fidelity. Rubric in REFERENCE.md. Do not default to 9–10. **&lt; 6 → do not merge** (ask human). Partial tests → ≤4 and block merge.
 
-### 5. Local act (owned glue)
+### 5. CI (owned glue)
 
-When workflows exist: run them with the sibling **run-ci-locally** skill, with the leg options the repo's AGENTS.md names (REFERENCE.md). Red → fix on branch, push, re-run. Monitor `gh pr checks` when hosted CI exists.
+Follow `finish-and-push` **Hosted CI**: in a public repository watch `gh pr checks`; in a private one the local gate is the pre-merge proof and the default-branch run after step 6 is the hosted one. Use the sibling **run-ci-locally** skill only when hosted CI cannot run (REFERENCE.md). Red → fix on branch, push, re-run.
 
 ### 6. Merge (owned glue; authorized by this skill)
 
-Only after Gate A + act/CI + confidence ≥ 6 (or human override):
+Only after Gate A + CI + confidence ≥ 6 (or human override):
 
 ```bash
 gh pr merge <n> --merge   # or house squash/rebase if that is repo default
 ```
 
-Confirm default branch SHA. Do not delete remote feature branch unless asked.
+Confirm default branch SHA. In a private repository, watch the default-branch run for that SHA (`gh run watch <id> --exit-status`); red → fix at once in its own PR. Do not delete remote feature branch unless asked.
 
 ### 7. Reinstall / smoke (owned glue)
 
@@ -143,7 +143,7 @@ Shipped only when all are fresh evidence:
 - [ ] Commits via **`organize-commits`**; pre-merge ship via **`finish-and-push`** (not a private fork of those steps)
 - [ ] Unit + e2e happy paths passed
 - [ ] PR has Summary + Confidence N/10
-- [ ] act green or skipped with recorded reason + override policy respected
+- [ ] CI green: PR checks (public) or local gate plus default-branch run (private); act only when hosted CI could not run
 - [ ] Merged (unless `no-merge`); default SHA recorded
 - [ ] Reinstall/smoke done or N/A
 - [ ] No remote deletes unless asked
@@ -159,7 +159,7 @@ pr: <url>
 confidence: N/10 — <reason>
 unit: <cmd> → pass
 e2e: <cmd> → pass
-act: <cmd> → pass | skipped:<why>
+ci: pr-checks → pass | local-gate + main run <id> → pass | act → pass
 merge: <default> @ <sha> | no-merge
 reinstall: <cmd> → <smoke>
 residual: <none or risks>
