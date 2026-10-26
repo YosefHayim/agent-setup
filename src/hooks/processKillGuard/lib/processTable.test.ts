@@ -6,18 +6,13 @@ import { describe, expect, it } from "vitest";
 import { runningProcesses } from "./processTable.js";
 
 describe("runningProcesses", () => {
-  it("lists a running child with its parent and full command line", async () => {
-    const child = spawn(process.execPath, [
-      "-e",
-      "console.log('ready'); setTimeout(() => {}, 60000)",
-      "process-table-marker",
-    ]);
-    await once(child.stdout, "data");
+  it("lists a running child with its parent, short name, and full command line", async () => {
+    const child = spawn("sleep", ["61.5"]);
+    await once(child, "spawn");
 
     const listedChild = runningProcesses().find((running) => running.processId === child.pid);
     child.kill();
 
-    expect(listedChild).toMatchObject({ parentProcessId: process.pid, name: "node" });
-    expect(listedChild?.commandLine).toContain("process-table-marker");
+    expect(listedChild).toMatchObject({ parentProcessId: process.pid, name: "sleep", commandLine: "sleep 61.5" });
   });
 });
