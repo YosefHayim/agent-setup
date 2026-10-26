@@ -37,6 +37,8 @@ jobs:
               - vitest.setup.ts
               - '.github/**'
               - '.husky/**'
+              - 'src/hooks/**'
+              - 'src/cli/**'
   report-failure:
     name: Open issue on main failure
     needs:

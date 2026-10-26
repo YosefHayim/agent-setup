@@ -26,12 +26,15 @@ Run the repository's GitHub Actions workflows on this machine with [act](https:/
   --container-options -v act-pnpm-store:/pnpm-store -v act-npm-cache:/root/.npm -v act-playwright:/ms-playwright
   --env=npm_config_store_dir=/pnpm-store
   --env=pnpm_config_store_dir=/pnpm-store
+  --env=npm_config_unsafe_perm=true
+  --env=pnpm_config_unsafe_perm=true
   ```
 
   - Map every `runs-on` label the repositories use (`ubuntu-latest`, `ubuntu-slim`, `ubuntu-24.04`) to the runner image. An unmapped label falls back to a slow default image.
   - The architecture is the host's own: `arm64` with an arm64 runner image on Apple silicon, `amd64` on x86. `linux/amd64` on Apple silicon runs every job under emulation, several times slower.
   - The Docker volume `act-pnpm-store` is one pnpm store for every run, so an install only links packages. Without it pnpm keeps its store inside the clone, whose path changes every run, so `actions/cache` never finds an earlier save: every leg downloads everything and saves another 600 MB entry to `~/.cache/actcache`. `--no-cache-server` turns those cache steps into quick misses. pnpm 10 reads `npm_config_*` and pnpm 11 only `pnpm_config_*`, so both are set. A bind mount of the host's own pnpm store is slower than the volume on macOS.
   - The Docker volume `act-npm-cache` is npm's download cache, so `npm ci` and the pnpm that `pnpm/action-setup` installs with npm download once, not in every leg. On a slow network, six legs each downloading pnpm time out.
+  - act runs jobs as root, and pnpm running lifecycle scripts as root sets `TMPDIR` to `<repo>/node_modules/.tmp`. In a deep checkout that makes socket paths too long (`tsx` in a `prepare` script fails with `listen EINVAL`). GitHub runners are not root, so `unsafe_perm=true` matches them. pnpm 10 reads `npm_config_*`, pnpm 11 only `pnpm_config_*`.
   - The Docker volume `act-playwright` is the browsers folder. Docker seeds a new named volume from the runner image's `/ms-playwright` on first use, so a `playwright install` of a version already there takes about 1s, not about 49s.
 - `gh auth status` works. The token goes in as a secret, never into a file.
 - Pick a run name used for everything this run creates: `CI_NAME="ci-<branch>-<short-sha>"`, with every `/` in the branch turned into `-`, because the name goes into `sed` and `perl` patterns and into container names. Work files go in the session scratchpad, never in the repository and never in the system temp folder.
