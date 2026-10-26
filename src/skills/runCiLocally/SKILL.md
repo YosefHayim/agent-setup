@@ -141,7 +141,7 @@ for container in $(docker ps -aq --filter "name=$CI_NAME"); do docker rm -f "$co
 for volume in $(docker volume ls -q --filter "name=$CI_NAME"); do docker volume rm "$volume"; done
 ```
 
-- **Slots.** The script frees its own slot. A killed holder's slot is reclaimed by the next waiter, so there is nothing to remove.
+- **Slots.** Each slot is a local port from 28731 up that the script listens on while act runs, so the system frees it when the script exits or is killed. There is nothing to remove.
 - **Images.** Before the run, save `docker images -q` to a scratchpad file. After it, remove only new `act-*` images the run built for Docker actions. Keep the runner images (the base image, `act-runner-node:<date>` and job container images): they are machine tooling reused by every run.
 - **Shared volumes.** Keep `act-toolcache`, `act-pnpm-store`, `act-npm-cache`, `act-playwright` and any volume without `CI_NAME` in its name.
 - **Files.** Delete the clone, the leg caches, the event file and the logs from the scratchpad once the report is written.

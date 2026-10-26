@@ -1,19 +1,13 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
+import net from "node:net";
 import os from "node:os";
-import path from "node:path";
 
 const DEFAULT_SLOTS = 6;
+const FIRST_SLOT_PORT = 28731;
 const POLL_MS = 5000;
 const GIVE_UP_MS = 2 * 60 * 60 * 1000;
-const STALE_MS = 3 * 60 * 60 * 1000;
-const WRITING_MS = 10 * 1000;
-const COMMAND_LENGTH = 200;
 const USAGE = "usage: holdActSlot.mjs [--slots <n>] -- <command> [args...]";
-
-const homeFolder = os.homedir();
-const slotsFolder = path.join(homeFolder, ".cache", "act-slots");
 
 const fail = (message, exitCode) => {
   process.stderr.write(`holdActSlot: ${message}\n`);
@@ -38,91 +32,37 @@ const parseArguments = (argv) => {
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const isPidAlive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code !== "ESRCH";
+const holdSlotPort = (port) =>
+  new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", (error) => {
+      const isSlotTaken = error.code === "EADDRINUSE";
+      if (isSlotTaken) {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    });
+    server.listen({ port, host: "127.0.0.1" }, () => resolve(true));
+  });
+
+const takeFreeSlot = async (slotPorts) => {
+  for (const port of slotPorts) {
+    const isHeld = await holdSlotPort(port);
+    if (isHeld) return true;
   }
+  return false;
 };
 
-const readSlotOwnerPid = (slotPath) => {
-  try {
-    const slotText = readFileSync(slotPath, "utf8");
-    const owner = JSON.parse(slotText);
-    if (Number.isInteger(owner.pid)) return owner.pid;
-    return null;
-  } catch {
-    return null;
-  }
-};
-
-const readSlotAgeMs = (slotPath) => {
-  try {
-    const slotStats = statSync(slotPath);
-    return Date.now() - slotStats.mtimeMs;
-  } catch {
-    return null;
-  }
-};
-
-const isSlotStale = (slotPath) => {
-  const ageMs = readSlotAgeMs(slotPath);
-  const hasVanished = ageMs === null;
-  if (hasVanished) return true;
-  const ownerPid = readSlotOwnerPid(slotPath);
-  const hasOwner = ownerPid !== null;
-  if (!hasOwner) return ageMs > WRITING_MS;
-  return ageMs > STALE_MS || !isPidAlive(ownerPid);
-};
-
-const removeSlot = (slotPath) => {
-  try {
-    unlinkSync(slotPath);
-  } catch {}
-};
-
-const createSlotFile = (slotPath) => {
-  try {
-    return openSync(slotPath, "wx");
-  } catch (error) {
-    if (error.code === "EEXIST") return null;
-    throw error;
-  }
-};
-
-const tryTakeSlot = (slotPath, command) => {
-  const descriptor = createSlotFile(slotPath);
-  if (descriptor === null) return false;
-  const commandText = command.join(" ").slice(0, COMMAND_LENGTH);
-  const owner = { pid: process.pid, startedAt: new Date().toISOString(), command: commandText };
-  const ownerText = JSON.stringify(owner);
-  writeSync(descriptor, ownerText);
-  closeSync(descriptor);
-  return true;
-};
-
-const takeFreeSlot = (slotPaths, command) => {
-  for (const slotPath of slotPaths) {
-    if (tryTakeSlot(slotPath, command)) return slotPath;
-    const isStale = isSlotStale(slotPath);
-    if (!isStale) continue;
-    removeSlot(slotPath);
-    if (tryTakeSlot(slotPath, command)) return slotPath;
-  }
-  return null;
-};
-
-const waitForSlot = async (slotPaths, command) => {
-  const firstSlotPath = takeFreeSlot(slotPaths, command);
-  if (firstSlotPath !== null) return firstSlotPath;
-  process.stderr.write(`waiting for a free act slot: all ${slotPaths.length} in use\n`);
+const waitForSlot = async (slotPorts) => {
+  const isHeldAtOnce = await takeFreeSlot(slotPorts);
+  if (isHeldAtOnce) return;
+  process.stderr.write(`waiting for a free act slot: all ${slotPorts.length} in use\n`);
   const giveUpAt = Date.now() + GIVE_UP_MS;
   for (;;) {
     await sleep(POLL_MS);
-    const slotPath = takeFreeSlot(slotPaths, command);
-    if (slotPath !== null) return slotPath;
+    const isHeld = await takeFreeSlot(slotPorts);
+    if (isHeld) return;
     const hasWaitedTooLong = Date.now() > giveUpAt;
     if (hasWaitedTooLong) fail("gave up after 2 hours without a free act slot", 1);
   }
@@ -150,11 +90,9 @@ const runCommand = (command) =>
 const main = async () => {
   const commandLine = process.argv.slice(2);
   const { slots, command } = parseArguments(commandLine);
-  mkdirSync(slotsFolder, { recursive: true });
-  const slotNumbers = Array.from({ length: slots }, (_, index) => index + 1);
-  const slotPaths = slotNumbers.map((slotNumber) => path.join(slotsFolder, `slot-${slotNumber}`));
-  const slotPath = await waitForSlot(slotPaths, command);
-  process.on("exit", () => removeSlot(slotPath));
+  const slotOffsets = Array.from({ length: slots }, (_, offset) => offset);
+  const slotPorts = slotOffsets.map((offset) => FIRST_SLOT_PORT + offset);
+  await waitForSlot(slotPorts);
   const exitCode = await runCommand(command);
   process.exit(exitCode);
 };
