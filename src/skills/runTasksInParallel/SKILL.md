@@ -120,8 +120,8 @@ Each agent must complete **only its task**:
 4. **E2E/integration happy path** — real suite or smallest durable e2e; headless default → green. Hard stop if red when stack exists; honest skip only if env missing (cap confidence).
 5. **Manual / UI QA** — load **`run-local-and-check`** for user-visible web/app flows; record evidence or N/A.
 6. **Commits** — **`organize-commits`** on the topic branch only.
-7. **Ship pre-merge** — **`finish-and-push`**: verify, push, open/update PR with `Fixes #<n>`, Summary, Confidence 1–10, test plan (unit/e2e/QA/act).
-8. **act / CI** when workflows exist — red blocks merge.
+7. **Ship pre-merge** — **`finish-and-push`**: verify, push, open/update PR with `Fixes #<n>`, Summary, Confidence 1–10, test plan (unit/e2e/QA/CI).
+8. **CI** as `finish-and-push` **Hosted CI** says: PR checks in a public repository, the local gate in a private one. Red blocks merge.
 9. **Merge** only if orchestrator authorized and confidence ≥ 6; else stop at open PR.
 10. **Do not** delete remotes; do not touch other lanes.
 11. **Lane habits** from the brief: waits that end on failure too, deletes by literal path, heavy tools stopped when done.
@@ -129,7 +129,7 @@ Each agent must complete **only its task**:
 #### 4. Orchestrator after lanes
 
 1. Refresh the Board section: task → issue → worktree → branch → model → PR → unit → e2e → QA → confidence → merge.
-2. If merge authorized: order merges (contracts → domain → UI → e2e-heavy last); `gh pr merge`; rebase remaining open PRs on conflicts; never force-push default.
+2. If merge authorized: order merges (contracts → domain → UI → e2e-heavy last); `gh pr merge`; rebase remaining open PRs on conflicts; never force-push default. In a private repository, merge the ready PRs back to back, then watch the one default-branch run; red is fixed at once in its own PR.
 3. Optional reinstall/smoke on default tip when user asked full ship (see REFERENCE).
 4. Done receipt (Verification section). Unfinished lanes stay open.
 

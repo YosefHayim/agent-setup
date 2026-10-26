@@ -8,11 +8,11 @@ Load each sibling’s `SKILL.md` when you hit that concern:
 |-------|--------|-----------------|
 | Issue + worktree + branch + cmux/brief | `run-tasks-in-parallel` setup-lanes (1 lane) | Mode B: bind existing `#N` instead of always creating |
 | Commits | `organize-commits` | — |
-| Verify, push, open PR | `finish-and-push` | PR **Summary** + **Confidence N/10** + unit/e2e/act checklist |
+| Verify, push, open PR | `finish-and-push` | PR **Summary** + **Confidence N/10** + unit/e2e/CI checklist |
 | Multi-lane cleanup | `clean-repo-by-feature` | Out of scope — redirect |
 | After merge live web | `deploy-and-check` | Optional, only if user asks |
 
-Orchestrator owns only: Gate A (unit+e2e), confidence rubric, act, merge, reinstall, done receipt.
+Orchestrator owns only: Gate A (unit+e2e), confidence rubric, CI, merge, reinstall, done receipt.
 
 ## Entry modes
 
@@ -32,8 +32,8 @@ Score **belief the feature is correct and matches repo patterns**, not optimism.
 | 4–5 | Works in a narrow demo; weak e2e; style drift. **Do not merge** without human. |
 | 6 | Happy-path unit + e2e green; follows main patterns; minor residual risk. Default minimum to auto-merge. |
 | 7 | Solid coverage; small unknowns (e.g. thin new e2e harness, one flaky host). |
-| 8 | Full gate + act green; matches CODE-STYLE; edge cases considered. |
-| 9 | High coverage, act + hosted CI green, reinstall smoke clean, little residual risk. |
+| 8 | Full gate + CI green; matches CODE-STYLE; edge cases considered. |
+| 9 | High coverage, CI green (PR checks, or local gate plus default-branch run), reinstall smoke clean, little residual risk. |
 | 10 | Reserved: production-hardened, multi-surface proof, no known residual risk. Rare. |
 
 **Caps (apply the lowest):**
@@ -41,7 +41,7 @@ Score **belief the feature is correct and matches repo patterns**, not optimism.
 - New thin e2e smoke only → max **7**
 - No CODE-STYLE / AGENTS guidance and inconsistent neighbors → max **5**
 - Unit without e2e (or reverse) → max **4** and **block merge**
-- act skipped because tooling missing (no user override) → do not merge; score may still describe code quality
+- no CI could run (no hosted run, no act) and no user override → do not merge; score may still describe code quality
 
 Always write one sentence under **Confidence** in the PR: what would lower the score.
 
@@ -55,13 +55,13 @@ Fixes #<n>
 - <user-visible outcome 2>
 
 ## Confidence
-**7/10** — Unit + CLI e2e green and matches existing command layout; act ran push CI only (not matrix OS).
+**7/10** — Unit + CLI e2e green and matches existing command layout; hosted CI ran on Linux only.
 
 ## Test plan
 - [x] Unit: `pnpm test -- <path>` → pass
 - [x] E2E: `pnpm test:integration` → pass
 - [x] Full gate: `pnpm verify` → pass
-- [x] Local act (run-ci-locally, one leg per job) → pass
+- [x] CI: PR checks → pass (private repository: local gate → pass, default-branch run after merge)
 
 ## Main safety
 - Base: main @ <sha>
@@ -69,9 +69,9 @@ Fixes #<n>
 - No history rewrite of default.
 ```
 
-## Local act (Docker)
+## Local act (only when hosted CI cannot run)
 
-Run the workflow files GitHub runs on PR/push with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow.
+When GitHub Actions cannot run for the repository, or the user asks, run the workflow files GitHub runs with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow.
 
 Notes:
 
@@ -139,7 +139,7 @@ Default branch: <main>
 - Skip tests
 
 ## Done for implementer
-Push topic branch with tests. Orchestrator owns PR confidence, act, merge, reinstall.
+Push topic branch with tests. Orchestrator owns PR confidence, CI, merge, reinstall.
 ```
 
 ## Anti-triggers (use a different skill)

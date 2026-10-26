@@ -9,7 +9,7 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | git commit push, wrap up, open PR, report when done | `finish-and-push` | Topic branch by default; no remote delete |
 | split commits, conventional messages only | `organize-commits` | Outer loop still finish-and-push if “done” means handoff |
 | new branch + small edit + PR | `finish-and-push` | Not clean-repo-by-feature |
-| one feature fully to main (tests, act, merge, reinstall) | `ship-one-feature` | `/ship-one-feature` or existing `#N`; reuses run-tasks-in-parallel + finish-and-push |
+| one feature fully to main (tests, CI, merge, reinstall) | `ship-one-feature` | `/ship-one-feature` or existing `#N`; reuses run-tasks-in-parallel + finish-and-push |
 | test gaps unit/MSW/e2e scan then TDD | `find-missing-tests` | `/find-missing-tests`; headless e2e default |
 | over-engineering scan + before/after + TDD prove | `simplify-repo-with-tests` | `/simplify-repo-with-tests`; reuses simplify-code; headless e2e default |
 | test gaps parallel lanes merge to main | `ship-missing-tests` | `/ship-missing-tests`; resume report; default merge after gates |
@@ -117,7 +117,7 @@ finish-and-push: create branch feat/<slug>, apply this exact text change: "<…>
 open PR to main, do not merge, report branch + PR URL + SHA.
 ```
 
-**One feature all the way to main (tests + act + merge + reinstall):**
+**One feature all the way to main (tests + CI + merge + reinstall):**
 
 ```text
 /ship-one-feature <feature description>
