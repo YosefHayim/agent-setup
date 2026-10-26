@@ -18,6 +18,7 @@ import { cleanUpCaches } from "../lib/cacheCleanup.js";
 import { appendToCleanupLog } from "../lib/cleanupLog.js";
 import { cacheCleanupStampFile, cleanupLockFile } from "../lib/cleanupState.js";
 import { isSessionLive } from "../lib/liveSessions.js";
+import { reportLine } from "../lib/reportLine.js";
 import { pushUnpushedBranches } from "../lib/unpushedBranches.js";
 import { cleanUpWorktrees } from "../lib/worktreeCleanup.js";
 
@@ -29,7 +30,7 @@ type WatcherOptions = {
 };
 
 const WAIT_POLL_MILLISECONDS = 2_000;
-const WAIT_LIMIT_MILLISECONDS = 10 * 60 * 1_000;
+const DEFAULT_WAIT_LIMIT_MILLISECONDS = 10 * 60 * 1_000;
 // Sessions end many times a day; the caches only need a look once a day.
 const CACHE_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60;
 
@@ -52,12 +53,15 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
   };
 };
 
+const waitLimitMilliseconds = (): number =>
+  Number(process.env.AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS) || DEFAULT_WAIT_LIMIT_MILLISECONDS;
+
 const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 // SessionEnd runs before the agent exits, and the agent's own folder only frees up once it has. While another
 // watcher holds the lock this one cannot act anyway, so it does not look at the session until the lock frees.
 const waitUntilReady = async (request: { readonly homeRoot: string; readonly sessionId: string }) => {
-  const deadline = Date.now() + WAIT_LIMIT_MILLISECONDS;
+  const deadline = Date.now() + waitLimitMilliseconds();
   while (Date.now() < deadline) {
     const isLockFree = !isWatcherLockHeldByOther(cleanupLockFile());
     if (isLockFree && !isSessionLive(request) && acquireWatcherLock(cleanupLockFile())) {
@@ -80,6 +84,15 @@ const claimCleanupTurn = (request: { readonly homeRoot: string; readonly options
   return waitUntilReady({ homeRoot: request.homeRoot, sessionId: request.options.sessionId });
 };
 
+const logGivingUp = (options: WatcherOptions): void => {
+  if (!options.wait || options.dryRun) {
+    return;
+  }
+
+  const target = `session ${options.sessionId}`;
+  appendToCleanupLog([reportLine({ action: "gave up", detail: "wait limit reached", target })]);
+};
+
 const runWatcher = async (): Promise<void> => {
   const options = decodeWatcherOptions(process.argv.slice(2));
   const homeRoot = process.env.HOME || os.homedir();
@@ -87,6 +100,7 @@ const runWatcher = async (): Promise<void> => {
   process.chdir(homeRoot);
   const hasTurn = await claimCleanupTurn({ homeRoot, options });
   if (!hasTurn) {
+    logGivingUp(options);
     return;
   }
 

@@ -54,4 +54,10 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
     purpose:
       "Folder for disk-cleanup's watcher lock, the stamp that limits the cache cleanup to once a day, the list of kept worktrees to look at again, and the log of what each pass did. Tests point it at a temporary folder.",
   },
+  {
+    name: "AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS",
+    defaultValue: "600000 (10 minutes)",
+    purpose:
+      "How long disk-cleanup's watcher waits for the ended session to stop looking live before it logs that it gave up. Tests set it to a fraction of a second.",
+  },
 ]);

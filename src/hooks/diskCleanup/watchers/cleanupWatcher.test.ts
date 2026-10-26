@@ -149,11 +149,15 @@ const watcherEnvironment = (home: CodeHome): NodeJS.ProcessEnv => ({
   AGENT_SETUP_DISK_CLEANUP_STATE_DIR: path.join(home.homeRoot, "disk-cleanup-state"),
 });
 
-const runWatcher = (request: { readonly home: CodeHome; readonly watcherArguments: ReadonlyArray<string> }) =>
+const runWatcher = (request: {
+  readonly home: CodeHome;
+  readonly watcherArguments: ReadonlyArray<string>;
+  readonly extraEnvironment?: NodeJS.ProcessEnv;
+}) =>
   spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.watcherArguments], {
     cwd: packageRoot,
     encoding: "utf8",
-    env: watcherEnvironment(request.home),
+    env: { ...watcherEnvironment(request.home), ...request.extraEnvironment },
   });
 
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
@@ -860,6 +864,26 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
 });
 
 describe("cleanupWatcher log", { timeout: 30_000 }, () => {
+  it("does not log a line again while a target's last logged action and detail are the same", () => {
+    const home = createCodeHome();
+    const locked = addBranchWorktree({ home, branch: "locked" });
+    commitFile({ workTree: locked, fileName: "locked.ts" });
+    git({ folder: home.repo, command: ["worktree", "lock", locked] });
+
+    cleanUpAfterSession(home);
+    const secondRun = cleanUpAfterSession(home);
+    git({ folder: home.repo, command: ["worktree", "unlock", locked] });
+    cleanUpAfterSession(home);
+
+    const lockedLines = readFileSync(cleanupLogFile(home), "utf8")
+      .split("\n")
+      .filter((line) => line.endsWith(` ${locked}`));
+    expect(reportLineFor({ report: secondRun.stdout, target: locked })).toMatch(/^kept +locked +\//);
+    expect(lockedLines).toHaveLength(2);
+    expect(lockedLines[0]).toMatch(/ kept +locked +\//);
+    expect(lockedLines[1]).toMatch(/ removed +pushed locked +\//);
+  });
+
   it("adds each pass's report after when it ran, and keeps only the latest thousand lines", () => {
     const home = createCodeHome();
     const earlierLines = Array.from({ length: 1_000 }, (_, lineNumber) => `earlier line ${lineNumber}`);
@@ -881,6 +905,22 @@ describe("cleanupWatcher log", { timeout: 30_000 }, () => {
 });
 
 describe("cleanupWatcher waiting", { timeout: 30_000 }, () => {
+  it("logs that it gave up waiting for an ended session that still looks live", () => {
+    const home = createCodeHome();
+    registerLiveSession({ home, sessionId: endedSessionId });
+
+    const run = runWatcher({
+      home,
+      watcherArguments: ["--session", endedSessionId, "--wait"],
+      extraEnvironment: { AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS: "500" },
+    });
+
+    const logLines = readFileSync(cleanupLogFile(home), "utf8").split("\n").filter(Boolean);
+    expect(run.status).toBe(0);
+    expect(logLines).toHaveLength(1);
+    expect(logLines[0]).toMatch(new RegExp(`^\\S+ gave up +wait limit reached +session ${endedSessionId}$`));
+  });
+
   it("does not look at the ended session while another watcher holds the lock, and cleans up once it frees", async () => {
     const home = createCodeHome();
     const merged = addBranchWorktree({ home, branch: "merged" });

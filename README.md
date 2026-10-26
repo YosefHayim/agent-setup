@@ -204,6 +204,7 @@ Lists (`duplicate-code-skip-folders`) take comma-separated values on the command
 | `AGENT_SETUP_AUTORUN_DRY_RUN` | off | When 1, true, or yes, the autorun watcher logs the keystrokes it would type instead of typing them (safe manual testing). |
 | `AGENT_SETUP_REHOME_STATE_DIR` | ~/.claude/agent-setup/state/session-rehome for a global install, .claude/agent-setup/state/session-rehome for a project install | Folder for session-rehome's ledger of moved, kept, and deleted sessions, its watcher lock, and its sweep stamp. Tests point it at a temporary folder. |
 | `AGENT_SETUP_DISK_CLEANUP_STATE_DIR` | ~/.claude/agent-setup/state/disk-cleanup for a global install, .claude/agent-setup/state/disk-cleanup for a project install | Folder for disk-cleanup's watcher lock, the stamp that limits the cache cleanup to once a day, the list of kept worktrees to look at again, and the log of what each pass did. Tests point it at a temporary folder. |
+| `AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS` | 600000 (10 minutes) | How long disk-cleanup's watcher waits for the ended session to stop looking live before it logs that it gave up. Tests set it to a fraction of a second. |
 <!-- AUTO:SETTINGS:END -->
 
 ## Scope
