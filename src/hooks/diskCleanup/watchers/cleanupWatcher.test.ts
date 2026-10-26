@@ -222,6 +222,12 @@ const interceptGit = (request: { readonly home: CodeHome; readonly words: string
   return gitStub;
 };
 
+const refuseEveryPush = (home: CodeHome) => {
+  const hookFile = path.join(home.repo, ".git", "hooks", "pre-push");
+  writeFileSync(hookFile, '#!/bin/sh\necho "tests failed" >&2\nexit 1\n');
+  chmodSync(hookFile, 0o755);
+};
+
 const upstreamOf = (request: { readonly home: CodeHome; readonly branch: string }): string =>
   git({ folder: request.home.repo, command: ["rev-parse", "--abbrev-ref", `${request.branch}@{upstream}`] });
 
@@ -256,6 +262,20 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     expect(pushedSubjects.split("\n")).toEqual(["chore: save work left in worktree", "add login.ts", "add README.md"]);
     expect(git({ folder: home.repo, command: ["branch", "--list", "feature"] })).toContain("feature");
     expect(upstreamOf({ home, branch: "feature" })).toBe("origin/feature");
+  });
+
+  it("keeps a worktree whose push the pre-push hook refuses, and says why", () => {
+    const home = createCodeHome();
+    const feature = addBranchWorktree({ home, branch: "feature" });
+    commitFile({ workTree: feature, fileName: "login.ts" });
+    refuseEveryPush(home);
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: feature })).toMatch(
+      /^kept +push failed: pre-push hook failed +\//,
+    );
+    expect(existsSync(feature)).toBe(true);
   });
 
   it("removes a worktree whose work is already on the remote without pushing", () => {
@@ -796,7 +816,7 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
     expect(git({ folder: home.repo, command: ["branch", "--show-current"] })).toBe("current");
   });
 
-  it("keeps a branch whose remote branch has moved on, since the push is never forced", () => {
+  it("keeps a branch whose remote branch has moved on, since the push is never forced, and says why", () => {
     const home = createCodeHome();
     addBranch({ home, branch: "login", fileName: "login.ts" });
     git({ folder: home.repo, command: ["push", "--quiet", "origin", "login"] });
@@ -807,8 +827,24 @@ describe("cleanupWatcher branches", { timeout: 30_000 }, () => {
 
     const run = cleanUpAfterSession(home);
 
-    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(/^kept +push failed +\//);
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(
+      /^kept +push failed: remote moved on +\//,
+    );
     expect(remoteSubjects({ home, branch: "login" })).toBe("add login.ts\nadd README.md");
+  });
+
+  it("keeps a branch whose pre-push hook refuses the push, and says the hook failed", () => {
+    const home = createCodeHome();
+    addBranch({ home, branch: "login", fileName: "login.ts" });
+    workInRepo({ home, sessionId: endedSessionId });
+    refuseEveryPush(home);
+
+    const run = cleanUpAfterSession(home);
+
+    expect(reportLineFor({ report: run.stdout, target: `${home.repo} login` })).toMatch(
+      /^kept +push failed: pre-push hook failed +\//,
+    );
+    expect(remoteBranches(home)).toBe("main");
   });
 
   it("only reports in a dry run", () => {

@@ -36,19 +36,32 @@ export type GitQuestion = {
   readonly timeoutMilliseconds?: number;
 };
 
-// A git call that fails or runs out of time has no answer, which is not the same as an empty one.
-export const gitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | undefined => {
+const runGit = (question: GitQuestion) =>
   // --no-optional-locks keeps this read from blocking an agent that is using the same work tree.
-  const git = spawnSync("git", ["--no-optional-locks", "-C", question.folder, ...question.query], {
+  spawnSync("git", ["--no-optional-locks", "-C", question.folder, ...question.query], {
     encoding: "utf8",
     env: gitEnvironment(),
     timeout: question.timeoutMilliseconds,
   });
+
+// A git call that fails or runs out of time has no answer, which is not the same as an empty one.
+export const gitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | undefined => {
+  const git = runGit(question);
   if (git.status !== 0) {
     return undefined;
   }
 
   return git.stdout.split("\n").filter((line) => line !== "");
+};
+
+// What git said on stderr when the call failed, "" when it said nothing, and undefined when the call succeeded.
+export const gitFailureText = (question: GitQuestion): string | undefined => {
+  const git = runGit(question);
+  if (git.status === 0) {
+    return undefined;
+  }
+
+  return git.stderr || "";
 };
 
 export const gitSucceeds = (question: GitQuestion): boolean => gitAnswerLines(question) !== undefined;

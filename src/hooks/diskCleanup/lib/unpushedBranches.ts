@@ -90,8 +90,9 @@ const pushUnpushedBranch = (request: {
     return reportLine({ action: "would push", detail: `to ${facts.remote}`, target });
   }
 
-  if (!pushBranch({ folder: repoFolder, remote: facts.remote, branch, commit: tip })) {
-    return reportLine({ action: "kept", detail: "push failed", target });
+  const pushStatus = pushBranch({ folder: repoFolder, remote: facts.remote, branch, commit: tip });
+  if (pushStatus._tag === "failed") {
+    return reportLine({ action: "kept", detail: `push failed: ${pushStatus.reason}`, target });
   }
 
   return reportLine({ action: "pushed", detail: `to ${facts.remote}`, target });

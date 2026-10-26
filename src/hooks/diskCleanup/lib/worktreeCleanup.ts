@@ -41,7 +41,7 @@ const applyRemoval = (request: {
 
   const removal = removeWorktree({ worktree, remote: request.remote, saveChanges: plan.saveChanges, push: plan.push });
   if (removal._tag === "failed") {
-    return reportLine({ action: "kept", detail: `${removal.step} failed`, target: worktree.folder });
+    return reportLine({ action: "kept", detail: removal.detail, target: worktree.folder });
   }
 
   const donePush = pushDetail({ pushVerb: "pushed", push: removal.pushed, branch: worktree.branch });
