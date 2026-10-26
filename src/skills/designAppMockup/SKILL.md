@@ -1,6 +1,6 @@
 ---
 name: design-app-mockup
-description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows wireframes with 3 directions for you to pick, then builds the final UI with a style sheet, custom icons, real photos, clickable app journeys, and a landing page. Say "design my app idea", "mock up this idea", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
+description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows wireframes with 3 directions that differ in how the app works and never repeat your past mockups, for you to pick, then builds the final UI with a style sheet, custom icons, real photos, clickable app journeys, and a landing page. Say "design my app idea", "mock up this idea", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
 type: flow
 ---
 
@@ -32,30 +32,33 @@ Ask in one question card only what is still open:
 - the launch CTA: download, sign up, or waitlist;
 - the pricing model. Prices stay placeholders unless the user gives them.
 
-### 2. Signature and job map
+### 2. Past mockups and signatures
 
-Pick one metaphor from the idea's own world, such as a fridge for a pantry app, with its shelves, door bins, display, and lamp. Give each part one job and keep it the same on every screen ([REFERENCE.md → Signature and job map](REFERENCE.md#signature-and-job-map)). The map goes on the first canvas page.
+Read the last 3 mockups this skill made and write what they used in a "Not again" note ([REFERENCE.md → Past mockups](REFERENCE.md#past-mockups)). Every mockup gets its own look, so nothing on that note comes back.
+
+Then pick 3 different metaphors from the idea's own world, one per direction, such as a fridge, a recipe card, and a shopping list for a pantry app. Give each part one job and keep it the same on every screen ([REFERENCE.md → Signature and job map](REFERENCE.md#signature-and-job-map)).
 
 ### 3. Wireframes with 3 directions — stop
 
 Build a canvas ([REFERENCE.md → Canvas](REFERENCE.md#canvas)) with:
 
-- a "Directions" page: 3 directions, one row each, the same 3 key screens in every row, and a good and bad note under each row. Mark the one you recommend;
-- the job map and a "how to read this canvas" note;
-- one page per journey with screens left to right and a "Step N" note under each: first use to first result, fixes and edge cases, account and payment;
-- grays plus one accent, gray squares for icons, and real text and data. Never lorem ipsum.
+- a "Directions" page: 3 directions, one row each, and a good and bad note under each row. Every row shows the same 3 key jobs, each laid out its own way. Mark the one you recommend;
+- the direction table that places each direction on the axes, so the user sees they differ in how the app works, not only in looks ([REFERENCE.md → Directions](REFERENCE.md#directions)). Redo a direction that differs from another on fewer than 3 axes or repeats the Not again note;
+- the Not again note, each direction's job map, and a "how to read this canvas" note;
+- one page per journey with screens left to right and a "Step N" note under each: first use to first result, fixes and edge cases, account and payment. Draw them in the recommended direction, not a neutral shell;
+- grays plus each row's own accent and font pairing, gray squares for icons, and real text and data. Never lorem ipsum.
 
 Tell the user in 3 lines which direction you recommend and why. Stop until they pick.
 
 ### 4. References and build plan — stop
 
-Pick 3–4 real templates that fit the idea, Framer marketplace first. For each, name the one touch you borrow, never a layout to copy. Name the slop you will avoid ([REFERENCE.md → Slop list](REFERENCE.md#slop-list)).
+Pick 3–4 real templates that fit the picked direction, Framer marketplace first. For each, name the one touch you borrow, never a layout to copy. Name the one whose section order the landing page takes. Name the slop you will avoid ([REFERENCE.md → Slop list](REFERENCE.md#slop-list)).
 
 List the boards: style sheet, icon sheet when the idea has physical things, every app screen, and the landing page at desktop and phone. Say how the real app will get its photos and icons. Stop until the user says go.
 
 ### 5. Style sheet first
 
-Build the style sheet board before any screen, from [REFERENCE.md → Tokens](REFERENCE.md#tokens) and [Components](REFERENCE.md#components): a one-line identity, colors with one role each, the type scale, the radius set, the grid, touch size, buttons, chips, cards, and the signature parts. Every later board copies these values exactly.
+Build the style sheet board before any screen, from [REFERENCE.md → Craft rules](REFERENCE.md#craft-rules) and [Components](REFERENCE.md#components): a one-line identity, colors with one role each, the type scale, the radius set, the grid, touch size, buttons, navigation, chips, cards, and the signature parts. The values come from the picked direction, never from the pantry example. Every later board copies them exactly.
 
 ### 6. Icons and photos
 
@@ -68,7 +71,7 @@ Build the key screens from step 3 first, then the rest in journey order ([REFERE
 
 ### 8. Landing page
 
-Follow one reference template's section order ([REFERENCE.md → Landing](REFERENCE.md#landing)) with the app's own content. Every CTA is the launch CTA from step 1. Build one fluid page and show it at desktop 1440 and phone 390.
+Follow the section order of the template named in step 4 ([REFERENCE.md → Landing](REFERENCE.md#landing)) with the app's own content. Every CTA is the launch CTA from step 1. Build one fluid page and show it at desktop 1440 and phone 390.
 
 ### 9. Consistency pass and cleanup
 
@@ -79,6 +82,7 @@ Read every board against the others ([REFERENCE.md → Consistency pass](REFEREN
 Report:
 
 - the canvas link (or local canvas path) and the chosen direction;
+- the direction table: every pair differs on at least 3 axes, and none repeats the Not again note;
 - the references used and the touch taken from each;
 - photo sources and licenses, and which need a credit line;
 - every placeholder left for the user, such as prices and store links;
