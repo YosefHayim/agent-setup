@@ -12,7 +12,8 @@ const WRITING_MS = 10 * 1000;
 const COMMAND_LENGTH = 200;
 const USAGE = "usage: holdActSlot.mjs [--slots <n>] -- <command> [args...]";
 
-const slotsFolder = path.join(os.homedir(), ".cache", "act-slots");
+const homeFolder = os.homedir();
+const slotsFolder = path.join(homeFolder, ".cache", "act-slots");
 
 const fail = (message, exitCode) => {
   process.stderr.write(`holdActSlot: ${message}\n`);
@@ -25,12 +26,11 @@ const parseArguments = (argv) => {
   if (!hasCommand) fail(USAGE, 2);
   const flags = argv.slice(0, separatorIndex);
   const command = argv.slice(separatorIndex + 1);
-  const slotsFlagIndex = flags.indexOf("--slots");
-  const hasSlotsFlag = slotsFlagIndex !== -1;
-  const expectedFlagCount = hasSlotsFlag ? 2 : 0;
-  if (flags.length !== expectedFlagCount) fail(USAGE, 2);
-  if (!hasSlotsFlag) return { slots: DEFAULT_SLOTS, command };
-  const slots = Number(flags[slotsFlagIndex + 1]);
+  const hasNoFlags = flags.length === 0;
+  if (hasNoFlags) return { slots: DEFAULT_SLOTS, command };
+  const isSlotsFlagOnly = flags.length === 2 && flags[0] === "--slots";
+  if (!isSlotsFlagOnly) fail(USAGE, 2);
+  const slots = Number(flags[1]);
   const isSlotsValid = Number.isInteger(slots) && slots > 0;
   if (!isSlotsValid) fail(USAGE, 2);
   return { slots, command };
@@ -49,27 +49,32 @@ const isPidAlive = (pid) => {
 
 const readSlotOwnerPid = (slotPath) => {
   try {
-    const owner = JSON.parse(readFileSync(slotPath, "utf8"));
-    return Number.isInteger(owner.pid) ? owner.pid : null;
+    const slotText = readFileSync(slotPath, "utf8");
+    const owner = JSON.parse(slotText);
+    if (Number.isInteger(owner.pid)) return owner.pid;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const readSlotAgeMs = (slotPath) => {
+  try {
+    const slotStats = statSync(slotPath);
+    return Date.now() - slotStats.mtimeMs;
   } catch {
     return null;
   }
 };
 
 const isSlotStale = (slotPath) => {
-  const ageMs = Date.now() - statSync(slotPath).mtimeMs;
+  const ageMs = readSlotAgeMs(slotPath);
+  const hasVanished = ageMs === null;
+  if (hasVanished) return true;
   const ownerPid = readSlotOwnerPid(slotPath);
   const hasOwner = ownerPid !== null;
   if (!hasOwner) return ageMs > WRITING_MS;
   return ageMs > STALE_MS || !isPidAlive(ownerPid);
-};
-
-const isSlotGone = (slotPath) => {
-  try {
-    return isSlotStale(slotPath);
-  } catch {
-    return true;
-  }
 };
 
 const removeSlot = (slotPath) => {
@@ -78,77 +83,78 @@ const removeSlot = (slotPath) => {
   } catch {}
 };
 
-const tryTakeSlot = (slotPath, command) => {
-  let descriptor;
+const createSlotFile = (slotPath) => {
   try {
-    descriptor = openSync(slotPath, "wx");
+    return openSync(slotPath, "wx");
   } catch (error) {
-    if (error.code === "EEXIST") return false;
+    if (error.code === "EEXIST") return null;
     throw error;
   }
+};
+
+const tryTakeSlot = (slotPath, command) => {
+  const descriptor = createSlotFile(slotPath);
+  if (descriptor === null) return false;
   const commandText = command.join(" ").slice(0, COMMAND_LENGTH);
   const owner = { pid: process.pid, startedAt: new Date().toISOString(), command: commandText };
-  writeSync(descriptor, JSON.stringify(owner));
+  const ownerText = JSON.stringify(owner);
+  writeSync(descriptor, ownerText);
   closeSync(descriptor);
   return true;
 };
 
-const takeFreeSlot = (slots, command) => {
-  let slotsInUse = 0;
-  for (let index = 1; index <= slots; index += 1) {
-    const slotPath = path.join(slotsFolder, `slot-${index}`);
-    if (tryTakeSlot(slotPath, command)) return { slotPath, slotsInUse };
-    const isStale = isSlotGone(slotPath);
-    if (isStale) removeSlot(slotPath);
-    if (isStale && tryTakeSlot(slotPath, command)) return { slotPath, slotsInUse };
-    slotsInUse += 1;
+const takeFreeSlot = (slotPaths, command) => {
+  for (const slotPath of slotPaths) {
+    if (tryTakeSlot(slotPath, command)) return slotPath;
+    const isStale = isSlotStale(slotPath);
+    if (!isStale) continue;
+    removeSlot(slotPath);
+    if (tryTakeSlot(slotPath, command)) return slotPath;
   }
-  return { slotPath: null, slotsInUse };
+  return null;
 };
 
-const waitForSlot = async (slots, command) => {
-  const startedWaitingAt = Date.now();
-  let hasAnnounced = false;
+const waitForSlot = async (slotPaths, command) => {
+  const firstSlotPath = takeFreeSlot(slotPaths, command);
+  if (firstSlotPath !== null) return firstSlotPath;
+  process.stderr.write(`waiting for a free act slot: all ${slotPaths.length} in use\n`);
+  const giveUpAt = Date.now() + GIVE_UP_MS;
   for (;;) {
-    const { slotPath, slotsInUse } = takeFreeSlot(slots, command);
-    if (slotPath !== null) return slotPath;
-    if (!hasAnnounced) process.stderr.write(`waiting for a free act slot: ${slotsInUse} of ${slots} in use\n`);
-    hasAnnounced = true;
-    const hasWaitedTooLong = Date.now() - startedWaitingAt > GIVE_UP_MS;
-    if (hasWaitedTooLong) fail("gave up after 2 hours without a free act slot", 1);
     await sleep(POLL_MS);
+    const slotPath = takeFreeSlot(slotPaths, command);
+    if (slotPath !== null) return slotPath;
+    const hasWaitedTooLong = Date.now() > giveUpAt;
+    if (hasWaitedTooLong) fail("gave up after 2 hours without a free act slot", 1);
   }
 };
 
 const runCommand = (command) =>
   new Promise((resolve) => {
-    const child = spawn(command[0], command.slice(1), { stdio: "inherit" });
+    const [program, ...programArguments] = command;
+    const child = spawn(program, programArguments, { stdio: "inherit" });
     for (const signalName of ["SIGINT", "SIGTERM"]) process.on(signalName, () => child.kill(signalName));
     child.on("error", (error) => {
-      process.stderr.write(`holdActSlot: cannot start ${command[0]}: ${error.message}\n`);
+      process.stderr.write(`holdActSlot: cannot start ${program}: ${error.message}\n`);
       resolve(127);
     });
     child.on("close", (exitCode, signalName) => {
       const diedFromSignal = signalName !== null;
-      if (diedFromSignal) resolve(128 + os.constants.signals[signalName]);
-      if (!diedFromSignal) resolve(exitCode);
+      if (diedFromSignal) {
+        resolve(128 + os.constants.signals[signalName]);
+        return;
+      }
+      resolve(exitCode);
     });
   });
 
 const main = async () => {
-  const { slots, command } = parseArguments(process.argv.slice(2));
+  const commandLine = process.argv.slice(2);
+  const { slots, command } = parseArguments(commandLine);
   mkdirSync(slotsFolder, { recursive: true });
-  let heldSlotPath = null;
-  process.on("exit", () => {
-    if (heldSlotPath !== null) removeSlot(heldSlotPath);
-  });
-  for (const signalName of ["SIGINT", "SIGTERM"]) {
-    process.on(signalName, () => {
-      const isStillWaiting = heldSlotPath === null;
-      if (isStillWaiting) process.exit(128 + os.constants.signals[signalName]);
-    });
-  }
-  heldSlotPath = await waitForSlot(slots, command);
+  const slotNumbers = Array.from({ length: slots }, (_, index) => index + 1);
+  const slotPaths = slotNumbers.map((slotNumber) => path.join(slotsFolder, `slot-${slotNumber}`));
+  const slotPath = await waitForSlot(slotPaths, command);
+  process.on("exit", () => removeSlot(slotPath));
   const exitCode = await runCommand(command);
   process.exit(exitCode);
 };
