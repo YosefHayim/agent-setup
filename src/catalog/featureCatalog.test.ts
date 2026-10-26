@@ -246,7 +246,7 @@ describe("featureCatalog", () => {
       ["simplify-repo-with-tests", ["SKILL.md", "REFERENCE.md", "references", "agents"]],
       ["restructure-repo", ["SKILL.md", "REFERENCE.md", "EXAMPLES.md"]],
       ["improve-ux", ["SKILL.md", "REFERENCE.md"]],
-      ["design-app-mockup", ["SKILL.md", "REFERENCE.md"]],
+      ["design-app-mockup", ["SKILL.md", "REFERENCE.md", "scripts"]],
       ["free-ports", ["SKILL.md"]],
       ["clone-all-repos", ["SKILL.md", "agents"]],
       ["manage-cloudflare", ["SKILL.md"]],

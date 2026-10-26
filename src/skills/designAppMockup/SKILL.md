@@ -1,21 +1,24 @@
 ---
 name: design-app-mockup
-description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows wireframes with 3 directions that differ in how the app works and never repeat your past mockups, for you to pick, then builds the final UI with a style sheet, custom icons, real photos, clickable app journeys, and a landing page. Say "design my app idea", "mock up this idea", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
+description: Use when you have an app idea and want premium, Framer-level UI mockups before you build — clean, minimal, not AI slop. It shows 3 real Framer templates that fit the idea for you to pick, studies the one you pick (layout, type, motion), and builds a high-fidelity landing page inspired by it, never a 1:1 copy. After you approve the page, it builds a UI library from it, then clickable app screens with custom icons and real photos. Say "design my app idea", "mock up this idea", "Framer-vibe landing page", or "premium UI for…". For flows in an existing app, use improve-ux. To turn a finished design into exact code, use image-to-code.
 type: flow
 ---
 
 # Design app mockup
 
-Turn an app idea into a final UI mockup at the level of a good Framer template: real photos, custom icons, and every UX state thought through. Mockups only, no app code.
+Turn an app idea into a final UI mockup at the level of a good Framer template. The landing page comes first, and the UI library and app screens are built from it. Mockups only, no app code.
 
-The quality comes from the order of the work and a few hard rules, not from polishing each screen. Follow the steps in order. The taste rules live in [REFERENCE.md](REFERENCE.md).
+Everything the user sees is high fidelity: the final type and colors, real copy, real product UI, and motion. Never show gray-box wireframes, or directions built on object metaphors such as a report, a road sign, or a logbook. A user rejected exactly that as "terrible" and asked for "a framer vibe ui ux landing page that we will then build the rest of the ui library from".
+
+The taste rules live in [REFERENCE.md](REFERENCE.md). Follow the steps in order.
 
 ## Safety
 
 - Mockups only. Write no app code and change no repo files.
-- Two stops: after the wireframe directions (step 3) and after the build plan (step 4). Build nothing past a stop without the user's yes.
-- Keep every artifact private. Never share, deploy, or post it.
-- Photos: free licenses only — CC0 or public domain first, CC BY only with the credit noted. Never a brand's photos or logos, and never a real person's likeness.
+- Two stops: after the template pick (step 2) and after the landing page (step 4). Build nothing past a stop without the user's yes.
+- A template is inspiration, never a copy. Take its grammar: framing, rhythm, kinds of components, and the kind and pace of motion. Never take its palette, font set, copy, illustrations, photos, or files 1:1 ([REFERENCE.md → Not a copy](REFERENCE.md#not-a-copy)).
+- Keep every artifact private. Never share, deploy, or post it. Template captures stay in the scratchpad and never go into a board or an upload.
+- Photos: free licenses only. Use CC0 or public domain first, and CC BY only with the credit noted. Never use a brand's photos or logos, or a real person's likeness.
 - Never invent stats, reviews, testimonials, press logos, user counts, or prices. Use a placeholder such as `[YOUR PRICE]`.
 - Working files go in the session scratchpad or a folder the user names, never in `/tmp` and never inside a repo. Delete them at the end.
 
@@ -32,33 +35,49 @@ Ask in one question card only what is still open:
 - the launch CTA: download, sign up, or waitlist;
 - the pricing model. Prices stay placeholders unless the user gives them.
 
-### 2. Past mockups and signatures
+### 2. Pick a template — stop
 
-Read the last 3 mockups this skill made and write what they used in a "Not again" note ([REFERENCE.md → Past mockups](REFERENCE.md#past-mockups)). Every mockup gets its own look, so nothing on that note comes back.
+Note the templates, fonts, and colors of the last 3 mockups this skill made ([REFERENCE.md → Past mockups](REFERENCE.md#past-mockups)).
 
-Then pick 3 different metaphors from the idea's own world, one per direction, such as a fridge, a recipe card, and a shopping list for a pantry app. Give each part one job and keep it the same on every screen ([REFERENCE.md → Signature and job map](REFERENCE.md#signature-and-job-map)).
+Find 6–8 real templates that fit the idea, Framer marketplace first ([REFERENCE.md → Finding templates](REFERENCE.md#finding-templates)). Capture the first screen of each with [scripts/captureTemplate.mjs](scripts/captureTemplate.mjs), and look at every shot yourself. Offer the 3 best. They must differ from each other in ground, type, and how they show the product, and none may come from a past mockup.
 
-### 3. Wireframes with 3 directions — stop
+For each one, give:
 
-Build a canvas ([REFERENCE.md → Canvas](REFERENCE.md#canvas)) with:
+- the name and the preview link;
+- one line on why it fits the idea;
+- what would carry over: the layout, the motion, or the feel.
 
-- a "Directions" page: 3 directions, one row each, and a good and bad note under each row. Every row shows the same 3 key jobs, each laid out its own way. Mark the one you recommend;
-- the direction table that places each direction on the axes, so the user sees they differ in how the app works, not only in looks ([REFERENCE.md → Directions](REFERENCE.md#directions)). Redo a direction that differs from another on fewer than 3 axes or repeats the Not again note;
-- the Not again note, each direction's job map, and a "how to read this canvas" note;
-- one page per journey with screens left to right and a "Step N" note under each: first use to first result, fixes and edge cases, account and payment. Draw them in the recommended direction, not a neutral shell;
-- grays plus each row's own accent and font pairing, gray squares for icons, and real text and data. Never lorem ipsum.
+Recommend one. Stop until the user picks. They may mix templates, such as "Sola's layout on Signal's dark ground".
 
-Tell the user in 3 lines which direction you recommend and why. Stop until they pick.
+### 3. Study the template
 
-### 4. References and build plan — stop
+Capture the picked template screen by screen at 1440 and at 390 ([REFERENCE.md → Capturing a template](REFERENCE.md#capturing-a-template)). Look at every screen and every motion frame. Read `study.json` for the fonts, colors, radii, section order, and load motion. Write a study note in the scratchpad ([REFERENCE.md → Study note](REFERENCE.md#study-note)).
 
-Pick 3–4 real templates that fit the picked direction, Framer marketplace first. For each, name the one touch you borrow, never a layout to copy. Name the one whose section order the landing page takes. Name the slop you will avoid ([REFERENCE.md → Slop list](REFERENCE.md#slop-list)).
+Then write the "inspired, not copied" plan:
 
-List the boards: style sheet, icon sheet when the idea has physical things, every app screen, and the landing page at desktop and phone. Say how the real app will get its photos and icons. Stop until the user says go.
+- what carries over: the grammar;
+- what is the app's own: the palette, the fonts, the hero moment, one signature component, the section mix, and all copy and imagery.
 
-### 5. Style sheet first
+Check the plan against [REFERENCE.md → Not a copy](REFERENCE.md#not-a-copy).
 
-Build the style sheet board before any screen, from [REFERENCE.md → Craft rules](REFERENCE.md#craft-rules) and [Components](REFERENCE.md#components): a one-line identity, colors with one role each, the type scale, the radius set, the grid, touch size, buttons, navigation, chips, cards, and the signature parts. The values come from the picked direction, never from the pantry example. Every later board copies them exactly.
+### 4. Landing page first — stop
+
+Build one fluid landing page at the template's level ([REFERENCE.md → Landing](REFERENCE.md#landing), [Hi-fi bar](REFERENCE.md#hi-fi-bar), [Motion](REFERENCE.md#motion)). It has the app's real copy, real product UI in the hero and in how it works, and motion. Every CTA is the launch CTA. Show it on the canvas at 1440 and 390 ([REFERENCE.md → Canvas](REFERENCE.md#canvas)).
+
+Render both sizes yourself, after the motion settles, and look at the renders. Put each one next to the template's matching screen. Fix what looks off, and change more where the two could be mistaken for each other, before you show the user anything.
+
+Tell the user in 3 lines what carried over and what is the app's own. List the boards that come next: the library, icons, and every app screen. Stop until they approve or ask for changes.
+
+### 5. UI library from the landing page
+
+Build the style sheet and component library from the approved page ([REFERENCE.md → UI library](REFERENCE.md#ui-library)):
+
+- tokens copied exactly from the page;
+- every component the page uses;
+- the components the app needs that the page lacks, in the same grammar;
+- every state for each component.
+
+Every later board uses only these tokens and components.
 
 ### 6. Icons and photos
 
@@ -67,25 +86,26 @@ Build the style sheet board before any screen, from [REFERENCE.md → Craft rule
 
 ### 7. App screens in journey order
 
-Build the key screens from step 3 first, then the rest in journey order ([REFERENCE.md → Screens](REFERENCE.md#screens)): one primary action per screen, every state, real copy. Make a board interactive where a tap teaches something, and link screens so each journey clicks through.
+Build the screens in journey order from the library ([REFERENCE.md → Screens](REFERENCE.md#screens)):
 
-### 8. Landing page
+- the journeys: first use to first result, fixes and edge cases, then account and payment;
+- one primary action per screen, every state, and real copy;
+- navigation and home shaped by the app's job, never by a past mockup;
+- links between screens, so each journey clicks through.
 
-Follow the section order of the template named in step 4 ([REFERENCE.md → Landing](REFERENCE.md#landing)) with the app's own content. Every CTA is the launch CTA from step 1. Build one fluid page and show it at desktop 1440 and phone 390.
+### 8. Consistency pass and cleanup
 
-### 9. Consistency pass and cleanup
-
-Read every board against the others ([REFERENCE.md → Consistency pass](REFERENCE.md#consistency-pass)) and fix each mismatch. Lay out the canvas with page titles and the legend. Delete research notes, renders, and photo work files.
+Read every board against the landing page and the library ([REFERENCE.md → Consistency pass](REFERENCE.md#consistency-pass)), and fix each mismatch. Lay out the canvas with page titles. Delete the template captures, the study note, renders, and photo work files.
 
 ## Verification
 
 Report:
 
-- the canvas link (or local canvas path) and the chosen direction;
-- the direction table: every pair differs on at least 3 axes, and none repeats the Not again note;
-- the references used and the touch taken from each;
+- the canvas link (or local canvas path) and the template picked;
+- what carried over from the template and what is the app's own, with the Not a copy check passed;
+- that the 1440 and 390 renders were checked by eye next to the template;
 - photo sources and licenses, and which need a credit line;
 - every placeholder left for the user, such as prices and store links;
 - how the real app should get its photos and icons.
 
-The mockup is done when every board in the approved plan exists, each journey clicks through, and the consistency pass finds nothing left to fix.
+The mockup is done when every board in the approved list exists, each journey clicks through, and the consistency pass finds nothing left to fix.

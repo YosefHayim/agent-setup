@@ -736,8 +736,8 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     sourceDirectory: "designAppMockup",
     title: "Design app mockup",
     summary:
-      "Turn an app idea into premium UI mockups: 3 wireframe directions that differ in how the app works and never repeat past mockups, then a style sheet, custom icons, real photos, clickable app journeys, and a landing page.",
-    shippedPaths: ["SKILL.md", "REFERENCE.md"],
+      "Turn an app idea into premium, Framer-level UI mockups: pick one of 3 real templates, get a hi-fi landing page inspired by it (never a 1:1 copy), then a UI library from that page, custom icons, real photos, and clickable app journeys.",
+    shippedPaths: ["SKILL.md", "REFERENCE.md", "scripts"],
   }),
   skillFeature({
     id: "free-ports",
