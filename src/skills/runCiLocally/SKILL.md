@@ -130,6 +130,7 @@ GITHUB_TOKEN="$(gh auth token)" node "<skill directory>/scripts/holdActSlot.mjs"
 - `-s GITHUB_TOKEN` without a value reads the variable, so the token stays out of act's arguments in the process list.
 
 - Use the event the workflow really runs on: `pull_request` with the event file, `workflow_dispatch` for a manual full run, `push` only when the workflow has that trigger.
+- A repository's AGENTS.md can name options its legs need, such as `--input changed-files=<list>` for a `workflow_dispatch` input or `-P macos-26=-self-hosted` for a job that runs on this Mac. Pass them to every leg of that repository.
 - On cold caches (a new pnpm version or lockfile), run one leg alone first and start the rest after it, so they reuse its downloads.
 - The slots are shared by every session and account on the machine, so start all legs in the background and let the script queue them. It waits for a free slot (6 by default, `--slots <n>`), runs act, frees the slot when act exits, and exits with act's exit code. Do not cap the legs yourself.
 - A job with a matrix (for example Playwright shards) runs one leg per entry with `--matrix <key>:<value>`, each leg with its own workflow copy, action cache and slot. Rerun one failed leg the same way.

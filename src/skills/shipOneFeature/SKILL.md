@@ -114,7 +114,7 @@ No PR marked ready / no merge until Gate A passes.
 
 ### 5. Local act (owned glue)
 
-When workflows exist: `act` + Docker; prefer repo-documented act invocation; else PR/push workflow files (REFERENCE.md). Red → fix on branch, push, re-run. Monitor `gh pr checks` when hosted CI exists.
+When workflows exist: run them with the sibling **run-ci-locally** skill, with the leg options the repo's AGENTS.md names (REFERENCE.md). Red → fix on branch, push, re-run. Monitor `gh pr checks` when hosted CI exists.
 
 ### 6. Merge (owned glue; authorized by this skill)
 

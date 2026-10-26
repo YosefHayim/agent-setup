@@ -161,13 +161,7 @@ Happy path = primary success scenario. At least one unit and one e2e assertion s
 
 ## act (when CI exists)
 
-```bash
-act --version
-docker info >/dev/null
-act pull_request -W .github/workflows/ci.yml
-```
-
-Prefer repo-documented act invocations. Red → fix on branch, push, re-run; do not merge.
+Run the workflows with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow. Red → fix on branch, push, re-run; do not merge.
 
 ## Reinstall / smoke (optional full ship)
 

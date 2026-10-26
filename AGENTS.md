@@ -109,5 +109,5 @@ pnpm --dir src/skills/imageToCode/scripts typecheck
 
 ## Local CI
 
-Run `act workflow_dispatch -W .github/workflows/ci.yml` before opening a PR.
+Before opening a PR, run `.github/workflows/ci.yml` locally with the run-ci-locally skill. It runs one act process per job, each holding a machine-wide slot, so parallel sessions do not run Docker out of memory. Never run `act` on the whole workflow.
 The machine's `~/.actrc` selects the Docker runner and the shared pnpm store, as the run-ci-locally skill describes. The repository has no `.actrc`, because act reads it last and it would override those machine settings.
