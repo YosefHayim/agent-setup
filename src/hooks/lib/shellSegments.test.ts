@@ -19,6 +19,13 @@ describe("shellSegments", () => {
     ]);
   });
 
+  it("keeps an empty quoted word", () => {
+    expect(segmentWords(`git config core.hooksPath '' && pkill -f "" a''b`)).toEqual([
+      ["git", "config", "core.hooksPath", ""],
+      ["pkill", "-f", "", "ab"],
+    ]);
+  });
+
   it("joins a line continuation and splits on a newline", () => {
     expect(segmentWords("pkill \\\n-f vite\nls")).toEqual([["pkill", "-f", "vite"], ["ls"]]);
   });

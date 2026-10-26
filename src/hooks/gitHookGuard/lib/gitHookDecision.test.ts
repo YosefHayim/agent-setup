@@ -89,6 +89,8 @@ describe("decideGitHook skipped hooks", () => {
   it("denies git config that sets or unsets core.hooksPath to anything but the repo hooks", () => {
     denies("git config core.hooksPath /dev/null");
     denies("git config --local core.hookspath ~/hooks");
+    denies("git config core.hooksPath ''");
+    denies('git config core.hooksPath ""');
     denies("git config --unset core.hooksPath");
     denies("git config --unset-all core.hooksPath");
     denies("git config unset core.hooksPath");

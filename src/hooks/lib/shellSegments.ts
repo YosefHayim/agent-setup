@@ -17,6 +17,8 @@ const WORD_BREAK = "\u0000";
 const SEGMENT_BREAK = "\u0001";
 // Stands for the unknown text a shell expansion produces when the command runs.
 export const SHELL_VALUE = "\u0002";
+// Marks quoted text, so an empty quoted word such as '' stays a word, then is removed.
+const QUOTED_MARK = "\u0003";
 
 const doubleQuotedText = (quoted: string): string =>
   quoted.replace(DOUBLE_QUOTED_PIECE, (_piece, escapedCharacter: string | undefined) => {
@@ -31,11 +33,11 @@ const pieceText = (piece: RegExpExecArray): string => {
   const pieceGroups: Readonly<Record<string, string | undefined>> = { ...piece.groups };
   const { singleQuoted, doubleQuoted, escaped, plainWord, segmentBreak } = pieceGroups;
   if (singleQuoted !== undefined) {
-    return singleQuoted;
+    return `${QUOTED_MARK}${singleQuoted}`;
   }
 
   if (doubleQuoted !== undefined) {
-    return doubleQuotedText(doubleQuoted);
+    return `${QUOTED_MARK}${doubleQuotedText(doubleQuoted)}`;
   }
 
   if (escaped !== undefined) {
@@ -57,7 +59,8 @@ const pieceText = (piece: RegExpExecArray): string => {
 // odd index is a segment's text, with the break that opened it before it and the break that closed it after it.
 const segmentAt = (parts: ReadonlyArray<string>, index: number): ReadonlyArray<ShellSegment> => {
   const [openedBy = "", segmentText = "", closedBy = ""] = parts.slice(index - 1, index + 2);
-  const words = segmentText.split(WORD_BREAK).filter((word) => word !== "");
+  const markedWords = segmentText.split(WORD_BREAK).filter((word) => word !== "");
+  const words = markedWords.map((word) => word.replaceAll(QUOTED_MARK, ""));
   if (index % 2 === 0 || words.length === 0) {
     return [];
   }
