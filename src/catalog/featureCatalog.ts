@@ -397,6 +397,29 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     },
   },
   {
+    id: "git-hook-guard",
+    sourceDirectory: "gitHookGuard",
+    installedSkill: { _tag: "none" },
+    title: "Git hook guard",
+    summary:
+      "Block git commands that skip or disable git hooks (`--no-verify`, `git commit -n`, `HUSKY=0`, `core.hooksPath` overrides), and commits and pushes in a worktree whose hooks are not installed yet, e.g. a fresh worktree before `pnpm install`. The agent is told to fix what the hooks report instead.",
+    selectedByDefault: true,
+    dependencies: [],
+    platform: "any",
+    runtime: {
+      _tag: "hook",
+      sourceEntrypoint: "hooks/gitHookGuard.ts",
+      registrations: [
+        {
+          event: "PreToolUse",
+          matcher: { _tag: "pattern", value: "Bash" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+      ],
+    },
+  },
+  {
     id: "session-rehome",
     sourceDirectory: "sessionRehome",
     installedSkill: { _tag: "none" },

@@ -120,6 +120,10 @@ _Avoid_: "temp guard", "tmp hook".
 Guard that denies a `pkill`, `killall`, or pgrep-fed `kill` whose pattern also matches a running Claude Code session, the terminal and shells it runs in, or an app the pattern does not name.
 _Avoid_: "kill blocker", "pkill hook".
 
+**git-hook-guard**
+Guard that denies a git command that skips or disables git hooks, and a `git commit` or `git push` in a worktree whose hooks are not installed yet.
+_Avoid_: "no-verify blocker", "husky check".
+
 **session-rehome**
 Feature that moves an ended Claude Code session or Codex thread into the local repo its work was about, so that repo's `/resume` or `codex resume` lists it. "Rehome" is the verb for that move; a session's **home** is the folder its agent lists it under.
 _Avoid_: "migrate", "relocate" (Claude Code's own word for its worktree moves).

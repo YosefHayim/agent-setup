@@ -1,5 +1,5 @@
 import { escapeForPattern } from "../../lib/patternEscape.js";
-import { SHELL_VALUE, type ShellSegment, shellSegments } from "./shellSegments.js";
+import { SHELL_VALUE, type ShellSegment, shellSegments } from "../../lib/shellSegments.js";
 
 export type KillTarget = {
   readonly commandWords: string;
