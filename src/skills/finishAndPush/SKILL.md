@@ -1,6 +1,6 @@
 ---
 name: finish-and-push
-description: Use when the work is done and you want to wrap it up. It runs the checks, commits, pushes to a feature branch, and cleans up. It never pushes to main or deletes remote branches unless you ask. Say "commit and push", "wrap up", or "finish what I asked". To only split commits, use organize-commits.
+description: Use when the work is done and you want to wrap it up. It runs the checks, commits, pushes to a feature branch, and cleans up. It never pushes to main or deletes remote branches unless you ask. Say "commit and push", "git commit push", "commit push redeploy", "wrap up", or "finish what I asked". To only split commits, use organize-commits.
 type: flow
 ---
 
