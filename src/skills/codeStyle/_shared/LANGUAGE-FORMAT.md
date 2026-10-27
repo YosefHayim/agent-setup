@@ -3,7 +3,10 @@
 `LANGUAGE.md` is the **human↔agent glossary** — names only. It pins the exact
 words used in code, comments, commits, docs, and agent chat, plus the aliases to
 avoid. Orientation lives in `CONTEXT.md`; purpose/direction in `PROJECT.md`;
-coding rules in the `code-standard` package and the repo's `AGENTS.md`.
+coding rules in `~/.claude/rules/` and the repo's `AGENTS.md`.
+
+This file is optional (see `~/.claude/rules/repo-layout.md`, Root docs). Add it only when it holds
+something the README and the rules do not already say.
 
 This is the stack adaptation of Matt Pocock's domain-language term anatomy
 (canonical term → tight definition → `_Avoid_` aliases). In upstream Matt
@@ -38,7 +41,7 @@ _Avoid_: Client, buyer, account.
 
 ### Swaps table
 
-`code-standard check` reads a `## Swaps` section and reports every declared name or file name that uses an avoided word, so one thing has one name in code. Put it last in the file. The header is exact:
+The `## Swaps` section lists names to avoid in code, so one thing has one name. Agents follow it when they write or rename code. Put it last in the file. The header is exact:
 
 ```md
 ## Swaps
@@ -49,7 +52,7 @@ _Avoid_: Client, buyer, account.
 | ownerUser     | owner |
 ```
 
-Each row is two different names, and the use name must not contain the avoid name (`language-swaps-valid` checks this). Names are split into lowercase words, so `userOwnerId` and `user-owner-card` both match `userOwner`; plurals match too, spelled the English way (`people` for `person`, `equities` for `equity`). A missing section or an empty table means no swaps. Propose rows from the `nameWords` list of `pnpm exec code-standard check --json-output <file>`, where one thing has several names, and add only the ones the user approves.
+Each row is two different names, and the use name must not contain the avoid name. Names are split into lowercase words, so `userOwnerId` and `user-owner-card` both match `userOwner`; plurals match too, spelled the English way (`people` for `person`, `equities` for `equity`). A missing section or an empty table means no swaps. Propose rows where one thing has several names in the code (grep the declared names), and add only the ones the user approves.
 
 ### Optional area groups
 

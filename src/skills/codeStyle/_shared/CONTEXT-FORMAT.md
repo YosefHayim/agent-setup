@@ -2,7 +2,10 @@
 
 `CONTEXT.md` is **orientation only** — what the project is, who the actors are,
 and how the system is shaped. It is **not** the glossary, not purpose/roadmap,
-and not coding rules.
+and not coding rules. Keep it to 60 lines at most.
+
+This file is optional (see `~/.claude/rules/repo-layout.md`, Root docs). Add it only when it holds
+something the README and the rules do not already say.
 
 | File | Role |
 | --- | --- |
@@ -10,7 +13,7 @@ and not coding rules.
 | `CONTEXT.md` | Orientation (this file) |
 | `LANGUAGE.md` | Names-only glossary — [LANGUAGE-FORMAT.md](./LANGUAGE-FORMAT.md) |
 | PR description | Individual hard-to-reverse decisions |
-| `AGENTS.md` | How to work in the repo, and its `## Exceptions to code-standard` |
+| `AGENTS.md` | Steps an agent needs in this repo (commands, release steps, recipes) |
 
 **Canonical exemplar:** `ai-browser-bridge/CONTEXT.md` (orientation sections; no
 glossary blocks). agent-setup's own `CONTEXT.md` is a second good short example.
@@ -32,8 +35,8 @@ an existing `CONTEXT.md`, migrate those terms into `LANGUAGE.md` using
 # CONTEXT.md — {Project}
 
 Orientation: what this is, its moving parts, and how they fit. For the words, see
-`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for how to work in the repo
-and how it differs from code-standard, `AGENTS.md`.
+`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for the steps an agent needs
+in the repo, `AGENTS.md`.
 
 ## What it is
 
@@ -68,7 +71,7 @@ Diagrams and short tables of actors/parts are fine when they orient.}
 | `## Language` section | `LANGUAGE.md` |
 | Purpose, goals, non-goals, roadmap Built/Next/Maybe | `PROJECT.md` |
 | Decision rationale | The PR description |
-| Code-style rules | the `code-standard` package; repo exceptions in `AGENTS.md` |
+| Code-style rules | `~/.claude/rules/code-style.md`; repo exceptions in `AGENTS.md` |
 | Long implementation walkthroughs | code; link only |
 
 ## Rules

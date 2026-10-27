@@ -6,8 +6,8 @@ One made-up repo runs through every example: an Expo app in `mobile/`, a Cloudfl
 
 - Scout brief
 - Step 1: Start
-- Step 3: Fix
-- Step 4: Score
+- Step 3: Safe fixes
+- Step 4: Rule scan
 - Step 7: Review page
 - Phase 1: Dead weight
 - Phase 2: Structure
@@ -46,41 +46,29 @@ Card (illustrative; the real options come from the models this host offers in th
 > 2. **Mid model.** Reads code and doc pages more carefully and costs more.
 > 3. **Same as the main agent.** Most careful and costs the most.
 
-## Step 3: Fix
+## Step 3: Safe fixes
 
-On `refactor/split-app-and-api`, clean tree, repo not yet on code-standard:
-
-```bash
-pnpm dlx code-standard@0.1.0 fix --html-output "$RUN_DIR/standard"
-```
-
-Output outside a terminal (exit 1: findings remain, which is normal):
-
-```text
-shop health 4.2% -> 33.8%, 293 files changed (review with git diff)
-report file:///.../runs/shop/restructure-repo/2026-10-27-1030/standard/index.html
-findings /.../runs/shop/restructure-repo/2026-10-27-1030/standard/findings.md
-```
-
-Then the repo's checks, then one commit: `Apply code-standard fixes`.
-
-## Step 4: Score
+On `refactor/split-app-and-api`, clean tree:
 
 ```bash
-pnpm dlx code-standard@0.1.0 check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+pnpm exec biome check --write .
+```
+
+Then the `git mv` renames for file names that are not kebab-case, the repo's checks, and one commit: `Apply safe fixes`.
+
+## Step 4: Rule scan
+
+```bash
+git grep -n -E "^(export )?(async )?function " -- 'mobile/**/*.ts' 'mobile/**/*.tsx'
+git grep -n "from \"\.\./" -- mobile api common
 ```
 
 Report section:
 
 ```text
-Score: 4.2% before the Fix step, 33.8% now (102 of 320 files clean, 10 of 11 repo checks pass)
-Top rules: no-parent-imports 386, no-nested-calls 125, named-conditions 92, kebab-case-names 26, console-logs-take-objects 22
-Failed repo check: language-md-present
-Report: file:///.../standard/index.html
-Findings: .../standard/findings.md
+Rule counts now: parent-imports 386, function-declarations 125, banned-name-words 92, non-kebab-case-files 26
+Findings: $RUN_DIR/findings.md
 ```
-
-Top rules come from `ruleCounts` in `check.json`.
 
 ## Step 7: Review page
 
@@ -88,9 +76,9 @@ The scouts are done and the main agent checked each finding at its `file:line`. 
 
 | Section | Holds |
 |---|---|
-| Score | Before and after the Fix step, a link to `standard/index.html`, the top rule counts |
+| Rule scan | Counts per rule before the phases, and the top rules |
 | Tree | Current tree and proposed tree side by side, then the move table (from, to, why, source) |
-| Names | Rename table, and proposed `LANGUAGE.md` swaps from `nameWords` (`ticker price` to `stock price` when both name one thing) |
+| Names | Rename table, and proposed `LANGUAGE.md` swaps from the declared names (`ticker price` to `stock price` when both name one thing) |
 | Code | Before and after for the biggest wins, each with its `file:line` |
 | Stack fits purpose | Each framework and main library, a verdict against `PROJECT.md`, and the official doc link |
 | Deps | Unused files, exports, deps, wrong sections |
@@ -104,15 +92,11 @@ open "$RUN_DIR/review.html"
 > **Which phases should I apply?**
 > 1. **Approve all phases (Recommended).** Dead weight, structure, code, names, deps, best practices, in order.
 > 2. Pick phases.
-> 3. Stop here. Nothing beyond the Fix commit is applied.
+> 3. Stop here. Nothing beyond the safe-fixes commit is applied.
 
 ## Many repos
 
-```bash
-pnpm dlx code-standard@<latest> check --repos-folder ~/Code --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
-```
-
-Outside a terminal: `32 repos, average health 34.2%, 1 failed`, the `report` line and the `findings` line. Start with the repo that the report page lists under "Clean first" (`modelRepo` in `check.json`), and give it its own run.
+Run the step 4 rule scan on each repo under `~/Code`, read-only, and list the repos by number of hits (`32 repos, 1 failed to scan`). Start with the repo with the fewest hits, and give it its own run.
 
 ## Phase 1: Dead weight
 

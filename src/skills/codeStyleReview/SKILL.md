@@ -10,10 +10,10 @@ out **understanding what changed**, not alienated from my own code. So collapse 
 short, teaching report: let the machine carry the mechanical load, and spend judgment (and my
 attention) only where a machine can't.
 
-**Read first:** the code-standard rules (`node_modules/code-standard/README.md`) and the repo's
-`AGENTS.md` section `## Exceptions to code-standard`, plus `PROJECT.md`/`CONTEXT.md`, and **my original
+**Read first:** the rules in `~/.claude/rules/` (`code-style.md`, `repo-layout.md`, `stack-choices.md`)
+and the repo's `AGENTS.md` exceptions when it has any, plus `PROJECT.md`/`CONTEXT.md` when present, and **my original
 prompt/intent** (ask me for it if you don't have it — Tier 3 checks the diff *did what I asked* and
-flags scope creep). `code-standard` not installed? Offer `code-style` (Adopt) first.
+flags scope creep). The repo far from the rules (old `CODE-STYLE.md`, no Biome)? Offer `code-style` (Adopt) first.
 
 **Scope the diff** (ask if unclear): `git diff <base>...HEAD` (branch/PR), the uncommitted working
 tree, or a named PR. That file list is the review surface.
@@ -24,24 +24,23 @@ tree, or a named PR. That file list is the review surface.
 
 ## The three tiers — cheapest enforcement first
 
-Most rules are machine-checked, so most never reach me:
+Biome checks what it can, so most mechanical problems never reach me:
 
 1. **Tier 1+2 — deterministic, whole-tree, auto-fix.**
-   Run `pnpm exec code-standard check`, then the repo's own gate (`verify`: lint, typecheck, tests, build).
-   Outside a terminal the check prints the health line, a `report` link and a `findings` path; grep
-   that `findings.md` for the changed files only. For the safe fixes run `pnpm exec code-standard fix` (it
-   needs a clean git tree, so commit or stash first; it never commits). Re-run to green. I read
+   Run the repo's own gate (`verify`: lint, typecheck, tests, build). Lint is Biome built-in rules.
+   For the safe fixes run `pnpm exec biome check --write .` on the changed files (commit or stash
+   first so the fixes stay separate). Re-run to green. I read
    **nothing** for this tier. Never weaken a rule/test to go green — fix the code.
-2. **Tier 3 — judgment, fanned out over the diff.** For what no tool checks (the "Stack by purpose"
-   section of the code-standard README, placement, architecture, the repo's exceptions) + **my intent**,
+2. **Tier 3 — judgment, fanned out over the diff.** For what no tool checks (the rules in `~/.claude/rules/`: names, conditions, functions, modules,
+   `stack-choices.md`, placement, architecture, the repo's exceptions) + **my intent**,
    split the changed files into slices and dispatch
    read-only sub-agents (see below). Each returns **only deviations** — never a file dump.
 
 ## Fan-out (Tier 3)
 
 Group the changed files into coherent slices (by layer/feature/directory). For each slice, launch a
-`subagent_explore` with: the slice's file list, the code-standard README
-(stack and structure sections) and the `AGENTS.md` exceptions, the relevant `CONTEXT.md` terms, and **my original prompt**. Ask each to report, per
+`subagent_explore` with: the slice's file list, the three files in `~/.claude/rules/`
+and the `AGENTS.md` exceptions, the relevant `CONTEXT.md` terms, and **my original prompt**. Ask each to report, per
 finding: `file:line` · which rule/intent it breaks · the one-line fix · the file it should
 mirror. Tell them explicitly: **report deviations only; stay silent on conforming code.** Aggregate,
 dedupe, and rank (intent-misses and architectural breaks first, nits last).
@@ -71,6 +70,6 @@ I want to approve/reject findings in the browser; otherwise ASCII inline.
 - Never weaken a Biome rule, edit the config, or skip/loosen a test to reach green — fix the code.
 - Never dump conforming diffs — the report is deviations + the teaching map only.
 - Never rewrite a `judgment`-level architectural choice without my decision.
-- Never review a judgment rule from memory — read it from the code-standard README or `AGENTS.md`.
+- Never review a judgment rule from memory — read it from `~/.claude/rules/` or `AGENTS.md`.
 
 </supporting-info>

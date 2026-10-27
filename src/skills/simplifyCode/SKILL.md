@@ -7,7 +7,7 @@ description: Use when code is over-engineered and you want only what the job nee
 
 Make code and structure do exactly what the job needs — no more. Where `make-code-readable` makes the pipeline *readable* (naming, ordering, splitting for clarity), `simplify-code` makes it *lean*: it deletes abstractions, layers, folders, packages, **and tool-ceremony** that carry their weight in process instead of product. The two are complementary — run `make-code-readable` for comprehension, `simplify-code` for over-engineering. When both apply, simplify-code removes the extra code first, then make-code-readable names what remains.
 
-**Pairing with the grill:** `code-style` (Adopt) installs `code-standard`, whose check finds unused files, exports and dependencies, and bad names. This skill **applies** the rest of the kill list (delete wrappers, typegen theater, orphan generated files). Prefer running after Adopt; when the standard is installed, enforce it first.
+**Pairing with the grill:** `code-style` (Adopt) lines the repo up with `~/.claude/rules/`. This skill **applies** the rest of the kill list (delete wrappers, typegen theater, orphan generated files, unused files, exports and dependencies from `npx knip`). Prefer running after Adopt; enforce the rules first.
 
 Default mode is **review-first**: show the current shape, the excess, and concrete before/after examples before changing files. Do not apply edits until the user approves, unless the user says to apply immediately.
 
@@ -23,7 +23,7 @@ Everything below is those tests applied to a specific shape. More code, more ind
 
 ## Style source (read first)
 
-Before proposing anything, read the code-standard README (`node_modules/code-standard/README.md`) and the `AGENTS.md` section `## Exceptions to code-standard`. Their rules and exceptions are the **authoritative** over-engineering targets for this repo — call those out first. You **enforce** them, you never edit them; if a rule is itself over-engineered, flag it and point the user to `code-style`. If `code-standard` is not installed, use the three axes below.
+Before proposing anything, read the rules in `~/.claude/rules/` and the repo's `AGENTS.md` exceptions when it has any. They are the **authoritative** over-engineering targets for this repo — call those out first. You **enforce** them, you never edit them; if a rule is itself over-engineered, flag it and point the user to `code-style`. If the repo has no exceptions, use the three axes below.
 
 ## Three axes of over-engineering
 
@@ -50,7 +50,7 @@ The ceremony families (C1–C8): tool-wrapper scripts, house typegen/drift theat
 1. Identify the target from the user's paths, `git diff`, recent edits, or the nearest entrypoint. For "kill ceremony / noisy scripts", tree `scripts/`, `src/scripts/`, `package.json` scripts, and `*.generated.*` first.
 2. Read the files (and `ls`/tree the relevant folders — structure is in scope).
 3. Map what the code actually does vs. how many layers it takes to do it. For each script/typegen hit, name the **official tool that replaces it**.
-4. Flag every hit against the three axes, `code-standard` findings first.
+4. Flag every hit against the three axes, rule breaks from `~/.claude/rules/` first.
 5. Show a **kill list** (path → replace with / delete orphans) plus 2–4 before/after examples.
 6. State the risk (public API, imports, tests, CI that invokes the dead script) and ask for approval.
 

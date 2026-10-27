@@ -26,7 +26,7 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | identify over-engineering whole repo, prove lean, fewer files/LOC same behavior | `simplify-repo-with-tests` |
 | make readable / rename for clarity | `make-code-readable` |
 | restructure whole repo / better project structure / rename across the codebase / which deps do we not need / clean all my repos / score and fix this repo | `restructure-repo` |
-| Adopt the code standard, or score a repo, new or existing | `code-style` (adopt / new project / audit mode) |
+| Adopt the personal code rules, or review a repo against them, new or existing | `code-style` (adopt / new project / review mode) |
 | teach stack choices | `explain-my-stack` |
 | plan / design grill, with or without project docs | `question-my-plan` |
 

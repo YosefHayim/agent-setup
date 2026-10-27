@@ -549,7 +549,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     sourceDirectory: "codeStyle",
     title: "Code style",
     summary:
-      "Make a repo follow the code-standard package: install its Biome and Ruff config, move the repo's own exceptions into AGENTS.md, set word swaps in LANGUAGE.md, run the safe fixes, and add a check to CI. Can also only score a repo.",
+      "Make a repo follow the personal rules in ~/.claude/rules/: set up Biome and Ruff, move the repo's own exceptions into AGENTS.md, line up folders, file names and root docs, and fix the code. Can also only review a repo.",
     shippedPaths: ["SKILL.md", "ADOPT.md", "NEW-PROJECT.md", "_shared"],
   }),
   skillFeature({
@@ -764,7 +764,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     sourceDirectory: "restructureRepo",
     title: "Restructure repo",
     summary:
-      "Clean a whole repo — folders, names, code, and deps. It applies the no-AI code-standard fixes, scores the repo, shows one review page, then applies only the phases you approve on a branch.",
+      "Clean a whole repo — folders, names, code, and deps. It applies the safe fixes, scans the repo against the personal rules, shows one review page, then applies only the phases you approve on a branch.",
     shippedPaths: ["SKILL.md", "REFERENCE.md", "EXAMPLES.md"],
     dependencies: ["make-code-readable", "simplify-code"],
   }),

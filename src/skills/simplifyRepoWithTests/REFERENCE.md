@@ -105,7 +105,7 @@ paths: <globs>
 |-----|-------------|
 | Make this block readable / rename | `make-code-readable` |
 | Kill ceremony on one file, no prove campaign | `simplify-code` |
-| Adopt code-standard | `code-style` |
+| Adopt the personal rules | `code-style` |
 | Only add missing tests | `find-missing-tests` |
 | Ship one product feature to main | `ship-one-feature` |
 | Multi-feature backup main + PRs | `clean-repo-by-feature` (can host simplify-repo-with-tests per lane) |

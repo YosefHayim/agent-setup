@@ -23,9 +23,9 @@ Good readability work may rename symbols, reorder imports, move files, split or 
 
 ## Style source (read first)
 
-Before proposing any style, read the code-standard README (`node_modules/code-standard/README.md`) and the `AGENTS.md` section `## Exceptions to code-standard`. When `code-standard` is installed, they are the **authoritative target style** for this repo — the generic doctrine below only fills the gaps they don't cover, and where the two conflict, **the standard plus the repo's exceptions win**. Run `pnpm exec code-standard check` and read the `findings.md` path it prints; code that breaks a rule is a primary readability target, called out first. Not installed: offer `code-style` (Adopt).
+Before proposing any style, read the rules in `~/.claude/rules/` (`code-style.md`, `repo-layout.md`) and the repo's `AGENTS.md` exceptions when it has any. They are the **authoritative target style** for this repo — the generic doctrine below only fills the gaps they don't cover, and where the two conflict, **the rules plus the repo's exceptions win**. Run `pnpm exec biome check .`; code that breaks a rule is a primary readability target, called out first. Repo far from the rules (old `CODE-STYLE.md`, no Biome): offer `code-style` (Adopt).
 
-You **enforce** the guide; you never edit it. If one of its rules looks wrong or is fighting readability, flag it in the review and point the user to `code-style` to evolve the guide — don't silently deviate from it. If neither file exists, proceed on the generic doctrine below exactly as before.
+You **enforce** the guide; you never edit it. If one of its rules looks wrong or is fighting readability, flag it in the review and point the user to `code-style` to evolve the guide — don't silently deviate from it. If neither exists, proceed on the generic doctrine below exactly as before.
 
 ## Review First
 
