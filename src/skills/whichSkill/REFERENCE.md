@@ -25,7 +25,7 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | deslop, AI slop, kill ceremony, ban payload/result (local/scope) | `simplify-code` |
 | identify over-engineering whole repo, prove lean, fewer files/LOC same behavior | `simplify-repo-with-tests` |
 | make readable / rename for clarity | `make-code-readable` |
-| restructure whole repo / better project structure / rename across the codebase / which deps do we not need | `restructure-repo` |
+| restructure whole repo / better project structure / rename across the codebase / which deps do we not need / clean all my repos / score and fix this repo | `restructure-repo` |
 | CODE-STYLE grill or compliance audit, new or existing repo | `code-style` (new / existing / audit mode) |
 | teach stack choices | `explain-my-stack` |
 | plan / design grill, with or without project docs | `question-my-plan` |

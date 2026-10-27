@@ -764,7 +764,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     sourceDirectory: "restructureRepo",
     title: "Restructure repo",
     summary:
-      "Clean a whole repo — folders, names, code, and deps — against its own docs and the official docs of every framework it uses, one approved phase at a time on a branch.",
+      "Clean a whole repo — folders, names, code, and deps. It applies the no-AI code-standard fixes, scores the repo, shows one review page, then applies only the phases you approve on a branch.",
     shippedPaths: ["SKILL.md", "REFERENCE.md", "EXAMPLES.md"],
     dependencies: ["make-code-readable", "simplify-code"],
   }),
