@@ -105,10 +105,10 @@ Then run `git switch -c refactor/<goal>`.
 No AI in this step. On the `refactor/<goal>` branch with a clean tree (`git status --short` prints nothing):
 
 ```bash
-code-standard fix --html-output "$RUN_DIR/standard"
+pnpm exec code-standard fix --html-output "$RUN_DIR/standard"
 ```
 
-When the repo has not adopted code-standard (no `code-standard` in `package.json`), run `pnpm dlx code-standard@<latest> fix --html-output "$RUN_DIR/standard"`, with the latest version from `pnpm view code-standard version`.
+When the repo has not adopted code-standard (no `code-standard` in `package.json`), use `pnpm dlx code-standard@<latest>` in place of `pnpm exec code-standard` in every command of this skill, with the latest version from `pnpm view code-standard version`.
 
 Fix applies only safe changes: the repo checks (`biome.json`, `package.json`, `.env.example`, lockfile), unused exports and deps, code fixers, `git mv` renames, Biome, Ruff when there are `.py` files, and install. It never removes files and never commits. Outside a terminal it prints `<repo> health A% -> B%, N files changed (review with git diff)`, then the `report` and `findings` lines. Exit 0 is clean, 1 means findings remain (normal here), 2 means it refused to start: fix the cause (usually a dirty tree) and run it again.
 
@@ -119,10 +119,10 @@ Then run the repo's checks (typecheck, lint, tests, build). A fix that breaks a 
 ### 4. Score
 
 ```bash
-code-standard check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+pnpm exec code-standard check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
 ```
 
-Use `pnpm dlx code-standard@<latest> check` when the repo has not adopted it. Outside a terminal it prints three lines: the health line, `report file://.../index.html` and `findings .../findings.md`. Exit 1 only means findings remain.
+Outside a terminal it prints three lines: the health line, `report file://.../index.html` and `findings .../findings.md`. Exit 1 only means findings remain.
 
 Write to the Report section: the score before the Fix step and now, the top rules (`ruleCounts` in `check.json`, most findings first), the failed repo checks, and both links. Keep `check.json` for the review page: `findings` (rule, file, line, message), `nameWords` and `repoChecks`. Read `findings.md` and `check.json` with grep or a script, never into the conversation.
 
@@ -154,7 +154,7 @@ Open it with `open "$RUN_DIR/review.html"` (`xdg-open` on Linux). Ask one card: 
 Apply only the phases the user approved on the review page, in the order below. For each phase:
 
 1. Apply the approved changes from the review page. Ask an extra question only for what the review page marked as its own question (a stack change, a route rename, a public API).
-2. Re-run the repo's checks and `code-standard check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"`. A phase that lowers the score or breaks a check is fixed or reverted before going on.
+2. Re-run the repo's checks and `pnpm exec code-standard check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"`. A phase that lowers the score or breaks a check is fixed or reverted before going on.
 3. Commit `refactor(<phase>): <what changed>`, then append the result, the new score and the SHA to the Report section and tick the Plan checklist.
 
 | Phase | Targets |
@@ -172,7 +172,7 @@ The order is delete, move, rewrite, then name, so each phase leaves less work fo
 
 - When the repo has not adopted code-standard, run `code-style` in Adopt mode. It installs the package and the shared Biome config, and replaces `CODE-STYLE.md` with an `## Exceptions to code-standard` section in `AGENTS.md`.
 - Show a short "Project structure" section for `README.md`, and the `AGENTS.md` layout table change when there is one (or offer `update-agent-docs`). Apply them after approval in one `docs:` commit.
-- Run `code-standard check` one last time and report the score before the Fix step and now.
+- Run `pnpm exec code-standard check` one last time and report the score before the Fix step and now.
 - Push and open a PR only when the user asks, through `finish-and-push`.
 
 ### Many repos
@@ -180,7 +180,7 @@ The order is delete, move, rewrite, then name, so each phase leaves less work fo
 When the user asks to clean all repos, run first:
 
 ```bash
-code-standard check --repos-folder <folder> --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+pnpm dlx code-standard@<latest> check --repos-folder <folder> --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
 ```
 
 Its report page names the "Clean first" repo, also `modelRepo` in `check.json`. Start with that repo. Do one repo per run (its own run folder and branch), then go back to the report for the next one.

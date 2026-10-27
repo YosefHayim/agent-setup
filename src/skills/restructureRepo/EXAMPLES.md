@@ -51,7 +51,7 @@ Card (illustrative; the real options come from the models this host offers in th
 On `refactor/split-app-and-api`, clean tree, repo not yet on code-standard:
 
 ```bash
-pnpm dlx code-standard@0.4.0 fix --html-output "$RUN_DIR/standard"
+pnpm dlx code-standard@0.1.0 fix --html-output "$RUN_DIR/standard"
 ```
 
 Output outside a terminal (exit 1: findings remain, which is normal):
@@ -67,7 +67,7 @@ Then the repo's checks, then one commit: `Apply code-standard fixes`.
 ## Step 4: Score
 
 ```bash
-pnpm dlx code-standard@0.4.0 check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+pnpm dlx code-standard@0.1.0 check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
 ```
 
 Report section:
@@ -109,7 +109,7 @@ open "$RUN_DIR/review.html"
 ## Many repos
 
 ```bash
-code-standard check --repos-folder ~/Code --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+pnpm dlx code-standard@<latest> check --repos-folder ~/Code --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
 ```
 
 Outside a terminal: `32 repos, average health 34.2%, 1 failed`, the `report` line and the `findings` line. Start with the repo that the report page lists under "Clean first" (`modelRepo` in `check.json`), and give it its own run.
