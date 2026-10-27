@@ -2,8 +2,7 @@
 
 What an agent reads to understand product intent before changing behavior. The
 human-facing introduction lives in `README.md`; runtime boundaries live in
-`CONTEXT.md`; approved names live in `LANGUAGE.md`; coding rules live in
-`CODE-STYLE.md`.
+`CONTEXT.md`; approved names live in `LANGUAGE.md`.
 
 ## The problem
 

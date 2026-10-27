@@ -219,7 +219,6 @@ The hook code is intentionally small: compiled JavaScript, Node built-ins, and a
 - [PROJECT.md](PROJECT.md) — product direction and repository purpose.
 - [CONTEXT.md](CONTEXT.md) — domain context.
 - [LANGUAGE.md](LANGUAGE.md) — naming and terminology.
-- [src/templates/projectDocs/CODE-STYLE.md](src/templates/projectDocs/CODE-STYLE.md) — reusable code-style template installed into other repos.
 
 ## Official references
 

@@ -1,8 +1,7 @@
 # CONTEXT.md — agent-setup
 
 Orientation: what this is, its moving parts, and how they fit. For the words, see
-`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for how code is written,
-`CODE-STYLE.md`; for how to work in the repo, `AGENTS.md`.
+`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for how to work in the repo, `AGENTS.md`.
 
 ## What this is
 
@@ -48,5 +47,5 @@ A feature is either payload or hook code, never both: `src/skills/` holds only w
 - An `AGENT_SETUP_IDLE_COMPACT_AFTER` value set when starting an agent wins over the persistent `idleCompactAfter` config for that session.
 - Every setting and environment variable is listed in the Settings section of `README.md`, generated from `src/config/configSchema.ts` and `src/config/environmentVariables.ts`. Environment variables are named `AGENT_SETUP_<AREA>_<SETTING>`, config keys start with their area word (`context`, `autorun`, `idleCompact`, `duplicateCode`, `sessionRehome`, `diskCleanup`, `debug`), and a test fails when an `AGENT_SETUP_*` name in `src/` is missing from the list.
 - Authored skill directories use **camelCase**; public feature IDs and installed skill IDs remain **kebab-case** data.
-- One strict style bar across maintained TypeScript, documented in root `CODE-STYLE.md`. Biome and `src/scripts/checkCodeStyle.ts` both gate through `pnpm verify`, including `src/hooks/`; portable skill scripts additionally answer to their shipped harnesses.
+- One strict style bar across maintained TypeScript, enforced by the personal rules in `~/.claude/rules/`. Biome and `src/scripts/checkCodeStyle.ts` both gate through `pnpm verify`, including `src/hooks/`; portable skill scripts additionally answer to their shipped harnesses.
 - Root `AGENTS.md` is the authoritative contract for coding agents and routes each subject to its delegated SSOT.
