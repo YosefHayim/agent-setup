@@ -27,7 +27,7 @@ Application code is grouped by capability, not by technical layer:
 - `src/hooks/<sourceDirectory>/` — feature-local executable hook code: `hooks/` (registered agent hooks), `watchers/` (background processes a hook starts), `command/` (scripts the CLI or a skill runs), `lib/`
 - `src/doctor/` — installation health checks behind `agent-setup doctor`
 - `src/workflows/` — workflow template copying behind `agent-setup workflow scaffold`
-- `src/scripts/` — outer-ring maintainer tooling (build, README generation, style contract); never imported by product code
+- `src/scripts/` — outer-ring maintainer tooling (build, README generation); never imported by product code
 - `src/templates/` — copyable workflows and project docs
 - `src/statuslines/` — agent status-line presets with their own install script
 - `dist/prepared/` — catalog-closed prepared package for install/update/doctor
@@ -47,5 +47,5 @@ A feature is either payload or hook code, never both: `src/skills/` holds only w
 - An `AGENT_SETUP_IDLE_COMPACT_AFTER` value set when starting an agent wins over the persistent `idleCompactAfter` config for that session.
 - Every setting and environment variable is listed in the Settings section of `README.md`, generated from `src/config/configSchema.ts` and `src/config/environmentVariables.ts`. Environment variables are named `AGENT_SETUP_<AREA>_<SETTING>`, config keys start with their area word (`context`, `autorun`, `idleCompact`, `duplicateCode`, `sessionRehome`, `diskCleanup`, `debug`), and a test fails when an `AGENT_SETUP_*` name in `src/` is missing from the list.
 - Authored skill directories use **camelCase**; public feature IDs and installed skill IDs remain **kebab-case** data.
-- One strict style bar across maintained TypeScript, enforced by the personal rules in `~/.claude/rules/`. Biome and `src/scripts/checkCodeStyle.ts` both gate through `pnpm verify`, including `src/hooks/`; portable skill scripts additionally answer to their shipped harnesses.
+- One strict style bar across maintained TypeScript, enforced by the personal rules in `~/.claude/rules/`. Biome and knip gate through `pnpm verify`, including `src/hooks/`; portable skill scripts additionally answer to their shipped harnesses.
 - Root `AGENTS.md` is the authoritative contract for coding agents and routes each subject to its delegated SSOT.

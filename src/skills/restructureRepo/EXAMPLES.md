@@ -179,7 +179,7 @@ Table:
 
 | Before | After | Why | Source |
 |---|---|---|---|
-| `utils.ts › handleData()` | `formatPrice.ts › formatPrice()` | says what it returns | `LANGUAGE.md`: "price" |
+| `utils.ts › handleData()` | `price-label.ts › createPriceLabel()` | says what it returns | `LANGUAGE.md`: "price" |
 | `interface IUserData` | `interface Customer` | the domain word | `LANGUAGE.md`: "Customer" |
 
 Names over comments. Before:
@@ -192,7 +192,7 @@ export async function getData(id: string) {
 After, with no comment:
 
 ```ts
-export async function fetchCustomerOrders(customerId: string) {
+export const fetchCustomerOrders = async (customerId: string) => {
 ```
 
 Commit: `refactor(names): name files and functions after what they do`
