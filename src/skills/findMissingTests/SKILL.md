@@ -72,6 +72,8 @@ Framework-agnostic **capability** layers — mark N/A if the product has no such
 
 A gap is **missing** when the feature’s real behavior has no test that would **fail if that behavior were deleted** (happy path **and** important edges: auth fail, empty, validation, idempotency, permission deny, timeout/retry when code has them).
 
+Edge cases to look for in every feature: empty, one, many, slow or failed network, no permission, double submit, Hebrew right-to-left text. Name each one the feature meets and check a test covers it.
+
 ## Invocation
 
 ```text
@@ -113,7 +115,7 @@ If the user does **not** say headed/visible/ui → **headless**.
 
 ### 0. Resolve repo
 
-1. Repo root (cwd or path in prompt). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, `CODE-STYLE.md`, package scripts, existing e2e folders.
+1. Repo root (cwd or path in prompt). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README, package scripts, existing e2e folders.
 2. Detect commands **from the repo** (do not hardcode Playwright/Maestro):
    - unit: `test`, `test:unit`, workspace tests, language defaults
    - mocks: directories named `msw`, `mocks`, `handlers`, `fixtures` + imports

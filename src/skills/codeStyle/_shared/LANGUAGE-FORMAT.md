@@ -3,7 +3,7 @@
 `LANGUAGE.md` is the **human↔agent glossary** — names only. It pins the exact
 words used in code, comments, commits, docs, and agent chat, plus the aliases to
 avoid. Orientation lives in `CONTEXT.md`; purpose/direction in `PROJECT.md`;
-coding rules in `CODE-STYLE.md`.
+coding rules in the `code-standard` package and the repo's `AGENTS.md`.
 
 This is the stack adaptation of Matt Pocock's domain-language term anatomy
 (canonical term → tight definition → `_Avoid_` aliases). In upstream Matt
@@ -35,6 +35,21 @@ _Avoid_: Bill, payment request.
 A person or organization that places orders.
 _Avoid_: Client, buyer, account.
 ```
+
+### Swaps table
+
+`code-standard check` reads a `## Swaps` section and reports every declared name or file name that uses an avoided word, so one thing has one name in code. Put it last in the file. The header is exact:
+
+```md
+## Swaps
+
+| Avoid in code | Use   |
+| ------------- | ----- |
+| userOwner     | owner |
+| ownerUser     | owner |
+```
+
+Each row is two different names, and the use name must not contain the avoid name (`language-swaps-valid` checks this). Names are split into lowercase words, so `userOwnerId` and `user-owner-card` both match `userOwner`; a trailing `s` plural matches too. A missing section or an empty table means no swaps. Propose rows from the `nameWords` list of `pnpm exec code-standard check --json-output <file>`, where one thing has several names, and add only the ones the user approves.
 
 ### Optional area groups
 
@@ -84,7 +99,7 @@ Do **not** emit any of these (historical drift; convert on sight):
 
 | Forbidden | Why |
 | --- | --- |
-| Markdown tables (`\| Term \| Definition \| Avoid \|`) | Harder for agents to extend; inconsistent column names |
+| Markdown tables for terms (`\| Term \| Definition \| Avoid \|`) | Harder for agents to extend; inconsistent column names. The `## Swaps` table is the one allowed table |
 | Bullet glossaries (`- **Term** — def`) | Collapses term / definition / avoid into one line |
 | Colon-on-bold (`**Term**:`) | Matt Pocock's *in-CONTEXT* colon form; we use bold-on-own-line |
 | `_Avoid:_` (colon inside italics) | Use `_Avoid_:` (underscore-close, then colon) |
@@ -107,7 +122,7 @@ Do **not** emit any of these (historical drift; convert on sight):
 
 | Skill | Role |
 | --- | --- |
-| `code-style` | Create from this format when missing and the code or docs give a real domain term; report structure drift (do not invent terms without evidence) |
+| `code-style` | Create from this format when missing and the code or docs give a real domain term; write the approved `## Swaps` rows; report structure drift (do not invent terms without evidence) |
 | `question-my-plan` / domain-modeling moments | **Owner of term content** — when a term is resolved, update `LANGUAGE.md` inline using this format |
 | `explain-my-stack` | Leave alone unless a genuine *domain* term surfaces (tech teaching stays in chat) |
 

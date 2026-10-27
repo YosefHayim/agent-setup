@@ -1,121 +1,15 @@
-# Code style — new project
+# Code style: new project
 
 <what-to-do>
 
-Interview me relentlessly about **how this project is built** — its code style, its structure docs, and its CLI — until we reach a shared understanding. Walk down each branch of the decision tree, resolving dependencies one-by-one. For each question, provide your recommended answer.
+There is little or no code yet. Decide the stack from what the project is for, then adopt code-standard. Show a short plan first and wait for my approval.
 
-Fire every ready question in **one** `AskUserQuestion` (the host TUI question card). Recommended option first, marked `(Recommended)`; code variants go in each option's `preview`. Do not drip questions one-by-one. A second card is only for questions that could not exist until these answers landed (language/runtime when unknown is the only allowed gate card — Q0+Q1 together). If the host rejects the card for size, split into the fewest cards that fit — still never one question per turn.
+1. Read `PROJECT.md`. Missing or thin: ask the seven-part checklist in [PROJECT-FORMAT.md](_shared/PROJECT-FORMAT.md) in one `AskUserQuestion`.
+2. Read the "Stack by purpose" section of `code-standard`'s README (read the README at `node_modules/code-standard/README.md` after install, or on its GitHub page before). Pick the stack from the project's purpose, with the reason from each tool's official docs. Never pick a tool because another repo uses it. Ask the language and where it runs (Node server, Workers, browser, native app) in one card with a recommended answer.
+3. Show the plan: stack with reasons, folder layout, and the list of files to create. Give examples from the official docs of the main framework.
+4. After approval, create the repo files, then follow [ADOPT.md](ADOPT.md) from step 1 (install, Biome, Ruff, alias, AGENTS.md, LANGUAGE.md, gate, score). A new repo starts with a clean score, so `code-standard fix` is usually not needed.
+5. Create `CONTEXT.md` and `LANGUAGE.md` from [CONTEXT-FORMAT.md](_shared/CONTEXT-FORMAT.md) and [LANGUAGE-FORMAT.md](_shared/LANGUAGE-FORMAT.md). `LANGUAGE.md` starts with its first real domain terms and an empty `## Swaps` table.
 
-This is the **greenfield** variant: there is little or no code to read. Your source of truth is my **taste** (grill me) plus the project's **purpose** and its **language/framework** conventions. Never write generic advice ("use clear names", "keep functions small") — every rule must be a real, load-bearing decision for THIS project. If the project already has meaningful code, stop and use Existing project mode ([EXISTING-PROJECT.md](EXISTING-PROJECT.md)) instead.
-
-**Nothing is written to disk until I approve.** You grill (Steps 0–5) — the code-style grill is a **pick-the-code gallery**: I pick from illustrative code variants shown in **one** TUI question card (Step 2); then you compose the **golden path for adding a unit + its slop guard** (Step 5). You render an **interactive HTML plan** as the review gate (Step 6, built with the **planpage** kit — I approve, adjust, or flip any decision in the browser), and only then write the files (Step 7).
+Once the project has real code, the next run uses Adopt.
 
 </what-to-do>
-
-<supporting-info>
-
-## Step 0 — Detect language and runtime
-
-Before anything else, establish the two most load-bearing facts about this project. If either is unknown, they are the **only** allowed gate card — ask **Q0 and Q1 together** in one `AskUserQuestion`, then fire the catalog card. If both are already known, skip to Step 2.
-
-### Q0 — Primary language
-
-Ask: **"What's the primary language for this project?"**
-
-Recommend **TypeScript** as the default. Accept any of: TypeScript, JavaScript, Rust, Go, Python, Swift, Kotlin, Dart, Java, Ruby, PHP, C#, Elixir, or another.
-
-The answer gates:
-- Which language-conditional sections of [STYLE-CATALOG.md](_shared/STYLE-CATALOG.md) apply.
-- Which formatter/linter to scaffold (see [FORMATTERS.md](_shared/FORMATTERS.md)).
-- Which framework skills to reference.
-
-### Q1 — Runtime target
-
-Ask: **"Where does this run?"**
-
-Options (pick one or more):
-- **Node server** — backend, CLI, scripts
-- **Edge / worker** — Cloudflare Workers, Deno Deploy, Vercel Edge
-- **Browser SPA** — React, Vue, Svelte, etc.
-- **Native app** — React Native / Expo, Swift (iOS), Kotlin (Android)
-- **CLI tool** — developer tooling, scripts
-- **Library** — consumed by other packages
-- **Multi-target** — e.g. a monorepo spanning several of the above
-
-The answer gates:
-- Which catalog rounds to skip (no UI → skip Round 5; no HTTP surface → trim Round 4).
-- Which APIs/patterns are legal (no `fs` on the edge; no DOM on a server).
-- Framework skill references.
-
----
-
-## Step 1 — Ensure the structure docs (create if missing, validate if present)
-
-A project can't have a code style before it has a spine. Before grilling code, **ensure the three structure docs** — gather the missing ones' content now, validate the present ones, and **never restructure a doc that already exists** (report drift, don't rewrite it). Defer the actual file writes to Step 7 so the plan can show them.
-
-- **PROJECT.md** — purpose & direction. Missing/thin → ask the seven-part **What to ask** checklist in [PROJECT-FORMAT.md](_shared/PROJECT-FORMAT.md) (the same questions `question-my-plan` asks; don't write your own). Title: `# PROJECT.md — {Project}`.
-- **CONTEXT.md** — orientation only (what it is, actors, shape — NOT a glossary). Create/validate against [CONTEXT-FORMAT.md](_shared/CONTEXT-FORMAT.md) (exemplar: `ai-browser-bridge/CONTEXT.md`). Title: `# CONTEXT.md — {Project}`. No `## Language` / `_Avoid_:` blocks.
-- **LANGUAGE.md** — glossary / human↔agent bridge: **names only**. Create/validate against [LANGUAGE-FORMAT.md](_shared/LANGUAGE-FORMAT.md) (exemplar: `ai-browser-bridge/LANGUAGE.md` — bold term on its own line, definition, `_Avoid_:`). Never tables, bullet glossaries, or colon-on-bold.
-
-Record each doc's state — `create` · `validate ✓` · `drift` (with the gap) — for the Step 6 plan.
-
----
-
-## Step 2 — Grill the code style as a pick-the-code gallery
-
-The code-style grill runs as **pick-the-code**, not prose. Put every applicable dimension in **one** TUI card (`AskUserQuestion` — one question per dimension, code in each option's `preview`) and I **pick** them all in that card. With no repo to read, variants are **illustrative**: variant **A** is the default idiom for this language + framework (what the agent would reach for), variant **B** the alternative — both concrete to THIS project's domain, never `foo`/`bar`. Recommend one from the purpose + framework, but the pick is mine.
-
-Run the full catalog: **[STYLE-CATALOG.md](_shared/STYLE-CATALOG.md)** — all language-conditional sections filtered by the Q0 answer, all new dimensions included.
-
-Key behaviors:
-- **Each pick → a rule card.** Chosen variant = the `// ✓` case; rejected variant = the `// ✗` case. Every card follows the fixed five-slot anatomy in [CODE-STYLE-FORMAT.md](_shared/CODE-STYLE-FORMAT.md) (**SSOT root: this package’s format + root `CODE-STYLE.md` + `src/templates/projectDocs/CODE-STYLE.md` — never an external product repo**): `###` short name (no tags), `[rule:<id>] · verify: \`<command>\`` or `· verify: judgment`, **exactly one assertion sentence**, one fenced `// ✓` + `// ✗` block, `Why:` line. **Never** write `[taste]` / `[lint: …]` / `[CI: …]` in the heading.
-- **Formatting** — quotes, semicolons, line width, trailing commas, import order. Grill my preference, but **the answer becomes a formatter config, not prose**: pick and scaffold the appropriate config per [FORMATTERS.md](_shared/FORMATTERS.md), and record the choice in the PR description.
-- **Anti-patterns / AI-slop fingerprint** — the explicit "never do this here" list. Grill the recognizable AI tells up front so generated code avoids them from day one. Each becomes a concrete `Never` entry (an illustrative snippet, since there's no code yet) cross-referencing the `[rule:<id>]` that owns it.
-- **Over-engineering (the "too much" fingerprint)** — run [STYLE-CATALOG.md](_shared/STYLE-CATALOG.md) **Round 7**: grill each over-engineering family (needless indirection, fake robustness, control-flow contortion, shape noise, dead space, structural too-much/too-little, **and ceremony/tool-slop C1–C8** — tool wrappers, house typegen, scripts only under `scripts/{dev,production}`, tool-first CLIs, no parallel vendor schemas, structured logging + one env mute) against the one test — *an abstraction earns its place only with a second real caller or a genuine domain concept* — and the **tool-first test** — *if the framework CLI already does it, call it; no house wrapper*. Illustrative before/after: `simplify-code` references including **`ceremony-smells`**. Killed families fold into `Never`; recommend tool-first + two-nest scripts as default. Point ongoing enforcement at `simplify-code` per-diff.
-- **Compose the canonical example.** After the rounds, assemble every pick into one **canonical example** — a representative feature for this project written in the agreed style — so I see the whole pattern together. It becomes the Step 6 litmus and the `## Canonical example` block of `CODE-STYLE.md`; with no code yet, it's the single clearest picture of what "good" looks like here.
-
----
-
-## Step 3 — Grill the CLI
-
-In the agent era every project earns a **CLI that both humans and agents drive**. Put these picks on the **same** `AskUserQuestion` as the style catalog when they are already askable:
-
-- **Have/need one?** Default to yes — a dev+ops CLI (scaffold, run, check, deploy). A pure library or Worker may lean on its framework CLI instead — if so, say why and skip.
-- **Command surface** — the verbs/nouns and their shape.
-- **Dual-mode contract** — one code path serves both audiences: a bare invocation in a TTY opens an interactive menu; any flag or non-TTY stdin defers to flags and **never hangs**; both routes call the **same functions** (the `agent-setup` "interactive front door" pattern). Prompt wrappers return a fallback off-TTY so scripts don't block.
-
-Record the command surface in the **PR description** (the "why this surface"); the CLI conventions become `CODE-STYLE.md` rules + a recipe.
-
----
-
-## Step 4 — Establish dependency policy & research libraries
-
-Grill the dependency policy (2–3 quick picks — see [STEPS.md](_shared/STEPS.md) § "Greenfield" for the questions). Record it in the PR description.
-
-When a library choice comes up, research + recommend a stable option (WebSearch / the `deep-research` skill), then record the choice + rationale in the PR description. `CODE-STYLE.md` documents only how to USE the chosen library — never the choice rationale.
-
----
-
-## Step 5 — Compose the golden path + slop guard
-
-With the picks, CLI, structure, and dependency policy settled, compose the one artifact a future contributor reaches for: **"if tomorrow we add a thing, how do we add it, and how do we not slop it up?"** See **[EXTENSION-PATTERN.md](_shared/EXTENSION-PATTERN.md)** for the full procedure. Greenfield-specific: with no code yet, the path is **derived from the picks** (illustrative, not mined from history) — but still concrete to THIS project, never abstract "add tests" prose.
-
-- **Name the unit** of extension (feature / endpoint / screen / component / Actor / module) — parameterize the section to the project's real word.
-- **Derive a draft numbered path** from the picks + canonical example, then grill it in **one** `AskUserQuestion` (keep / adjust / reorder / cut per step); end with a **definition-of-done** checklist.
-- **Wire the guard** in layers: machine-catchable `## Never` tells → the **lint config** (CI blocks; flips a rule's `verify` from `judgment` to a real command); taste tells → **`make-code-readable` per-diff**; the checklist → the human/agent gate. Slop is "off the golden path".
-
-Lands a first-class `## Golden path — adding a {unit}` in `CODE-STYLE.md` + a tight mirror in the `AGENTS.md` digest.
-
----
-
-## Steps 6–8 — Framework references, plan, write, re-run
-
-See **[STEPS.md](_shared/STEPS.md)** for the shared procedures (the golden-path step above is shared Step 6; greenfield handles dependencies as its Step 4):
-
-- **Step 6** → Reference framework practices (detect stack, point to official skills), then render the interactive planpage plan (the review gate) — including the **golden-path + guard block**.
-- **Step 7** → On approval, write the files (CODE-STYLE.md incl. `## Golden path`, formatter + lint config, structure docs, AGENTS.md digest incl. the tight golden-path mirror); decisions go in the PR description.
-- **Re-running** → Idempotent refresh; once real code exists, switch to Existing project mode ([EXISTING-PROJECT.md](EXISTING-PROJECT.md)).
-
-> **Step 8 (capstone reorg) does not apply to greenfield** — there's no code to reorganize.
-
-</supporting-info>

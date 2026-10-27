@@ -26,7 +26,7 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | identify over-engineering whole repo, prove lean, fewer files/LOC same behavior | `simplify-repo-with-tests` |
 | make readable / rename for clarity | `make-code-readable` |
 | restructure whole repo / better project structure / rename across the codebase / which deps do we not need / clean all my repos / score and fix this repo | `restructure-repo` |
-| CODE-STYLE grill or compliance audit, new or existing repo | `code-style` (new / existing / audit mode) |
+| Adopt the code standard, or score a repo, new or existing | `code-style` (adopt / new project / audit mode) |
 | teach stack choices | `explain-my-stack` |
 | plan / design grill, with or without project docs | `question-my-plan` |
 
@@ -89,13 +89,13 @@ Agent config (issue tracker, triage labels, domain notes) goes in `AGENTS.md` se
 | ship-missing-tests | Ship (reads the newest find-missing-tests `report.md`) | none |
 | simplify-repo-with-tests | Features, Report | none |
 | restructure-repo | Plan (checkbox lines), Report | none |
-| code-style | Findings | none |
+| code-style | none (no `report.md`) | `check-before.json` |
 | clean-repo-by-feature | Matrix, State, Audit, Health | planpage JSON |
 | improve-ux | State, Matrix, Audit, Taste | `mocks/` |
 | benchmark-agents | Report | `results.json` |
 | find-repeated-prompts (repo `global`) | Report | the script's output files |
 
-Root stays for: README, AGENTS, CODE-STYLE, PROJECT, CONTEXT, LANGUAGE.
+Root stays for: README, AGENTS, PROJECT, CONTEXT, LANGUAGE.
 
 ## Anti-patterns
 

@@ -45,8 +45,8 @@ Never write run records into the repository: no `docs/` folder, no report at the
 |-----|--------|-------------------|
 | Line / structure / ceremony smell **catalogs** + local kill apply | `simplify-code` | **Load and follow**; never copy catalogs into this folder |
 | Readability rename/reorder only | `make-code-readable` | After lean if names still muddy |
-| Lock `CODE-STYLE.md` / grill `## Never` from scratch | `code-style` | Read guide if present; do **not** rewrite style docs here |
-| Audit “does code follow CODE-STYLE / PROJECT / AGENTS?” | style-compliance skill (other track) if present; else read those files | Reference only — not this workflow |
+| Adopt `code-standard` / set the repo's exceptions | `code-style` | Read the standard if present; do **not** rewrite style docs here |
+| Audit “does code follow the standard / PROJECT / AGENTS?” | `code-style` (Audit mode); else read those files | Reference only — not this workflow |
 | Missing **business** tests before a safe lean | `find-missing-tests` (fill only business gaps) | Call when parity tests are absent |
 | Parallel worktrees / cmux | `run-tasks-in-parallel` | setup-lanes when applying multi-feature lean |
 | Commits / PR | `organize-commits` / `finish-and-push` | Only if user wants ship; **default no merge** |
@@ -99,7 +99,7 @@ If the user does **not** say headed/visible/ui → **headless**.
 
 ### 0. Resolve repo
 
-1. Repo root (cwd or path). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, `CODE-STYLE.md` (`## Never` = first-class kill targets), package scripts, e2e folders.
+1. Repo root (cwd or path). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README and the `findings.md` from `pnpm exec code-standard check` (first-class kill targets), package scripts, e2e folders.
 2. **Load `simplify-code`** (and its three reference catalogs). Those are the smell definitions.
 3. Detect unit / e2e commands from the repo (same discovery spirit as `find-missing-tests`). Record headless flags.
 

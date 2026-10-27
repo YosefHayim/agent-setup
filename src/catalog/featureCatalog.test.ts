@@ -216,10 +216,7 @@ describe("featureCatalog", () => {
       ["make-code-readable", ["SKILL.md", "references"]],
       ["simplify-code", ["SKILL.md", "references"]],
       ["question-my-plan", ["SKILL.md"]],
-      [
-        "code-style",
-        ["SKILL.md", "NEW-PROJECT.md", "EXISTING-PROJECT.md", "SCAN.md", "_shared", "references", "scripts"],
-      ],
+      ["code-style", ["SKILL.md", "ADOPT.md", "NEW-PROJECT.md", "_shared"]],
       ["code-style-teach-me", ["SKILL.md"]],
       ["code-style-review", ["SKILL.md"]],
       ["explain-my-stack", ["SKILL.md", "TEACH-FORMAT.md"]],

@@ -28,7 +28,7 @@ This skill **must not** reinvent sibling workflows. Before any step, **load the 
 | “Which skill?” mid-flight | `which-skill` |
 | Patch this skill later | `improve-skill` |
 
-If a sibling skill already defines a command, branch naming, safety rule, or verify step: **use that definition**. Do not fork a second house style inside this file. Recommended practices = **repo docs** (`AGENTS.md`, `CODE-STYLE.md`) + **sibling skills**, not improvisation.
+If a sibling skill already defines a command, branch naming, safety rule, or verify step: **use that definition**. Do not fork a second house style inside this file. Recommended practices = **repo docs** (`AGENTS.md` and the code-standard rules) + **sibling skills**, not improvisation.
 
 ## Entry modes (equal first-class)
 
@@ -72,7 +72,7 @@ Optional freeform flags:
 ### 0. Resolve repo + mode
 
 1. Git root, remote, default branch from `origin/HEAD`. Unrelated dirty main → stop or isolate (sibling safety).
-2. Read `AGENTS.md`, `CODE-STYLE.md`, package verify/test scripts, `.github/workflows/*`.
+2. Read `AGENTS.md`, the code-standard README (`node_modules/code-standard/README.md`), package verify/test scripts, `.github/workflows/*`.
 3. Detect product install surface (npm/pnpm `bin`, agent-setup, cargo, source-only).
 4. Classify **Mode A** vs **Mode B** from the user text. If both a description and `#N` appear, **Mode B** wins for the issue id; treat extra text as scope notes on that issue.
 

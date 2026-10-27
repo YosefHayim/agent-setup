@@ -29,7 +29,7 @@ roadmap belong here; domain names stay in `LANGUAGE.md`; orientation stays in
 
 Purpose and direction. Read this to understand *why* the project exists and where
 it's going; read `CONTEXT.md` for how it's shaped, `LANGUAGE.md` for the words,
-and `CODE-STYLE.md` for how code is written.
+and `AGENTS.md` for how to work in the repo. The code rules live in the `code-standard` package.
 
 ## The problem
 {What problem this solves, and for whom. 2-4 sentences.}
