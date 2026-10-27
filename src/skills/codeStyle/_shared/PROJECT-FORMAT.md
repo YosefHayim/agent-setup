@@ -1,7 +1,8 @@
 # PROJECT.md Format
 
 `PROJECT.md` holds the project's **purpose and direction** — the "why we're
-building this and where it's going" — for agents. `README.md` is the
+building this and where it's going" — for agents. It is optional: add it only when it holds something the README and
+`~/.claude/rules/` do not already say. `README.md` is the
 human-facing version; `PROJECT.md` is what an agent reads to understand *intent*
 before writing code.
 
@@ -11,7 +12,7 @@ before writing code.
 | `CONTEXT.md` | Orientation — [CONTEXT-FORMAT.md](CONTEXT-FORMAT.md) |
 | `LANGUAGE.md` | Names-only glossary — [LANGUAGE-FORMAT.md](LANGUAGE-FORMAT.md) |
 | PR description | Individual hard-to-reverse decisions |
-| `AGENTS.md` | Current structure / how to work in the repo |
+| `AGENTS.md` | Steps an agent needs in this repo (commands, release steps, recipes) |
 
 **Canonical exemplars:** `planpage/PROJECT.md` and `agent-setup/PROJECT.md` (seven
 sections). `ai-browser-bridge/PROJECT.md` is a valid close variant (same intent,
@@ -29,7 +30,7 @@ roadmap belong here; domain names stay in `LANGUAGE.md`; orientation stays in
 
 Purpose and direction. Read this to understand *why* the project exists and where
 it's going; read `CONTEXT.md` for how it's shaped, `LANGUAGE.md` for the words,
-and `AGENTS.md` for how to work in the repo. The code rules live in the `code-standard` package.
+and `AGENTS.md` for the steps an agent needs in the repo. The code rules live in `~/.claude/rules/`.
 
 ## The problem
 {What problem this solves, and for whom. 2-4 sentences.}

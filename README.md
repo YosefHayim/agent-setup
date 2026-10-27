@@ -118,7 +118,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 | **write-readme** | Write or fix the README and other start-here docs. Reads the repo first, then asks you questions one by one. | 🟢 any OS |
 | **update-agent-docs** | Create or update agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor rules, and more) based on each agent's official docs. | 🟢 any OS |
 | **simplify-code** | Remove extra code — wrappers, layers, folders, generic names, and scripts the job does not need. | 🟢 any OS |
-| **code-style** | Make a repo follow the code-standard package: install its Biome and Ruff config, move the repo's own exceptions into AGENTS.md, set word swaps in LANGUAGE.md, run the safe fixes, and add a check to CI. Can also only score a repo. | 🟢 any OS |
+| **code-style** | Make a repo follow the personal rules in ~/.claude/rules/: set up Biome and Ruff, move the repo's own exceptions into AGENTS.md, line up folders, file names and root docs, and fix the code. Can also only review a repo. | 🟢 any OS |
 | **code-style-teach-me** | While you build, stop at each real choice, show two options, and explain the rule so you learn your own architecture. | 🟢 any OS |
 | **code-style-review** | Check a big change (branch or PR) against the style rules and get a short report, so you do not need to read every file. | 🟢 any OS |
 | **explain-my-stack** | Understand why the project uses each technology (language, framework, services), with honest trade-offs and a plain glossary, all in chat. | 🟢 any OS |
@@ -144,7 +144,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 | **find-missing-tests** | Find the tests each feature is missing (unit, mocks, integration, e2e), then write them test-first. | 🟢 any OS |
 | **ship-missing-tests** | Find missing tests in many features, fill them in parallel branches, and merge to main after checks. | 🟢 any OS |
 | **simplify-repo-with-tests** | Find over-engineering across the repo, simplify it, and use tests to prove the behavior did not change. | 🟢 any OS |
-| **restructure-repo** | Clean a whole repo — folders, names, code, and deps. It applies the no-AI code-standard fixes, scores the repo, shows one review page, then applies only the phases you approve on a branch. | 🟢 any OS |
+| **restructure-repo** | Clean a whole repo — folders, names, code, and deps. It applies the safe fixes, scans the repo against the personal rules, shows one review page, then applies only the phases you approve on a branch. | 🟢 any OS |
 | **improve-ux** | Make user flows easier (fewer clicks, better layout, forms, mobile). Shows before/after designs first, then builds the one you pick. | 🟢 any OS |
 | **design-app-mockup** | Turn an app idea into premium, Framer-level UI mockups: pick one of 3 real templates, get a hi-fi landing page inspired by it, or a close match in your own colors and content, then a UI library from that page, custom icons, real photos, and clickable app journeys. | 🟢 any OS |
 | **free-ports** | Stop local servers that block ports (keeps Metro on 8081) so you can start dev again. | 🟢 any OS |

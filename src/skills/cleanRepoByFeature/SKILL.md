@@ -40,7 +40,7 @@ Reuse existing skills rather than inventing a second ship path:
 - One agent = one feature = one worktree = one branch = one issue = one PR. No cross-lane file ownership without re-planning.
 - Do not merge PRs to main unless the user explicitly asks after review.
 - Do not deploy, publish, or delete production resources as part of cleanup.
-- Respect `AGENTS.md` and the code-standard rules; if `code-standard` is not installed, run `code-style` (Adopt) **once** first rather than N conflicting styles.
+- Respect `AGENTS.md` and the rules in `~/.claude/rules/`; if the repo is far from them (old `CODE-STYLE.md`, no Biome), run `code-style` (Adopt) **once** first rather than N conflicting styles.
 - **Never close cmux workspaces/panes** created for lanes unless the user explicitly asks. They are human entry points, not throwaway spawn shells.
 
 
@@ -68,7 +68,7 @@ Write the Matrix, State, Audit, and Health sections in `$REPORT`. Save planpage 
 ### 1. Scope the mess (orchestrator only)
 
 1. Confirm repo root, remotes, default branch, dirty state. Stop if the main checkout has unrelated dirty work the user did not authorize folding in.
-2. Read `AGENTS.md`, the code-standard README, `PROJECT.md` / `CONTEXT.md` when present.
+2. Read `AGENTS.md`, the rules in `~/.claude/rules/`, `PROJECT.md` / `CONTEXT.md` when present.
 3. Inventory **features/modules** from evidence (not vibes): app routes, `src/features/*`, packages in a monorepo, documented domains, or a user-provided list. Produce a table: `id | path globs | risk | suggested work (refactor|harden|cleanup|fix|docs)`.
 4. Present the table and get approval on **which lanes to open now** (batch size). Huge repos: wave 1 critical paths only.
 5. **Ask host mode** (required unless the user already stated a preference in this turn). Do not assume background-only fan-out.
@@ -95,7 +95,7 @@ If they already said e.g. “cmux terminal for each sub agent”, skip re-asking
 
 1. Create the **backup/** branch of `origin/<default>` (see Safety).
 2. Ensure working policy: product commits only on topic branches; PRs target default branch.
-3. If `code-standard` is not installed and the user wants consistency across lanes, run `code-style` (Adopt) **once** on the main checkout (or a single docs-only branch) before fan-out so every lane follows one standard.
+3. If the repo is far from `~/.claude/rules/` and the user wants consistency across lanes, run `code-style` (Adopt) **once** on the main checkout (or a single docs-only branch) before fan-out so every lane follows one standard.
 
 ### 3. Fan out lanes (delegate to run-tasks-in-parallel setup-lanes)
 
@@ -177,7 +177,7 @@ Each sub-agent must:
 
 1. `cd` into its worktree only; never edit other worktrees or the main checkout.
 2. Implement the scoped remediation (refactor / harden / clean up / fix) inside its path globs.
-3. Follow the code-standard rules and repo `AGENTS.md`; use `simplify-code` / `make-code-readable` when the job is lean/readability.
+3. Follow the rules in `~/.claude/rules/` and repo `AGENTS.md`; use `simplify-code` / `make-code-readable` when the job is lean/readability.
 4. Run the repo’s narrow checks for touched areas, then the full documented gate when feasible.
 5. Commit with `organize-commits` on its topic branch; close the loop with `finish-and-push` (push branch, not main).
 6. Open a PR **into the default branch** with:

@@ -115,7 +115,7 @@ If the user does **not** say headed/visible/ui → **headless**.
 
 ### 0. Resolve repo
 
-1. Repo root (cwd or path in prompt). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README, package scripts, existing e2e folders.
+1. Repo root (cwd or path in prompt). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the rules in `~/.claude/rules/` (`stack-choices.md` for tests), package scripts, existing e2e folders.
 2. Detect commands **from the repo** (do not hardcode Playwright/Maestro):
    - unit: `test`, `test:unit`, workspace tests, language defaults
    - mocks: directories named `msw`, `mocks`, `handlers`, `fixtures` + imports

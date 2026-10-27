@@ -112,7 +112,7 @@ If the user does **not** say headed/visible/ui → **headless**.
 ### 0. Resolve repo
 
 1. Repo root (cwd or path). Default branch from `origin/HEAD`. Dirty unrelated main → stop or isolate.
-2. Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README, package scripts, e2e setup docs.
+2. Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the rules in `~/.claude/rules/` (`stack-choices.md` for tests), package scripts, e2e setup docs.
 3. Detect unit / e2e commands via **`find-missing-tests`** discovery rules.
 4. Detect earlier runs: newest folder in `$RUNS` → `## Ship`; newest folder in `$GAP_RUNS` → `## Features` / `## Report`; or an open branch from a prior `find-missing-tests` run.
 

@@ -157,7 +157,6 @@ describe("run report folders", () => {
     ["restructureRepo", "restructure-repo"],
     ["cleanRepoByFeature", "clean-repo-by-feature"],
     ["improveUx", "improve-ux"],
-    ["codeStyle", "code-style"],
     ["benchmarkAgents", "benchmark-agents"],
   ] as const)("%s starts its run folder as %s", (sourceDirectory, skillId) => {
     const skillMd = path.join(skillRoot, sourceDirectory, "SKILL.md");
