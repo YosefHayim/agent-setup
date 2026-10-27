@@ -52,7 +52,7 @@ The current product owns installation lifecycle, managed configuration, diagnost
 feature and agent catalogs, dependency-free hooks, copied skills, status-line presets,
 and CI/publishing workflow scaffolding. Near-term work strengthens verified agent
 adapters, makes the command surface predictable for both people and automation, and
-keeps the authored skills and hooks consistent through one enforceable code-style contract.
+keeps the authored skills and hooks consistent through the personal rules in `~/.claude/rules/`, checked by Biome and knip.
 
 Additional template kinds or agent integrations are considered only when an actual
 repository or verified tool contract needs them.

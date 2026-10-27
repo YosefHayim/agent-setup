@@ -35,13 +35,13 @@ Names are plain English, one word per idea; the approved words live in [`LANGUAG
 
 Hard rules agents must hold every turn.
 
-- **Verify gate** — `pnpm verify` = Biome + typecheck + `style` + tests + build + generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/imageToCode/scripts/` is the single sanctioned exception.
+- **Verify gate** — `pnpm verify` = Biome + knip + typecheck + tests + build + generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/imageToCode/scripts/` is the single sanctioned exception.
 - **Effect / Schema** — capabilities return Effect; only `src/cli/main.ts` starts the runtime. Runtime, persisted, catalog, CLI, and agent-format data begin as Effect Schema. Application failures use `Schema.TaggedError`. No hand-rolled `isX` / `parseX` pairs for literals and numbers.
 - **Hooks** — installed hooks stay dependency-free plain Node (`node:*`, `src/hooks/lib/**`, own feature code only), **fail-open**. Application code imports hook code only through a feature's `command/` module.
 - **Ownership** — inspect → plan → validate → apply → write receipt last. A receipt is the only deletion authority. Catalog-closed shipping: the feature catalog owns exact shipped paths.
 - **Shape** — capability-owned paths; camelCase authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
 - **Local tooling** — local `src/scripts/dev/` for personal/one-off scripts. All maintained build/verify tools live under `src/scripts/`, and product code never imports them.
-- **Git hooks** — pre-commit runs `pnpm verify`; pre-push runs lint, typecheck, style and the README check (CI runs only test and build, on Linux); a new worktree needs `pnpm install` before its first push. Hooks report drift and never rewrite or stage files.
+- **Git hooks** — pre-commit runs `pnpm verify`; pre-push runs lint (Biome and knip), typecheck and the README check (CI runs only test and build, on Linux); a new worktree needs `pnpm install` before its first push. Hooks report drift and never rewrite or stage files.
 - **Branching** — never commit product work on `main`/default; use a topic branch (`feat/…`, `fix/…`, `refactor/…`, `chore/…`). Refinements to an existing feature still get their own branch.
 - **Remote branches** — do not delete remote branches unless the user explicitly asks; leave them for handoff/CI after push or PR.
 - **Parallel features** — one task per worktree under `.worktrees/`; issue + branch + PR to default with `Fixes #n` / `Closes #n`. Use `run-tasks-in-parallel` (setup-lanes / land-lanes).
@@ -58,14 +58,6 @@ pnpm test
 pnpm typecheck
 pnpm verify
 ```
-
-`pnpm style` is part of `pnpm verify`, so it gates:
-
-```bash
-pnpm style              # AST, path, and import-graph rules over the maintained tree
-```
-
-`pnpm style` gates application, tooling, payload placement, and `src/hooks/`; all are clean and must stay that way. Copied skill content follows Biome and its own harness rather than application architecture rules.
 
 For image-to-code script changes:
 

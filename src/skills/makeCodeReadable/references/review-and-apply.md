@@ -28,7 +28,7 @@ Prefer changes that make the main flow easier to scan:
 - extract pure React helpers for filtering, labels, grouping, or view-model shaping
 - flatten nested conditionals and render branches with early returns
 - separate data loading, transformation, mutation, and rendering
-- remove comments that only explain confusing code after simplifying that code (but never strip doc-comments the repo's guide requires — e.g. TSDoc on the exported surface is a documented contract, not slop; add them where missing)
+- remove comments that only explain confusing code after simplifying that code; keep a one-line comment that says why odd code is there
 
 ## Abstraction Rule
 
@@ -37,13 +37,13 @@ More functions is not automatically better.
 Extract when the new name exposes a real step in the pipeline:
 
 ```txt
-load -> validate -> buildViewModel -> render
+load -> validate -> createOrderSummary -> show
 ```
 
 Inline when the helper only forces the reader to jump:
 
 ```txt
-getIsThingVisible(item) -> item.status === "visible"
+isOrderVisible(order) -> order.status === "visible"
 ```
 
 ## React Rule

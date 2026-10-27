@@ -1,6 +1,6 @@
 # Make Code Readable — Examples
 
-Use examples like these in the read-only review. Adapt names to the real repo.
+Use examples like these in the read-only review. Adapt names to the real repo. They follow `~/.claude/rules/code-style.md`: arrow-const functions, verbs that say what happens, no vague names, named conditions, early returns.
 
 ## Example 1: Backend Pipeline Naming
 
@@ -18,12 +18,12 @@ export async function handle(req: Request) {
 After:
 
 ```ts
-export async function createInvoiceFromRequest(req: Request) {
-  const invoiceInput = await req.json();
-  const invoice = await saveInvoice(invoiceInput);
+export const createInvoiceFromRequest = async (request: Request) => {
+  const invoiceDraft = await request.json();
+  const invoice = await saveInvoice(invoiceDraft);
   await sendInvoiceCreatedEmail(invoice.id);
   return Response.json({ ok: true });
-}
+};
 ```
 
 Review wording:
@@ -40,7 +40,7 @@ The behavior is probably fine, but the names hide the business pipeline.
 Before:
 
 ```ts
-async function processUser(id: string) {
+const processUser = async (id: string) => {
   const user = await db.user.findUnique({ where: { id } });
   if (!user) return null;
 
@@ -49,34 +49,33 @@ async function processUser(id: string) {
 
   await audit.log("view_user", { id });
   return { id: user.id, label };
-}
+};
 ```
 
 After:
 
 ```ts
-async function getUserProfileSummary(id: string) {
-  const user = await findUserById(id);
-  if (!user) return null;
+const loadUserSummary = async (userId: string) => {
+  const user = await findUserById(userId);
+  const isThereNoUserFound = user === null;
+  if (isThereNoUserFound) return null;
 
-  await logUserProfileViewed(id);
-  return buildUserProfileSummary(user);
-}
+  await logUserViewed(userId);
+  return createUserSummary(user);
+};
 
-function buildUserProfileSummary(user: User) {
+const createUserSummary = (user: User) => {
   const fullName = `${user.firstName} ${user.lastName}`.trim();
-  return {
-    id: user.id,
-    label: user.isAdmin ? `${fullName} (admin)` : fullName,
-  };
-}
+  const label = user.isAdmin ? `${fullName} (admin)` : fullName;
+  return { id: user.id, label };
+};
 ```
 
 Review wording:
 
 ```txt
 This should become two named stages, not five tiny helpers:
-load user -> audit side effect -> build summary
+load user -> audit side effect -> create summary
 ```
 
 ## Example 3: React Component To Hook Plus Pure Helper
@@ -84,7 +83,7 @@ load user -> audit side effect -> build summary
 Before:
 
 ```tsx
-export function OrdersPage({ orders, query, status }: Props) {
+export const OrdersPage = ({ orders, query, status }: OrdersPageProps) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const visibleOrders = orders
@@ -97,45 +96,47 @@ export function OrdersPage({ orders, query, status }: Props) {
   }, [selectedId, visibleOrders]);
 
   return <OrdersTable orders={visibleOrders} selectedId={selectedId} onSelect={setSelectedId} />;
-}
+};
 ```
 
-After:
+After, in three files (`orders-page.tsx`, `use-orders-page.ts`, `list-visible-orders.ts`), one job each:
 
 ```tsx
-export function OrdersPage(props: Props) {
-  const { visibleOrders, selectedId, selectOrder } = useOrdersPageState(props);
+export const OrdersPage = (props: OrdersPageProps) => {
+  const { visibleOrders, selectedId, selectOrder } = useOrdersPage(props);
 
   return <OrdersTable orders={visibleOrders} selectedId={selectedId} onSelect={selectOrder} />;
-}
+};
+```
 
-function useOrdersPageState({ orders, query, status }: Props) {
+```ts
+export const useOrdersPage = ({ orders, query, status }: OrdersPageProps) => {
   const [selectedId, selectOrder] = useState<string | null>(null);
-  const visibleOrders = useMemo(
-    () => buildVisibleOrders({ orders, query, status }),
-    [orders, query, status],
-  );
+  const visibleOrders = useMemo(() => listVisibleOrders({ orders, query, status }), [orders, query, status]);
 
   useEffect(() => {
-    if (!selectedId && visibleOrders[0]) selectOrder(visibleOrders[0].id);
+    const isNothingSelected = selectedId === null;
+    const hasVisibleOrder = visibleOrders.length > 0;
+    if (isNothingSelected && hasVisibleOrder) selectOrder(visibleOrders[0].id);
   }, [selectedId, visibleOrders]);
 
   return { visibleOrders, selectedId, selectOrder };
-}
+};
+```
 
-function buildVisibleOrders({ orders, query, status }: Props) {
-  return orders
+```ts
+export const listVisibleOrders = ({ orders, query, status }: OrdersFilter) =>
+  orders
     .filter((order) => status === "all" || order.status === status)
     .filter((order) => order.customerName.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
 ```
 
 Review wording:
 
 ```txt
-Current: OrdersPage owns state + filtering + sorting + default selection + render
-Proposed: OrdersPage renders, useOrdersPageState owns state/effect, buildVisibleOrders owns pure shaping
+Current: OrdersPage owns state + filtering + sorting + default selection + UI
+Proposed: OrdersPage shows UI, useOrdersPage owns state/effect, listVisibleOrders is the pure filter
 ```
 
 ## Example 4: Do Not Over-Extract
@@ -143,9 +144,7 @@ Proposed: OrdersPage renders, useOrdersPageState owns state/effect, buildVisible
 Before:
 
 ```ts
-function isPaid(invoice: Invoice) {
-  return invoice.status === "paid";
-}
+const isPaid = (invoice: Invoice) => invoice.status === "paid";
 
 const paidInvoices = invoices.filter(isPaid);
 ```
@@ -175,15 +174,15 @@ src/components/order.tsx
 After:
 
 ```txt
-src/features/orders/api/orderApi.ts
-src/features/orders/model/buildOrderViewModel.ts
-src/features/orders/components/OrderPage.tsx
+src/orders/orders-client.ts
+src/orders/order-summary.ts
+src/orders/order-page.tsx
 ```
 
 Review wording:
 
 ```txt
-Current folders hide ownership: "lib/data" contains API calls, view shaping, and UI-specific naming.
-Proposed folders read as a pipeline: api -> model -> components.
+Current folders hide ownership: "lib/data" mixes API calls, summary logic and UI-specific naming.
+Proposed: one folder named after the job (orders), kebab-case files named after what they export.
 Risk: import churn across order screens; search usages before applying.
 ```

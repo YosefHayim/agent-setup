@@ -85,17 +85,17 @@ The shipped `templates/web-vitals.js` is this snippet, ready to drop into an app
 ```js
 import { onCLS, onINP, onLCP } from "web-vitals/attribution";
 
-function toGA(metric) {
+const sendMetricToAnalytics = (metric) => {
   gtag("event", metric.name, {
     value: Math.round(metric.name === "CLS" ? metric.delta * 1000 : metric.delta),
     metric_id: metric.id,
     metric_rating: metric.rating,
     debug_target: metric.attribution?.element ?? metric.attribution?.interactionTarget,
   });
-}
-onCLS(toGA);
-onINP(toGA);
-onLCP(toGA);
+};
+onCLS(sendMetricToAnalytics);
+onINP(sendMetricToAnalytics);
+onLCP(sendMetricToAnalytics);
 ```
 
 ## Thresholds (exported constants)

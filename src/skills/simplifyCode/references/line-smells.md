@@ -104,12 +104,12 @@ const limit = opts.limit ?? cfg.limit ?? DEFAULTS.limit ?? 50;
 ```
 
 ```ts
-// After — normalize once at the boundary, pass a clean value down
-const settings = resolveSettings(cfg, env, opts); // all defaults applied here
+// After — apply defaults once at the boundary, pass a clean value down
+const settings = loadSettings(config, environment, overrides); // all defaults applied here
 // deeper code reads settings.name / settings.root / settings.limit directly
 ```
 
-**Smell:** the same `??` chains repeated deep in logic. Normalize defaults once at the edge.
+**Smell:** the same `??` chains repeated deep in logic. Apply defaults once at the edge.
 
 ### 10. Hand-rolled type guards where a schema belongs
 
@@ -263,7 +263,7 @@ const dto = {
 
 ```ts
 // After — pass it through, or remap only what changes
-return row; // or: { ...row, sizeBytes: toMB(row.sizeBytes) }
+return row; // or: { ...row, sizeBytes: convertBytesToMegabytes(row.sizeBytes) }
 ```
 
 **Smell:** a mapping object whose keys/values equal the source.

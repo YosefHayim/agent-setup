@@ -24,11 +24,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/agent-setup.tsbuildinfo",
-    "style": "tsx src/scripts/reportCodeStyle.ts",
-    "lint": "biome check .",
+    "lint": "biome check . && knip",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "verify": "biome ci . && tsc --noEmit && pnpm style && vitest run && pnpm build && pnpm generate-readme:check",
+    "verify": "biome ci . && knip && tsc --noEmit && vitest run && pnpm build && pnpm generate-readme:check",
     "prepublishOnly": "npm run build",
     "generate-readme": "tsx src/scripts/generateReadme.ts",
     "generate-readme:check": "tsx src/scripts/generateReadme.ts --check"
@@ -79,6 +78,7 @@
     "@types/node": "22.20.0",
     "glob": "13.0.6",
     "husky": "9.1.7",
+    "knip": "6.43.0",
     "tsx": "4.22.4",
     "typescript": "5.9.3",
     "vitest": "3.2.7"

@@ -74,6 +74,8 @@ A gap is **missing** when the feature’s real behavior has no test that would *
 
 Edge cases to look for in every feature: empty, one, many, slow or failed network, no permission, double submit, Hebrew right-to-left text. Name each one the feature meets and check a test covers it.
 
+Write tests the way `~/.claude/rules/stack-choices.md` says: one `describe` per exported function, sentence `test()` names inside it, and arrange, act and assert blocks split by blank lines. Assert the values that matter; no snapshots.
+
 ## Invocation
 
 ```text
