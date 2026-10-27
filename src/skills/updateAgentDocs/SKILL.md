@@ -22,10 +22,10 @@ Refresh repo agent guidance from current official docs without turning prompts i
 2. Refresh vendor guidance from this skill directory:
 
    ```bash
-   node scripts/fetchOfficialAgentDocs.mjs
+   node scripts/fetchOfficialAgentDocs.mjs --save-to <your scratchpad>/agent-docs
    ```
 
-   Use the printed cache directory as the source set. If any source fails, report it; if every source fails, stop.
+   Read the files in the printed folder as the source set. If any source fails, report it; if every source fails, stop.
 3. Compare tool behavior:
    - Codex/OpenAI, Cursor, Kiro, Roo, and other AGENTS-aware tools can share compact `AGENTS.md` guidance.
    - Claude Code needs `CLAUDE.md`; use `@AGENTS.md` only when `AGENTS.md` is intentionally compact.

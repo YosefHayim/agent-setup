@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 
 const FETCH_TIMEOUT_MS = 20000;
 const SOURCE_FILE_SUFFIX = ".source";
@@ -13,47 +13,12 @@ const REQUEST_HEADERS = {
 };
 const SOURCE_FILE = "sources.json";
 
-function usage() {
-  return [
-    "Fetch official agent-doc guidance into a local cache.",
-    "",
-    "Usage:",
-    "  node scripts/fetchOfficialAgentDocs.mjs [--out <dir>]",
-  ].join("\n");
-}
+const USAGE = "Usage: node scripts/fetchOfficialAgentDocs.mjs --save-to <folder>";
 
-function parseArgs(argv) {
-  const args = { out: undefined };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--help" || arg === "-h") {
-      return { ...args, help: true };
-    }
-
-    if (arg === "--out") {
-      index += 1;
-      if (!argv[index]) throw new Error("--out requires a directory");
-      args.out = argv[index];
-      continue;
-    }
-
-    if (arg.startsWith("--out=")) {
-      args.out = arg.slice("--out=".length);
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-
-  return args;
-}
-
-function timestampSlug(date) {
-  // e.g. "2026-07-18T18:38:24.663Z" → "2026-07-18T18-38-24-663Z"
-  return date.toISOString().replace(/[:.]/g, "-");
-}
+const readSaveToFolder = (argv) => {
+  const { values } = parseArgs({ args: argv, options: { "save-to": { type: "string" } }, strict: true });
+  return values["save-to"];
+};
 
 function formatError(error) {
   if (error instanceof Error) return error.message;
@@ -155,18 +120,19 @@ function buildSummary({ failures, manifest, outDir, successes }) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const saveToFolder = readSaveToFolder(process.argv.slice(2));
+  const hasSaveToFolder = Boolean(saveToFolder);
 
-  if (args.help) {
-    console.log(usage());
-    return;
+  if (!hasSaveToFolder) {
+    console.error(USAGE);
+    process.exit(1);
   }
 
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const skillDir = path.resolve(scriptDir, "..");
   const sourcePath = path.join(skillDir, SOURCE_FILE);
   const sources = await readJson(sourcePath);
-  const outDir = path.resolve(args.out || path.join(os.tmpdir(), `update-agent-docs-${timestampSlug(new Date())}`));
+  const outDir = path.resolve(saveToFolder);
 
   await mkdir(outDir, { recursive: true });
 
@@ -229,5 +195,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(formatError(error));
+  console.error(USAGE);
   process.exit(1);
 });
