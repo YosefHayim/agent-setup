@@ -99,7 +99,7 @@ If the user does **not** say headed/visible/ui → **headless**.
 
 ### 0. Resolve repo
 
-1. Repo root (cwd or path). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README and `code-standard check` findings (first-class kill targets), package scripts, e2e folders.
+1. Repo root (cwd or path). Read `AGENTS.md`, `PROJECT.md`/`CONTEXT.md`, the code-standard README and the `findings.md` from `pnpm exec code-standard check` (first-class kill targets), package scripts, e2e folders.
 2. **Load `simplify-code`** (and its three reference catalogs). Those are the smell definitions.
 3. Detect unit / e2e commands from the repo (same discovery spirit as `find-missing-tests`). Record headless flags.
 
