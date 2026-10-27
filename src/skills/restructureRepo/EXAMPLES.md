@@ -6,6 +6,9 @@ One made-up repo runs through every example: an Expo app in `mobile/`, a Cloudfl
 
 - Scout brief
 - Step 1: Start
+- Step 3: Fix
+- Step 4: Score
+- Step 7: Review page
 - Phase 1: Dead weight
 - Phase 2: Structure
 - Phase 3: Code
@@ -20,7 +23,7 @@ Code scout:
 ```text
 You are a read-only scout for restructure-repo, phase 4 (Names).
 Area: mobile/**. Do not edit, commit, or propose fixes.
-Read every exported function, type, interface, and prop name, and the comment above each.
+These are the `findings.md` lines for mobile/** (from `grep -A40 '^## mobile/' findings.md`); check each at its file:line first, then read every exported function, type, interface, and prop name, and the comment above each.
 Return only this table, one row per finding, no prose. If nothing is found, return "none".
 | file:line | kind | name | what it really does (evidence: quote, tool output, or count) |
 ```
@@ -28,7 +31,7 @@ Return only this table, one row per finding, no prose. If nothing is found, retu
 Doc scout (one per framework; this one is for Expo, and the Worker and React get their own):
 
 ```text
-You are a read-only scout for restructure-repo, step 3 (Official docs).
+You are a read-only scout for restructure-repo, step 5 (Official docs).
 Fetch the pages for Expo SDK <installed version> on project structure and monorepos.
 Return only this table. Quote the page; never paraphrase from memory.
 | URL | section | quote (at most 2 sentences) | applies to |
@@ -43,6 +46,74 @@ Card (illustrative; the real options come from the models this host offers in th
 > 2. **Mid model.** Reads code and doc pages more carefully and costs more.
 > 3. **Same as the main agent.** Most careful and costs the most.
 
+## Step 3: Fix
+
+On `refactor/split-app-and-api`, clean tree, repo not yet on code-standard:
+
+```bash
+pnpm dlx code-standard@0.4.0 fix --html-output "$RUN_DIR/standard"
+```
+
+Output outside a terminal (exit 1: findings remain, which is normal):
+
+```text
+shop health 4.2% -> 33.8%, 293 files changed (review with git diff)
+report file:///.../runs/shop/restructure-repo/2026-10-27-1030/standard/index.html
+findings /.../runs/shop/restructure-repo/2026-10-27-1030/standard/findings.md
+```
+
+Then the repo's checks, then one commit: `Apply code-standard fixes`.
+
+## Step 4: Score
+
+```bash
+pnpm dlx code-standard@0.4.0 check --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+```
+
+Report section:
+
+```text
+Score: 4.2% before the Fix step, 33.8% now (102 of 320 files clean, 10 of 11 repo checks pass)
+Top rules: no-parent-imports 386, no-nested-calls 125, named-conditions 92, kebab-case-names 26, console-logs-take-objects 22
+Failed repo check: language-md-present
+Report: file:///.../standard/index.html
+Findings: .../standard/findings.md
+```
+
+Top rules come from `ruleCounts` in `check.json`.
+
+## Step 7: Review page
+
+The scouts are done and the main agent checked each finding at its `file:line`. `$RUN_DIR/review.html` has these sections, in this order:
+
+| Section | Holds |
+|---|---|
+| Score | Before and after the Fix step, a link to `standard/index.html`, the top rule counts |
+| Tree | Current tree and proposed tree side by side, then the move table (from, to, why, source) |
+| Names | Rename table, and proposed `LANGUAGE.md` swaps from `nameWords` (`ticker price` to `stock price` when both name one thing) |
+| Code | Before and after for the biggest wins, each with its `file:line` |
+| Stack fits purpose | Each framework and main library, a verdict against `PROJECT.md`, and the official doc link |
+| Deps | Unused files, exports, deps, wrong sections |
+
+The page is one file: inline CSS, `prefers-color-scheme` colors, a `viewport` meta tag, tables inside an `overflow-x: auto` box, no scripts, and every repo string run through an HTML escape. Then:
+
+```bash
+open "$RUN_DIR/review.html"
+```
+
+> **Which phases should I apply?**
+> 1. **Approve all phases (Recommended).** Dead weight, structure, code, names, deps, best practices, in order.
+> 2. Pick phases.
+> 3. Stop here. Nothing beyond the Fix commit is applied.
+
+## Many repos
+
+```bash
+code-standard check --repos-folder ~/Code --html-output "$RUN_DIR/standard" --json-output "$RUN_DIR/check.json"
+```
+
+Outside a terminal: `32 repos, average health 34.2%, 1 failed`, the `report` line and the `findings` line. Start with the repo that the report page lists under "Clean first" (`modelRepo` in `check.json`), and give it its own run.
+
 ## Phase 1: Dead weight
 
 Scout row:
@@ -51,29 +122,17 @@ Scout row:
 |---|---|---|---|
 | `api/src/legacy/syncV1.ts:1` | file | unused file | knip "Unused files"; `git grep syncV1` finds nothing |
 
-Card:
-
-> **knip found 3 unused files and 4 unused deps. Delete them?**
-> 1. **Delete all 7 (Recommended).** Nothing imports them; git keeps the history.
-> 2. Delete the files; review the deps in phase 5.
-> 3. Keep everything.
-
-Table (first 2 of 7 rows; the Report section of `report.md` gets all 7):
+Table (first 2 of 3 rows; the review page and the Report section of `report.md` get all 3):
 
 | Remove | Kind | Evidence | Source |
 |---|---|---|---|
 | `api/src/legacy/syncV1.ts` | file | no importers | knip |
-| `lodash` (`mobile`) | dep | no imports | knip |
+| `mobile/src/old/Banner.tsx` | file | no importers | knip |
 
-Commit: `refactor(dead-weight): remove 3 unused files and 4 unused deps`
+Commit: `refactor(dead-weight): remove 3 unused files`
 
 ## Phase 2: Structure
 
-Card:
-
-> **Where should the app and the API live?**
-> 1. **`apps/mobile` + `apps/api` + `packages/shared` (Recommended).** The Expo monorepo guide's layout; each app owns its config.
-> 2. Keep `mobile/` and `api/` at the root; move only the shared types.
 
 Before and after:
 
@@ -104,11 +163,6 @@ Scout row:
 |---|---|---|---|
 | `apps/mobile/src/api/orders.ts:8`, `apps/mobile/src/api/menu.ts:6` | repeated code | the same fetch, status check, and JSON parse | 14 identical lines in each |
 
-Card:
-
-> **Two files repeat the same 14 lines of fetch code. Merge them?**
-> 1. **One `fetchJson()` used by both (Recommended).** Two real callers; removes 11 lines.
-> 2. Keep both copies.
 
 Before:
 
@@ -136,11 +190,6 @@ Scout row:
 |---|---|---|---|
 | `apps/mobile/src/lib/utils.ts:12` | function | `handleData` | returns `"$12.00"` from cents: `` `$${(cents / 100).toFixed(2)}` `` |
 
-Card:
-
-> **`utils.ts` holds 4 helpers that each do a different job. Split it?**
-> 1. **One file per job: `formatPrice.ts`, `parseOrderDate.ts`, … (Recommended).** Each file name says what is inside.
-> 2. Keep one file, renamed `formatting.ts`.
 
 Table:
 
@@ -172,11 +221,6 @@ Scout row:
 |---|---|---|---|
 | `apps/mobile/package.json:18` | dep | `axios` | 2 imports, both plain GET requests |
 
-Card:
-
-> **`axios` is used for 2 plain GET requests. Replace it with `fetch`?**
-> 1. **Use `fetch` and remove `axios` (Recommended).** React Native ships `fetch`; one dep fewer.
-> 2. Keep `axios`.
 
 Table:
 
@@ -197,11 +241,6 @@ Scout row (doc scout quote plus code scout row):
 | `apps/api/src/env.ts:1` | hand-written `interface Env` | `wrangler types` generates "`Env` types based on your Worker bindings" | <https://developers.cloudflare.com/workers/languages/typescript/> |
 | `apps/mobile/src/screens/OrderTotal.tsx:12` | `useEffect` sets `total` from `items` | "When something can be calculated from the existing props or state, don't put it in state. Instead, calculate it during rendering." | <https://react.dev/learn/you-might-not-need-an-effect> |
 
-Card (multi-select):
-
-> **Which fixes should we apply?**
-> 1. **Generate `Env` with `wrangler types` (Recommended).** Types follow the real bindings; delete `env.ts`.
-> 2. **Compute the Order total during render (Recommended).** One fewer effect and render.
 
 Table:
 

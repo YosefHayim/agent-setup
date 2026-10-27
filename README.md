@@ -144,7 +144,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 | **find-missing-tests** | Find the tests each feature is missing (unit, mocks, integration, e2e), then write them test-first. | 🟢 any OS |
 | **ship-missing-tests** | Find missing tests in many features, fill them in parallel branches, and merge to main after checks. | 🟢 any OS |
 | **simplify-repo-with-tests** | Find over-engineering across the repo, simplify it, and use tests to prove the behavior did not change. | 🟢 any OS |
-| **restructure-repo** | Clean a whole repo — folders, names, code, and deps — against its own docs and the official docs of every framework it uses, one approved phase at a time on a branch. | 🟢 any OS |
+| **restructure-repo** | Clean a whole repo — folders, names, code, and deps. It applies the no-AI code-standard fixes, scores the repo, shows one review page, then applies only the phases you approve on a branch. | 🟢 any OS |
 | **improve-ux** | Make user flows easier (fewer clicks, better layout, forms, mobile). Shows before/after designs first, then builds the one you pick. | 🟢 any OS |
 | **design-app-mockup** | Turn an app idea into premium, Framer-level UI mockups: pick one of 3 real templates, get a hi-fi landing page inspired by it, or a close match in your own colors and content, then a UI library from that page, custom icons, real photos, and clickable app journeys. | 🟢 any OS |
 | **free-ports** | Stop local servers that block ports (keeps Metro on 8081) so you can start dev again. | 🟢 any OS |
