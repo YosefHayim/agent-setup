@@ -51,11 +51,15 @@ Keep user wording. Note workspace if known. Strip secrets from logs, not from th
 
 | Class | Freeform signals | Primary skill |
 |-------|------------------|---------------|
-| Ship / branch / PR / report when done | new branch, open PR, commit push | `finish-and-push` |
+| Ship / branch / PR / report when done | new branch, open PR, commit push, git commit push, commit push redeploy | `finish-and-push` |
+| Split into clean commits | organize commits, organized commits, split commits | `organize-commits` |
+| Readable code | no nested ifs, no ternaries, proper naming, make this readable | `make-code-readable` |
+| Release a mobile app | release new version, internal testing, TestFlight, I don’t see it in TestFlight | `release-mobile-app` |
+| Better screens and flows | better UX UI, user journey, this screen looks bad | `improve-ux` |
 | Whole messy repo / every feature / backup main | multi-feature cleanup | `clean-repo-by-feature` |
 | Parallel agents / worktrees | many lanes, fan-out | `run-tasks-in-parallel` setup-lanes |
 | Land concurrent lanes | salvage, integrate worktrees | `run-tasks-in-parallel` land-lanes |
-| Local UI prove | launch local, playwright, don’t deploy | `run-local-and-check` |
+| Local UI prove | launch local, playwright, simulator, emulator, on my phone, relaunch so I see it, don’t deploy | `run-local-and-check` |
 | Prod live prove | redeploy, is live, curl | `deploy-and-check` |
 | Lean / ceremony | deslop, AI slop, ban payload | `simplify-code` |
 | Whole-repo restructure | folders, names, deps, official docs | `restructure-repo` |
