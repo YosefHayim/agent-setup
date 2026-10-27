@@ -31,6 +31,7 @@ const otherSessionId = "0b6f1d2e-3c4a-4e5f-8a9b-1c2d3e4f5a6b";
 const laterSessionId = "9e8d7c6b-5a49-4382-a716-5f4e3d2c1b0a";
 const codexThreadId = "019a2c41-7d3e-7b10-9c2a-5e4f6a7b8c9d";
 const PRUNE_TOOLS = ["xcrun", "pnpm", "uv", "docker"];
+const PROCESS_TOOLS = ["lsof", "ps"];
 const MONTH_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
 const TWO_HOURS_AGO = new Date(Date.now() - 2 * 60 * 60 * 1_000);
 const realGitPath = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
@@ -81,6 +82,23 @@ const writePruneToolStubs = (homeRoot: string) => {
   return toolCallsFile;
 };
 
+// The watcher asks lsof and ps about every process on the machine, so any process outside the test, such as a git
+// process still winding down, can make a worktree look in use. The stubs list no process, so only a test that starts a
+// process itself brings the real tools back.
+const writeQuietProcessToolStubs = (homeRoot: string) => {
+  for (const tool of PROCESS_TOOLS) {
+    const stub = path.join(homeRoot, "stub-tools", tool);
+    writeFileSync(stub, "#!/bin/sh\n");
+    chmodSync(stub, 0o755);
+  }
+};
+
+const useRealProcessTools = (home: CodeHome) => {
+  for (const tool of PROCESS_TOOLS) {
+    rmSync(path.join(home.homeRoot, "stub-tools", tool));
+  }
+};
+
 // A fake home with ~/Desktop/Code/app, cloned from a bare remote outside the code folders.
 const createCodeHome = (): CodeHome => {
   const homeRoot = mkdtempSync(path.join(scratchParent, "disk-cleanup-"));
@@ -97,6 +115,7 @@ const createCodeHome = (): CodeHome => {
   // A clone of a repository that already has commits learns the remote's default branch the same way.
   git({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
   const toolCallsFile = writePruneToolStubs(homeRoot);
+  writeQuietProcessToolStubs(homeRoot);
   return { homeRoot, remote, repo, toolCallsFile };
 };
 
@@ -445,6 +464,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const home = createCodeHome();
     const opened = addBranchWorktree({ home, branch: "opened" });
     const named = addBranchWorktree({ home, branch: "named" });
+    useRealProcessTools(home);
     const fileHolder = holdFileOpen({ home, heldFile: path.join(opened, "README.md") });
     const folderNamer = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", named], { cwd: home.homeRoot });
     try {
@@ -466,6 +486,7 @@ describe("cleanupWatcher worktrees", { timeout: 30_000 }, () => {
     const named = addBranchWorktree({ home, branch: "named" });
     moveAndLinkBack({ folder: path.dirname(home.repo), movedFolder: path.join(home.homeRoot, "Volumes", "Code") });
     const namedRealFolder = realpathSync(named);
+    useRealProcessTools(home);
     const fileHolder = holdFileOpen({ home, heldFile: path.join(opened, "README.md") });
     const folderNamer = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", namedRealFolder], {
       cwd: home.homeRoot,
@@ -1150,6 +1171,7 @@ describe("cleanupWatcher caches", { timeout: 30_000 }, () => {
       folder: path.join(home.homeRoot, ".npm"),
       movedFolder: path.join(home.homeRoot, "Volumes", "npm"),
     });
+    useRealProcessTools(home);
     const fileHolder = holdFileOpen({ home, heldFile });
     try {
       await once(fileHolder.stdout, "data");
