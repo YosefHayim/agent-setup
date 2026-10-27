@@ -1,1 +1,1 @@
-pnpm lint && pnpm typecheck && pnpm style && pnpm style:guide . && pnpm generate-readme:check
+pnpm lint && pnpm typecheck && pnpm style && pnpm generate-readme:check

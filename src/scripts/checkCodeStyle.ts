@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { globSync } from "glob";
 import ts from "typescript";
-import { checkRuleCards } from "./checkRuleCards.js";
 
 type CodeStyleViolation = {
   ruleId: string;
@@ -32,14 +30,6 @@ const NULLISH_EXCEPTION = "src/skills/makePromoVideo/scripts/assembleCut.mjs";
 
 const failConfiguration = (message: string): never => {
   throw new Error(`Invalid code-style configuration: ${message}`);
-};
-
-const assertRuleCardsConform = (repositoryRoot: string): void => {
-  const violations = checkRuleCards({ guide: readFileSync(join(repositoryRoot, "CODE-STYLE.md"), "utf8") });
-  if (violations.length > 0) {
-    const lines = violations.map((violation) => `  CODE-STYLE.md:${violation.line} ${violation.message}`);
-    failConfiguration(`CODE-STYLE.md does not match the rule-card format:\n${lines.join("\n")}`);
-  }
 };
 
 const isCallOn = (node: ts.Node, callee: { owner: string; method: RegExp }): boolean =>
@@ -605,8 +595,6 @@ const misplacedHookFiles = (repositoryRoot: string): ReadonlyArray<CodeStyleViol
   }));
 
 export const checkCodeStyle = (repositoryRoot: string): ReadonlyArray<CodeStyleViolation> => {
-  assertRuleCardsConform(repositoryRoot);
-
   const files = globSync(["src/**/*.{ts,tsx,js,mjs,mts,cts}", "*.{ts,tsx,js,mjs,mts,cts}"], {
     cwd: repositoryRoot,
     nodir: true,

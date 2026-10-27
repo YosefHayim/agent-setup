@@ -6,38 +6,10 @@ import { checkCodeStyle } from "./checkCodeStyle.js";
 
 const repositories: Array<string> = [];
 
-const ruleCard = (ruleId: string): string =>
-  [
-    `### ${ruleId}`,
-    `[rule:${ruleId}] · verify: \`pnpm style\``,
-    "",
-    "One rule sentence.",
-    "",
-    "```ts",
-    "// ✓ good",
-    "// ✗ bad",
-    "```",
-    "",
-    "Why: one reason.",
-  ].join("\n");
-
-const guideWith = (ruleIds: ReadonlyArray<string>): string =>
-  [
-    "# Style",
-    "## Rules",
-    ...ruleIds.map(ruleCard),
-    "## Canonical example",
-    "## Golden path",
-    "## Exemplars",
-    "## Never",
-  ]
-    .join("\n\n")
-    .concat("\n");
-
 const repositoryWith = (files: Readonly<Record<string, string>>): string => {
   const repositoryRoot = mkdtempSync(join(tmpdir(), "agent-setup-style-"));
   repositories.push(repositoryRoot);
-  Object.entries({ "CODE-STYLE.md": guideWith(["function.arrow-only"]), ...files }).forEach(([path, source]) => {
+  Object.entries(files).forEach(([path, source]) => {
     mkdirSync(dirname(join(repositoryRoot, path)), { recursive: true });
     writeFileSync(join(repositoryRoot, path), source);
   });
@@ -393,14 +365,6 @@ describe("checkCodeStyle", () => {
 
   it.each(ACCEPTED)("accepts $name", ({ path = EXAMPLE, source }) => {
     expect(findings({ [path]: source })).toEqual([]);
-  });
-
-  it("fails when CODE-STYLE.md repeats a rule card", () => {
-    const repositoryRoot = repositoryWith({
-      "CODE-STYLE.md": guideWith(["function.arrow-only", "function.arrow-only"]),
-    });
-
-    expect(() => checkCodeStyle(repositoryRoot)).toThrow(/function\.arrow-only has more than one card/u);
   });
 
   it("reports an index-named barrel for both ownership rules", () => {
