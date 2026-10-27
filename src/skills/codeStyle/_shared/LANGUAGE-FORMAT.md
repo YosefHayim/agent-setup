@@ -49,7 +49,7 @@ _Avoid_: Client, buyer, account.
 | ownerUser     | owner |
 ```
 
-Each row is two different names, and the use name must not contain the avoid name (`language-swaps-valid` checks this). Names are split into lowercase words, so `userOwnerId` and `user-owner-card` both match `userOwner`; a trailing `s` plural matches too. A missing section or an empty table means no swaps. Propose rows from the `nameWords` list of `pnpm exec code-standard check --json-output <file>`, where one thing has several names, and add only the ones the user approves.
+Each row is two different names, and the use name must not contain the avoid name (`language-swaps-valid` checks this). Names are split into lowercase words, so `userOwnerId` and `user-owner-card` both match `userOwner`; plurals match too, spelled the English way (`people` for `person`, `equities` for `equity`). A missing section or an empty table means no swaps. Propose rows from the `nameWords` list of `pnpm exec code-standard check --json-output <file>`, where one thing has several names, and add only the ones the user approves.
 
 ### Optional area groups
 
