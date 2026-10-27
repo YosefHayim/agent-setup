@@ -118,7 +118,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 | **write-readme** | Write or fix the README and other start-here docs. Reads the repo first, then asks you questions one by one. | 🟢 any OS |
 | **update-agent-docs** | Create or update agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor rules, and more) based on each agent's official docs. | 🟢 any OS |
 | **simplify-code** | Remove extra code — wrappers, layers, folders, generic names, and scripts the job does not need. | 🟢 any OS |
-| **code-style** | Ask you questions about code style, folder structure, and CLI, reading the real code when there is some, then write CODE-STYLE.md, a formatter config, and the project docs. Can also only check code against the rules. | 🟢 any OS |
+| **code-style** | Make a repo follow the code-standard package: install its Biome and Ruff config, move the repo's own exceptions into AGENTS.md, set word swaps in LANGUAGE.md, run the safe fixes, and add a check to CI. Can also only score a repo. | 🟢 any OS |
 | **code-style-teach-me** | While you build, stop at each real choice, show two options, and explain the rule so you learn your own architecture. | 🟢 any OS |
 | **code-style-review** | Check a big change (branch or PR) against the style rules and get a short report, so you do not need to read every file. | 🟢 any OS |
 | **explain-my-stack** | Understand why the project uses each technology (language, framework, services), with honest trade-offs and a plain glossary, all in chat. | 🟢 any OS |

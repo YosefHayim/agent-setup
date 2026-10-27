@@ -32,14 +32,14 @@ Score **belief the feature is correct and matches repo patterns**, not optimism.
 | 4–5 | Works in a narrow demo; weak e2e; style drift. **Do not merge** without human. |
 | 6 | Happy-path unit + e2e green; follows main patterns; minor residual risk. Default minimum to auto-merge. |
 | 7 | Solid coverage; small unknowns (e.g. thin new e2e harness, one flaky host). |
-| 8 | Full gate + CI green; matches CODE-STYLE; edge cases considered. |
+| 8 | Full gate + CI green; passes `code-standard check`; edge cases considered. |
 | 9 | High coverage, CI green (PR checks, or local gate plus default-branch run), reinstall smoke clean, little residual risk. |
 | 10 | Reserved: production-hardened, multi-surface proof, no known residual risk. Rare. |
 
 **Caps (apply the lowest):**
 
 - New thin e2e smoke only → max **7**
-- No CODE-STYLE / AGENTS guidance and inconsistent neighbors → max **5**
+- No code-standard / AGENTS guidance and inconsistent neighbors → max **5**
 - Unit without e2e (or reverse) → max **4** and **block merge**
 - no CI could run (no hosted run, no act) and no user override → do not merge; score may still describe code quality
 
@@ -130,7 +130,7 @@ Default branch: <main>
 - Unit happy path green
 - E2E happy path green
 - Full repo gate when present
-- Follow CODE-STYLE.md / AGENTS.md
+- Follow the code-standard rules and AGENTS.md
 
 ## Forbidden
 - Commits on default branch

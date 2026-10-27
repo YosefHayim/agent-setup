@@ -10,7 +10,7 @@ and not coding rules.
 | `CONTEXT.md` | Orientation (this file) |
 | `LANGUAGE.md` | Names-only glossary — [LANGUAGE-FORMAT.md](./LANGUAGE-FORMAT.md) |
 | PR description | Individual hard-to-reverse decisions |
-| `CODE-STYLE.md` / `AGENTS.md` | How to write code / how to work in the repo |
+| `AGENTS.md` | How to work in the repo, and its `## Exceptions to code-standard` |
 
 **Canonical exemplar:** `ai-browser-bridge/CONTEXT.md` (orientation sections; no
 glossary blocks). agent-setup's own `CONTEXT.md` is a second good short example.
@@ -32,8 +32,8 @@ an existing `CONTEXT.md`, migrate those terms into `LANGUAGE.md` using
 # CONTEXT.md — {Project}
 
 Orientation: what this is, its moving parts, and how they fit. For the words, see
-`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for how code is written,
-`CODE-STYLE.md`; for how to work in the repo, `AGENTS.md`.
+`LANGUAGE.md`; for purpose and direction, `PROJECT.md`; for how to work in the repo
+and how it differs from code-standard, `AGENTS.md`.
 
 ## What it is
 
@@ -68,7 +68,7 @@ Diagrams and short tables of actors/parts are fine when they orient.}
 | `## Language` section | `LANGUAGE.md` |
 | Purpose, goals, non-goals, roadmap Built/Next/Maybe | `PROJECT.md` |
 | Decision rationale | The PR description |
-| Full code-style rules | `CODE-STYLE.md` |
+| Code-style rules | the `code-standard` package; repo exceptions in `AGENTS.md` |
 | Long implementation walkthroughs | code; link only |
 
 ## Rules

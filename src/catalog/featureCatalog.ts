@@ -549,8 +549,8 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     sourceDirectory: "codeStyle",
     title: "Code style",
     summary:
-      "Ask you questions about code style, folder structure, and CLI, reading the real code when there is some, then write CODE-STYLE.md, a formatter config, and the project docs. Can also only check code against the rules.",
-    shippedPaths: ["SKILL.md", "NEW-PROJECT.md", "EXISTING-PROJECT.md", "SCAN.md", "_shared", "references", "scripts"],
+      "Make a repo follow the code-standard package: install its Biome and Ruff config, move the repo's own exceptions into AGENTS.md, set word swaps in LANGUAGE.md, run the safe fixes, and add a check to CI. Can also only score a repo.",
+    shippedPaths: ["SKILL.md", "ADOPT.md", "NEW-PROJECT.md", "_shared"],
   }),
   skillFeature({
     id: "code-style-teach-me",

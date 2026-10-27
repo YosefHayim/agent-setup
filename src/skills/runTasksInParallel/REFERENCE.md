@@ -101,7 +101,7 @@ Merge authorized: false | true
 - Stop what you started once you no longer need it: simulators, emulators, VMs, Gradle daemons (`./gradlew --stop`), dev servers. They slow every other lane on the machine.
 
 ## Style
-Follow AGENTS.md, CODE-STYLE.md at repo root of this worktree.
+Follow AGENTS.md and the code-standard rules (node_modules/code-standard/README.md) at repo root of this worktree.
 
 ## Done for implementer
 PR open with gates evidence. Orchestrator owns merge sequencing and campaign board.

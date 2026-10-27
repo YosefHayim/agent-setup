@@ -67,7 +67,7 @@ This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge
 #### 1. Parse tasks
 
 1. Repo root, default branch from `origin/HEAD`, `git fetch` (do not mutate other worktrees).
-2. Read `AGENTS.md`, `CODE-STYLE.md`, package verify/test scripts.
+2. Read `AGENTS.md`, the code-standard README, package verify/test scripts.
 3. Split the request into **independent** numbered tasks. Accept forms: `1. …`, `1) …`, `- [ ] …`, or explicit “Task N:”.
 4. Name each with a short kebab slug. Flag overlaps; sequence or batch only when paths do not collide.
 5. Start a run: one new folder outside the repo, never a file that parallel runs overwrite:

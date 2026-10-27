@@ -1,53 +1,46 @@
 ---
 name: code-style
-description: Use when you want clear code style rules for a project, new or with code. It reads the code if there is any, asks you questions, and writes CODE-STYLE.md, the formatter config, and the project docs after you approve. It can also only check code against the rules. Say "code style", "set up conventions", "grill me on style", or "check code against CODE-STYLE".
+description: Use when you want a repo to follow the one code standard (the code-standard package). It installs the shared Biome and Ruff config, moves the repo's own exceptions into AGENTS.md, sets the word swaps in LANGUAGE.md, runs the safe fixes, and adds a check to CI. It can also only score a repo. Say "code style", "adopt code-standard", "set up conventions", "score my repo", or "check code against the standard".
 ---
 
 <what-to-do>
 
-Pick a mode from the user request and the repo, then follow only that mode:
+The rules are not written per repo. They live in the npm package `code-standard`. Its README is the rule book: read `node_modules/code-standard/README.md` once it is installed, or on its GitHub page (`YosefHayim/code-standard`) before. A repo only keeps its own exceptions, in `AGENTS.md`.
+
+**How to call the CLI.** Bare `code-standard` is not on PATH. When the repo has it in `devDependencies`, run `pnpm exec code-standard <command>`. When the repo has not adopted it yet, run `pnpm dlx code-standard@<latest> <command>`, with `<latest>` from `pnpm view code-standard version`. The commands below use `pnpm exec code-standard`; swap in `pnpm dlx` before the install step. Package scripts may call `code-standard` bare.
+
+Pick a mode from the request and the repo, then follow only that mode:
 
 | Mode | When | Follow | Writes files? |
 | --- | --- | --- | --- |
-| **New project** | Little or no code yet — decide from my taste, the purpose, and the language | [NEW-PROJECT.md](NEW-PROJECT.md) | Only after planpage approval |
-| **Existing project** (default when there is code) | Decide / rebuild style with me using real code as evidence | [EXISTING-PROJECT.md](EXISTING-PROJECT.md) | Only after planpage approval |
-| **Audit** | Docs already exist; check whether code + slices follow them | Below | **Never** — report only; hand cleanup to `simplify-code` |
+| **Adopt** (default for a repo with code) | Make the repo follow code-standard | [ADOPT.md](ADOPT.md) | Only after I approve the plan |
+| **New project** | Little or no code yet | [NEW-PROJECT.md](NEW-PROJECT.md) | Only after I approve the plan |
+| **Audit** | Only score the repo | Below | Never |
 
-Read the chosen file in full before the first question. Once a new project has real code, the next run uses Existing project.
+Read the chosen file in full before the first question.
 
-### Mode: Audit (read-only compliance)
+### Run folder (Adopt and New project)
 
-When I already have `CODE-STYLE.md` / structure docs and want confirmation that the tree follows them (including mechanical bans like `result` / `payload` / vague `to*`·`build*`·`resolve*` mappers):
+Check outputs go in a run folder outside the repo, never in a system temp folder.
 
-1. Resolve the package/repo root.
-2. Run mechanical inventory + scan from this skill directory (paths relative to the installed skill root):
+```bash
+SKILL="code-style"
+COMMON_GIT_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
+REPO_ROOT=$(dirname "$COMMON_GIT_DIR")
+REPO=$(basename "$REPO_ROOT")
+RUNS="${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/$REPO/$SKILL"
+RUN_DIR="$RUNS/$(date +%Y-%m-%d-%H%M)"
+[ -e "$RUN_DIR" ] && RUN_DIR="$RUN_DIR-$$"
+mkdir -p "$RUN_DIR"
+```
 
-   ```bash
-   SCAN_DIR=$(mktemp -d)
-   node scripts/inventory-repository.mjs --root <repo> --out "$SCAN_DIR/style-inventory.json"
-   node scripts/scan-style-compliance.mjs --root <repo> --out "$SCAN_DIR/style-findings.json"
-   ```
+### Mode: Audit (read-only)
 
-3. Map apps, packages, feature slices, and cross-slice imports from the inventory.
-4. Compare docs (AGENTS, CODE-STYLE, PROJECT, CONTEXT, LANGUAGE, README) for missing files, nested contradictions, and path drift.
-5. Publish evidence-first findings (`ruleId`, path, symbol, line, evidence, severity, confidence, remediation). Taxonomy: [references/finding-taxonomy.md](references/finding-taxonomy.md). Defaults informed by [references/research-principles.md](references/research-principles.md); **project CODE-STYLE wins**.
-6. If findings are **persisted** (not chat-only): start a run folder outside the repo and write only the **`## Findings`** section of `$REPORT`:
+1. Run `pnpm exec code-standard check` in the repo root. Outside a terminal it prints three lines: the health line, `report file://.../index.html` and `findings /.../findings.md`. It exits 1 when there are findings; that is not a failure of the run.
+2. Show me the health line and the report link.
+3. Read the top rules from the `findings.md` path with `grep`. Each finding line is `- <line> <rule>: <message>` under a `## <file> (<count>)` heading. Count findings per rule and show the biggest ones. Never paste the HTML or the whole findings file.
+4. Cleanup is not done here. Offer `restructure-repo` for folders, names and docs, and `simplify-code` for code.
 
-   ```bash
-   SKILL="code-style"
-   COMMON_GIT_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
-   REPO_ROOT=$(dirname "$COMMON_GIT_DIR")
-   REPO=$(basename "$REPO_ROOT")
-   RUNS="${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/$REPO/$SKILL"
-   RUN_DIR="$RUNS/$(date +%Y-%m-%d-%H%M)"
-   [ -e "$RUN_DIR" ] && RUN_DIR="$RUN_DIR-$$"
-   mkdir -p "$RUN_DIR"
-   REPORT="$RUN_DIR/report.md"
-   ```
-
-   Resume → the run path the user gives, else the newest folder (`ls -1 "$RUNS" | tail -n 1`). Never write `*AUDIT*.md` / compliance reports in the repository: no `docs/` folder, nothing at the root.
-7. Do **not** rewrite CODE-STYLE or rename symbols in audit mode. Approved cleanup → `simplify-code`; structural prove-outs → `simplify-repo-with-tests`.
-
-Honest limit: mechanical scanners prove banned names, missing docs, and path patterns — not whether a name truly captures a business concept (`confidence: judgment` for those).
+Several repos at once: `--repo <path>` (repeat it) or `--repos-folder <path>`. Add `--json-output <file>` when you need the full outcome as JSON.
 
 </what-to-do>

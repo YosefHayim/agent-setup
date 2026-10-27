@@ -63,7 +63,7 @@ Keep user wording. Note workspace if known. Strip secrets from logs, not from th
 | Prod live prove | redeploy, is live, curl | `deploy-and-check` |
 | Lean / ceremony | deslop, AI slop, ban payload | `simplify-code` |
 | Whole-repo restructure | folders, names, deps, official docs, code-standard score and fixes, clean all repos | `restructure-repo` |
-| Style system (new or existing code) | CODE-STYLE, style rules, style audit | `code-style` |
+| Code standard (new or existing code) | adopt code-standard, style rules, score my repo | `code-style` |
 | Kill ports | free ports, metro 8081 | `free-ports` |
 | Bootstrap Code folder | clone all GH repos | `clone-all-repos` |
 | Cloudflare ops | wrangler, D1 (not prove live) | `manage-cloudflare` |
