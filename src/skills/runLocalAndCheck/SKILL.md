@@ -13,7 +13,7 @@ Validate the product through the surface the user actually sees. Source inspecti
 - Read the repository's run, test-data, and environment instructions before starting services.
 - Use local, sandbox, preview, or explicitly authorized test accounts and payment methods. Never create a production charge, send a real campaign, or mutate customer data to prove a flow.
 - Do not expose credentials, cookies, tokens, personal data, or private screenshots in logs or the final report.
-- For mobile, boot only a simulator or emulator, never a real phone, and shut down the one you started when done. Screenshots may show private data, so keep them out of the repo.
+- For mobile, boot only a simulator or emulator, never install on a real phone yourself, and shut down the one you started when done. Screenshots may show private data, so keep them out of the repo.
 - Ask only when a required credential, irreversible action, or product choice cannot be discovered safely. If a surface is unavailable, report it as unverified.
 
 ## Workflow
@@ -42,6 +42,8 @@ Android emulator:
 2. Wait for it: `adb wait-for-device`.
 3. Launch the app: `npx expo run:android`, or `npx expo start` and press `a`.
 4. Screenshot: `adb exec-out screencap -p > <path>.png`.
+
+"On my phone": run `npx expo start` and tell the owner to scan the QR code with Expo Go or the dev build on their own phone. Check the same screen yourself in the simulator or emulator.
 
 To clean the cache and relaunch like a new build, run `npx expo start --clear`. If native code or config changed, do a fresh native build with `npx expo run:ios` or `npx expo run:android`.
 
