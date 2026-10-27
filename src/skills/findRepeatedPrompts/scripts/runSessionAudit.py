@@ -47,9 +47,32 @@ SYSTEMISH = re.compile(
 NOISE_PAT = re.compile(
     r"(?is)^(\s*<environment_context>|\s*<skill>|\s*<recommended_plugins>|"
     r"\s*system prompt:\s*you are a skill author|"
-    r"\s*<permissions|"
+    r"\s*<permissions|\s*# AGENTS\.md instructions|"
     r"agreed\.?\s*[ab]?\s*$|approved\s*$|sounds good\s*$)"
 )
+SKILL_LINK_RE = re.compile(r"\[\$([\w:.-]+)\]\([^)]*\)")
+COMMAND_NAME_RE = re.compile(r"<command-name>\s*/?(.*?)\s*</command-name>", re.S)
+COMMAND_ARGS_RE = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.S)
+SLASH_TEXT_RE = re.compile(r"^/([\w:.-]+)(?:\s+(.*))?$", re.S)
+PASTED_RE = re.compile(
+    r"<pasted_content[^>]*>.*?</pasted_content[^>]*>|\[(Pasted text|Image) #\d+[^\]]*\]|"
+    r"\[Pasted Content \d+ chars\]",
+    re.S,
+)
+CLAUDE_BUILTIN_COMMANDS = {
+    "add-dir", "agents", "chrome", "clear", "compact", "config", "context", "doctor",
+    "effort", "exit", "export", "fast", "help", "hooks", "ide", "login", "logout", "mcp",
+    "memory", "model", "permissions", "plugin", "plugins", "rate-limit-options", "rename",
+    "resume", "rewind", "status", "statusline", "usage",
+}
+CLAUDE_SKIP_PREFIXES = (
+    "<",
+    "This session is being continued",
+    "[Request interrupted",
+    "Caveat:",
+)
+CLAUDE_HUMAN_ORIGINS = (None, "human")
+CODEX_SKIPPED_SOURCES = ("exec",)
 
 INTENT_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("finish_and_push", re.compile(
@@ -130,6 +153,7 @@ def normalize(text: str) -> str:
     if USER_QUERY_RE.search(t):
         t = USER_QUERY_RE.sub(r"\1", t)
     t = re.sub(r"</?user_query>", "", t, flags=re.I)
+    t = SKILL_LINK_RE.sub(r"$\1", t).replace("›", " ")
     t = redact(t)
     t = UUID_RE.sub("[UUID]", t)
     t = NUM_RE.sub("[N]", t)
@@ -194,6 +218,16 @@ def bigrams(s: str) -> set[tuple[str, str]]:
     return set(zip(words, words[1:])) if len(words) > 1 else set()
 
 
+def breadth(items: list[dict]) -> dict:
+    days = sorted(str(i["ts"])[:10] for i in items if i.get("ts"))
+    return {
+        "workspaces": len({i["workspace"] for i in items if i.get("workspace")}),
+        "active_days": len(set(days)),
+        "first_seen": days[0] if days else None,
+        "last_seen": days[-1] if days else None,
+    }
+
+
 def jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
@@ -217,15 +251,202 @@ def discover_installed_skills(home: Path) -> list[str]:
     return sorted(names)
 
 
+def claude_prompt_text(text: str) -> tuple[str, str | None]:
+    t = PASTED_RE.sub("[PASTE]", text).strip()
+    command = COMMAND_NAME_RE.search(t)
+    if command:
+        args = COMMAND_ARGS_RE.search(t)
+        name = command.group(1)
+        rest = args.group(1).strip() if args else ""
+        is_prompt = bool(rest) and name not in CLAUDE_BUILTIN_COMMANDS
+        return (f"/{name} {rest}" if is_prompt else ""), name
+    slash = SLASH_TEXT_RE.match(t)
+    if slash:
+        name = slash.group(1)
+        rest = (slash.group(2) or "").strip()
+        is_prompt = bool(rest) and name not in CLAUDE_BUILTIN_COMMANDS
+        return (t if is_prompt else ""), name
+    if t.startswith(CLAUDE_SKIP_PREFIXES):
+        return "", None
+    return t, None
+
+
+def is_claude_human_turn(o: dict) -> bool:
+    if o.get("type") != "user" or o.get("isMeta") or o.get("isSidechain"):
+        return False
+    if o.get("entrypoint") == "sdk-cli":
+        return False
+    content = (o.get("message") or {}).get("content")
+    if isinstance(content, list) and any(
+        isinstance(c, dict) and c.get("type") == "tool_result" for c in content
+    ):
+        return False
+    return o.get("turnOrigin") in CLAUDE_HUMAN_ORIGINS
+
+
+def add_claude_prompt(
+    records: list[dict], stats: dict, slash_counts: Counter, raw: str, base: dict
+) -> None:
+    text, command = claude_prompt_text(raw)
+    if command and command not in CLAUDE_BUILTIN_COMMANDS:
+        slash_counts[command] += 1
+    if is_noise(text):
+        stats["skipped"] += 1
+        return
+    stats["extracted"] += 1
+    records.append({
+        **base,
+        "agent": "claude",
+        "text": redact(text)[:4000],
+        "norm": normalize(text),
+    })
+
+
+def extract_claude(home: Path, records: list[dict], coverage: dict) -> None:
+    transcripts = coverage["claude_transcripts"]
+    history = coverage["claude_history"]
+    slash_counts: Counter = Counter()
+    project_roots = {p.resolve() for p in home.glob(".claude*/projects") if p.is_dir()}
+    sessions_with_transcript: set[str] = set()
+
+    for root in sorted(project_roots):
+        for path in root.glob("*/*.jsonl"):
+            transcripts["files"] += 1
+            sessions_with_transcript.add(path.stem)
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        if '"user"' not in line:
+                            continue
+                        try:
+                            o = json.loads(line)
+                        except Exception:
+                            transcripts["errors"] += 1
+                            continue
+                        if not is_claude_human_turn(o):
+                            continue
+                        transcripts["found"] += 1
+                        add_claude_prompt(
+                            records,
+                            transcripts,
+                            slash_counts,
+                            extract_text_content((o.get("message") or {}).get("content")),
+                            {
+                                "source": "transcript",
+                                "session_id": o.get("sessionId") or path.stem,
+                                "ts": o.get("timestamp"),
+                                "workspace": Path(o.get("cwd") or "").name or None,
+                            },
+                        )
+            except Exception:
+                transcripts["errors"] += 1
+
+    for path in sorted(home.glob(".claude*/history.jsonl")):
+        history["files"] += 1
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    history["errors"] += 1
+                    continue
+                if o.get("sessionId") in sessions_with_transcript:
+                    continue
+                history["found"] += 1
+                ts = o.get("timestamp")
+                iso = (
+                    datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
+                    if isinstance(ts, (int, float))
+                    else None
+                )
+                add_claude_prompt(
+                    records,
+                    history,
+                    slash_counts,
+                    o.get("display") or "",
+                    {
+                        "source": "history.jsonl",
+                        "session_id": o.get("sessionId"),
+                        "ts": iso,
+                        "workspace": Path(o.get("project") or "").name or None,
+                    },
+                )
+
+    transcripts["skill_commands"] = dict(slash_counts.most_common(40))
+
+
+def codex_session_meta(fpath: str) -> dict:
+    with open(fpath, encoding="utf-8", errors="replace") as f:
+        first = json.loads(f.readline() or "{}")
+    return first.get("payload") or {} if first.get("type") == "session_meta" else {}
+
+
 def extract_all(home: Path) -> tuple[list[dict], dict]:
     records: list[dict] = []
     coverage: dict = {
+        "claude_transcripts": {"found": 0, "extracted": 0, "skipped": 0, "errors": 0, "files": 0},
+        "claude_history": {"found": 0, "extracted": 0, "skipped": 0, "errors": 0, "files": 0},
+        "codex_sessions": {
+            "found": 0, "extracted": 0, "skipped": 0, "errors": 0, "files": 0,
+            "skipped_files": 0,
+        },
         "codex_history": {"found": 0, "extracted": 0, "skipped": 0, "errors": 0},
-        "codex_sessions": {"found": 0, "extracted": 0, "skipped": 0, "errors": 0, "files": 0},
         "grok_sessions": {"found": 0, "extracted": 0, "skipped": 0, "errors": 0, "sessions": 0},
-        "claude": {"found": 0, "extracted": 0, "note": "no session store auto-discovered"},
         "cursor": {"found": 0, "note": "not scanned unless present"},
     }
+
+    extract_claude(home, records, coverage)
+
+    for fpath in glob.glob(str(home / ".codex" / "sessions" / "**" / "*.jsonl"), recursive=True):
+        coverage["codex_sessions"]["files"] += 1
+        try:
+            meta = codex_session_meta(fpath)
+        except Exception:
+            coverage["codex_sessions"]["errors"] += 1
+            continue
+        if meta.get("source") in CODEX_SKIPPED_SOURCES or isinstance(meta.get("source"), dict):
+            coverage["codex_sessions"]["skipped_files"] += 1
+            continue
+        session_uuid = UUID_RE.search(Path(fpath).stem)
+        session_id = session_uuid.group(0) if session_uuid else Path(fpath).stem
+        try:
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        o = json.loads(line)
+                    except Exception:
+                        coverage["codex_sessions"]["errors"] += 1
+                        continue
+                    p = o.get("payload") or {}
+                    text = ""
+                    if o.get("type") == "response_item" and p.get("role") == "user":
+                        text = extract_text_content(p.get("content"))
+                    elif o.get("type") == "event_msg" and p.get("type") == "user_message":
+                        text = extract_text_content(
+                            p.get("message") or p.get("content") or p.get("text")
+                        )
+                    else:
+                        continue
+                    text = PASTED_RE.sub("[PASTE]", text).strip()
+                    if is_noise(text) or not text:
+                        coverage["codex_sessions"]["skipped"] += 1
+                        continue
+                    if "<permissions" in text or "Filesystem sandboxing" in text:
+                        coverage["codex_sessions"]["skipped"] += 1
+                        continue
+                    coverage["codex_sessions"]["found"] += 1
+                    records.append({
+                        "agent": "codex",
+                        "source": "session_jsonl",
+                        "session_id": session_id,
+                        "ts": o.get("timestamp"),
+                        "workspace": Path(meta.get("cwd") or "").name or None,
+                        "text": redact(text)[:4000],
+                        "norm": normalize(text),
+                    })
+                    coverage["codex_sessions"]["extracted"] += 1
+        except Exception:
+            coverage["codex_sessions"]["errors"] += 1
 
     hist = home / ".codex" / "history.jsonl"
     if hist.exists():
@@ -237,7 +458,7 @@ def extract_all(home: Path) -> tuple[list[dict], dict]:
                 except Exception:
                     coverage["codex_history"]["errors"] += 1
                     continue
-                text = (o.get("text") or "").strip()
+                text = PASTED_RE.sub("[PASTE]", o.get("text") or "").strip()
                 if is_noise(text):
                     coverage["codex_history"]["skipped"] += 1
                     continue
@@ -258,46 +479,6 @@ def extract_all(home: Path) -> tuple[list[dict], dict]:
                     "norm": normalize(text),
                 })
                 coverage["codex_history"]["extracted"] += 1
-
-    for fpath in glob.glob(str(home / ".codex" / "sessions" / "**" / "*.jsonl"), recursive=True):
-        coverage["codex_sessions"]["files"] += 1
-        try:
-            with open(fpath, encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    try:
-                        o = json.loads(line)
-                    except Exception:
-                        coverage["codex_sessions"]["errors"] += 1
-                        continue
-                    p = o.get("payload") or {}
-                    text = ""
-                    if o.get("type") == "response_item" and p.get("role") == "user":
-                        text = extract_text_content(p.get("content"))
-                    elif o.get("type") == "event_msg" and p.get("type") == "user_message":
-                        text = extract_text_content(
-                            p.get("message") or p.get("content") or p.get("text")
-                        )
-                    else:
-                        continue
-                    if is_noise(text) or not text:
-                        coverage["codex_sessions"]["skipped"] += 1
-                        continue
-                    if "<permissions" in text or "Filesystem sandboxing" in text:
-                        coverage["codex_sessions"]["skipped"] += 1
-                        continue
-                    coverage["codex_sessions"]["found"] += 1
-                    records.append({
-                        "agent": "codex",
-                        "source": "session_jsonl",
-                        "session_id": Path(fpath).stem,
-                        "ts": o.get("timestamp"),
-                        "workspace": None,
-                        "text": redact(text)[:4000],
-                        "norm": normalize(text),
-                    })
-                    coverage["codex_sessions"]["extracted"] += 1
-        except Exception:
-            coverage["codex_sessions"]["errors"] += 1
 
     grok_root = home / ".grok" / "sessions"
     if grok_root.is_dir():
@@ -465,6 +646,7 @@ def cluster_fuzzy(unique: list[dict]) -> list[dict]:
             "prompt_count": len(all_items),
             "unique_sessions": len(sessions),
             "agents": sorted({i["agent"] for i in all_items}),
+            **breadth(all_items),
             "top_terms": top_words,
             "examples": examples,
             "confidence": (
@@ -523,6 +705,7 @@ def intent_buckets(unique: list[dict]) -> list[dict]:
             "prompt_count": len(items),
             "unique_sessions": len(sessions),
             "agents": sorted({i["agent"] for i in items}),
+            **breadth(items),
             "existing_skills": skills,
             "recommendation": rec,
             "why": why,
@@ -607,8 +790,8 @@ def write_report_md(
     for c in fuzzy[:15]:
         terms = ", ".join(c["top_terms"][:6])
         lines.append(
-            f"- **{c['unique_sessions']} sessions** · {c['confidence']} · "
-            f"terms: {terms}"
+            f"- **{c['unique_sessions']} sessions** · {c['workspaces']} workspaces · {c['active_days']} days · "
+            f"{c['first_seen']} to {c['last_seen']} · {c['confidence']} · terms: {terms}"
         )
         if c["examples"]:
             lines.append(f"  - _{c['examples'][0].replace(chr(10), ' ')[:160]}_")
@@ -617,8 +800,10 @@ def write_report_md(
         "## Limitations",
         "",
         "- Local stores only; no cloud/account history.",
-        "- Claude/Cursor omitted when no session store is present.",
-        "- History + session sources may double-count; prefer unique_sessions.",
+        "- Cursor is not scanned.",
+        "- Claude transcripts older than cleanupPeriodDays survive only as history.jsonl "
+        "lines: typed text with pastes collapsed.",
+        "- Codex history and session files are merged by session UUID; prefer unique_sessions.",
         "- Grok worktree subagents can inflate session counts.",
         "- Lexical clustering only (no hosted embeddings).",
         "- A repeated string is not a skill unless it is a reusable job with a stable trigger.",
@@ -641,7 +826,7 @@ def main() -> int:
     parser.add_argument(
         "--home",
         default=str(Path.home()),
-        help="User home containing .codex / .grok session stores",
+        help="User home containing .claude*, .codex and .grok session stores",
     )
     parser.add_argument(
         "--out",
@@ -672,7 +857,7 @@ def main() -> int:
         "scope": {
             "machine": "local",
             "home": str(home),
-            "agents": ["codex", "grok"],
+            "agents": ["claude", "codex", "grok"],
         },
         "coverage": coverage,
         "totals": {
@@ -688,6 +873,10 @@ def main() -> int:
             "skip acks and stack-heavy noise",
             "redact secrets, URLs, UUIDs, home paths",
             "normalize: lower, collapse ws, placeholder numbers",
+            "claude: human turns only (no SDK, sidechain, task notifications, compaction "
+            "summaries); slash commands counted, kept as prompts only with args",
+            "claude: history.jsonl only for sessions whose transcript was cleaned up",
+            "codex: exec and subagent sessions skipped",
         ],
         "clustering": {
             "exact": "normalized string equality across sessions",

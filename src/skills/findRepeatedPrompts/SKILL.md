@@ -26,7 +26,7 @@ Turn repeated user requests into evidence-backed skill candidates. The audit is 
    python3 scripts/runSessionAudit.py --home "$HOME"
    ```
 
-   Resolve `scripts/runSessionAudit.py` from this skill’s install directory (global or project). The script discovers Codex + Grok stores under `$HOME`, writes coverage, prompts, clusters, intent buckets, shards, and `report.md`. It covers all sessions, not one repo, so each run gets a new folder `${XDG_STATE_HOME:-~/.local/state}/agent-setup/runs/global/find-repeated-prompts/<YYYY-MM-DD-HHMM>/`, outside every repo. Never write the audit into a repository `docs/` folder.
+   Resolve `scripts/runSessionAudit.py` from this skill’s install directory (global or project). The script discovers Claude Code (every `~/.claude*` account), Codex, and Grok stores under `$HOME`, writes coverage, prompts, clusters, intent buckets, shards, and `report.md`. It covers all sessions, not one repo, so each run gets a new folder `${XDG_STATE_HOME:-~/.local/state}/agent-setup/runs/global/find-repeated-prompts/<YYYY-MM-DD-HHMM>/`, outside every repo. Never write the audit into a repository `docs/` folder.
 
 2. If the script is unavailable, run the same pipeline manually: discover stores → coverage manifest → sample formats → extract user prompts → normalize → exact + fuzzy cluster → intent map → skill compare.
 
