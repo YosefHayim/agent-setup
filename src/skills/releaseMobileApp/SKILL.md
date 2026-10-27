@@ -1,6 +1,6 @@
 ---
 name: release-mobile-app
-description: Use when you want to release a mobile app to the App Store, TestFlight, or Google Play. It builds, bumps the version, writes release notes, submits, and records which commit was shipped. Say "release to TestFlight", "submit to App Store", or "what did we ship".
+description: Use when you want to release a mobile app to the App Store, TestFlight, or Google Play. It builds, bumps the version, writes release notes, submits, and records which commit was shipped. Say "release new version", "release to TestFlight", "internal testing", "I don't see it in TestFlight", "submit to App Store", or "what did we ship".
 type: flow
 ---
 
@@ -178,6 +178,8 @@ Still record the same identity fields (SHA, version, build numbers, EAS build ID
 | Config version | version + build numbers at build time |
 | Build | Launch build/artifact id or EAS build id; finished status |
 | Store | TestFlight build visible / Play track; `launch status` when using Launch |
+
+If the owner cannot see a build ("I don't see it in TestFlight"), run `launch status` (or `launch status --watch`) first. Report whether the build is still processing, failed, or done, before building again.
 
 If SHA, version, or build number disagree with intent — stop and report the mismatch.
 
