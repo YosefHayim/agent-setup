@@ -29,6 +29,7 @@ Use this as a quick lookup. Prefer **one primary** skill.
 | Adopt the personal code rules, or review a repo against them, new or existing | `code-style` (adopt / new project / review mode) |
 | teach stack choices | `explain-my-stack` |
 | plan / design grill, with or without project docs | `question-my-plan` |
+| ask before build / ask me everything first / scope a new task up front, MVP and backlog | `ask-before-build` |
 
 ## Prove it works
 

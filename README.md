@@ -118,6 +118,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 | **write-readme** | Write or fix the README and other start-here docs. Reads the repo first, then asks you questions one by one. | 🟢 any OS |
 | **update-agent-docs** | Create or update agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor rules, and more) based on each agent's official docs. | 🟢 any OS |
 | **simplify-code** | Remove extra code — wrappers, layers, folders, generic names, and scripts the job does not need. | 🟢 any OS |
+| **ask-before-build** | Ask every open question about a new task up front, cut it to an MVP, and backlog the rest, so scope does not arrive one message at a time. | 🟢 any OS |
 | **code-style** | Make a repo follow the personal rules in ~/.claude/rules/: set up Biome and Ruff, move the repo's own exceptions into AGENTS.md, line up folders, file names and root docs, and fix the code. Can also only review a repo. | 🟢 any OS |
 | **code-style-teach-me** | While you build, stop at each real choice, show two options, and explain the rule so you learn your own architecture. | 🟢 any OS |
 | **code-style-review** | Check a big change (branch or PR) against the style rules and get a short report, so you do not need to read every file. | 🟢 any OS |
@@ -168,7 +169,7 @@ These skills ship with agent-setup for convenience — installable the same way 
 | Skill | What it does | By |
 | --- | --- | --- |
 | **make-code-readable** | Use when you want code that is easier to read — clearer names, order, files, and functions. It shows before and after, and changes code only after you approve. Say "make this readable", "no nested ifs", "no ternaries", "nested ternary", "avoid let", "proper naming", "rename for clarity", or "clean this up". To remove extra layers, use simplify-code. For a whole repo, use restructure-repo. | [Mike Cann](https://github.com/mikecann/agent-skills) (upstream: `deslop`) |
-| **question-my-plan** | Use when you want the agent to ask you hard questions about your plan until you both understand it the same way. When the repo has PROJECT.md, CONTEXT.md, or LANGUAGE.md, or you ask for it, it also checks the plan against them and updates them as you decide. Say "grill me", "question my plan", or "grill me with docs". | [Matt Pocock](https://github.com/mattpocock/skills) (upstream: `grill-me`, `grill-with-docs`) |
+| **question-my-plan** | Use when you want the agent to ask you hard questions about your plan until you both understand it the same way. When the repo has PROJECT.md, CONTEXT.md, or LANGUAGE.md, or you ask for it, it also checks the plan against them and updates them as you decide. Say "grill me", "question my plan", or "grill me with docs". To ask everything up front before a new task, use ask-before-build. | [Matt Pocock](https://github.com/mattpocock/skills) (upstream: `grill-me`, `grill-with-docs`) |
 
 > `code-style` is an agent-setup-original skill that builds on Matt Pocock's grilling pattern — it stays in the owned catalog above.
 <!-- AUTO:SKILLS:END -->
