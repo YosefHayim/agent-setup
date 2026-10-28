@@ -545,6 +545,14 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     dependencies: ["code-style"],
   }),
   skillFeature({
+    id: "ask-before-build",
+    sourceDirectory: "askBeforeBuild",
+    title: "Ask before build",
+    summary:
+      "Ask every open question about a new task up front, cut it to an MVP, and backlog the rest, so scope does not arrive one message at a time.",
+    shippedPaths: ["SKILL.md"],
+  }),
+  skillFeature({
     id: "code-style",
     sourceDirectory: "codeStyle",
     title: "Code style",
