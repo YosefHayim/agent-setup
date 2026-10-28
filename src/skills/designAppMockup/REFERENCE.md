@@ -6,14 +6,17 @@ The craft rules here hold on every run. The values (colors, fonts, radii, motion
 
 **With an Artifact tool (Claude Code):** run `quickstart` with intent `design` and create the canvas from the Design type it names. Follow that type's own instructions for boards, pages, and the canvas file.
 
-- Pages: Landing, Library, Icons and photos, then one page per journey.
-- One row per journey, with a short note under each screen.
+- Pages: Landing, Library, Icons and photos, then Journeys.
+- On the Journeys page, the journeys sit side by side from left to right, one column each. Pick the journeys from the app's idea and purpose, such as first use to first result or fixing a wrong result. Add sign up, log in, or payment only when the app has them. The journey's name is the title above its column.
+- Each journey is one tall board that reads top to bottom, the way a new user lives it the first time. Down a numbered line, each step says what the user does, then shows the real hi-fi screen at true size with tap markers, arrows, and one-line callouts for what they tap, what changes, and what comes next. Never lay a journey's steps out left to right.
+- Each step's main action links to the next step, so the journey clicks through.
+- A journey board leaves room for the step text beside the screen: about 960 wide for a phone app, 1440 for web.
 - Publish each board right after you write it.
 - Before you publish the canvas file again, read the published copy and edit that, so boards the user moved stay where they are.
 - Upload photos and icons as assets, and use each one by the URL the upload returns.
 - Add a short note on the Landing page that names the template it was inspired by, so the next run can find it.
 
-**Without an Artifact tool (Codex and others):** write the boards into a folder the user names, one HTML file per board. Add a `canvas.html` that shows every board in rows by page, each in an iframe at its real size with its title above it. Open it in the browser. Use no build step and no framework, and load fonts from Google Fonts.
+**Without an Artifact tool (Codex and others):** write the boards into a folder the user names, one HTML file per board. Add a `canvas.html` that shows every board by page, each in an iframe at its real size with its title above it, and the journey boards side by side as columns at full height. Open it in the browser. Use no build step and no framework, and load fonts from Google Fonts.
 
 **Sizes:** phone boards are 390x844. The landing page is one fluid file, shown at 1440 and at 390.
 
@@ -193,7 +196,7 @@ Every app gets these states, not only the happy path:
 - detail with steps;
 - paywall, when the app has a paid tier: a free path, the usage count, restore, and terms;
 - saved or history, with filters and an empty filter state;
-- account: subscription, preferences, privacy, help, log out.
+- account, when the app has accounts: subscription, preferences, privacy, help, log out.
 
 Rules:
 

@@ -89,10 +89,11 @@ Every later board uses only these tokens and components.
 
 Build the screens in journey order from the library ([REFERENCE.md → Screens](REFERENCE.md#screens)):
 
-- the journeys: first use to first result, fixes and edge cases, then account and payment;
+- the journeys the app's idea and purpose need: first use to first result, fixes and edge cases, then account and payment only when the app has them;
+- each journey on one tall board that a new user reads top to bottom, step by step, with the journeys side by side ([REFERENCE.md → Canvas](REFERENCE.md#canvas));
 - one primary action per screen, every state, and real copy;
 - navigation and home shaped by the app's job, never by a past mockup;
-- links between screens, so each journey clicks through.
+- links from each step to the next, so each journey clicks through.
 
 ### 8. Consistency pass and cleanup
 
@@ -109,4 +110,4 @@ Report:
 - every placeholder left for the user, such as prices and store links;
 - how the real app should get its photos and icons.
 
-The mockup is done when every board in the approved list exists, each journey clicks through, and the consistency pass finds nothing left to fix.
+The mockup is done when every board in the approved list exists, each journey reads top to bottom and clicks through, and the consistency pass finds nothing left to fix.
