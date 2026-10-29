@@ -65,7 +65,7 @@ jobs:
             echo "::error::npm $(npm -v) is below 11.5.1; trusted publishing is not supported"
             exit 1
           }
-      - name: Verify release candidate
-        run: pnpm verify
+      - name: Check release candidate
+        run: pnpm check
       - name: Publish to npm (trusted publishing)
         run: pnpm publish --no-git-checks --access public --provenance

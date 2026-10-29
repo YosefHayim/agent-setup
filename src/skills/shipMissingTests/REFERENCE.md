@@ -9,7 +9,7 @@
 | `run-tasks-in-parallel` | setup-lanes mechanics |
 | `organize-commits` | Commit shape on topic branches |
 | `finish-and-push` | Push + open PR (pre-merge) |
-| `ship-one-feature` | Confidence honesty + act gate ideas; **single** product feature is a different skill |
+| `ship-one-feature` | Confidence honesty; **single** product feature is a different skill |
 
 ## Headless policy
 
@@ -111,7 +111,7 @@ N/10 — <why>
 
 - Mono-branch dump of all features when parallel lanes were requested (except optional wave-0 of prior work)  
 - Merging without backup  
-- Merging red CI/unit  
+- Merging with a failing `pnpm check` or unit run  
 - Claiming e2e green when skipped  
 - Reimplementing worktree or TDD rules inside this file  
 - Deleting remotes or force-pushing main  

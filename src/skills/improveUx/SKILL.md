@@ -320,7 +320,7 @@ Once `direction_id` is set (or user clearly locks direction in chat):
 # Phase 4 — land (only when user says)
 
 1. Merge only PRs they named or marked liked + “land/merge”.  
-2. Prefer `gh pr merge`; never force-push tip.  
+2. Merge one PR at a time per `finish-and-push` **Local sign-off** (`pnpm check`, `gh signoff`, `gh pr merge <n> --squash --match-head-commit <sha>`); never force-push tip.  
 3. Post-land: quick verify / e2e if present.  
 4. Local worktree cleanup only if they ask close/prune.  
 5. STATE `phase: done` when campaign finished.

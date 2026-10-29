@@ -86,7 +86,7 @@ All paths are in the agent-setup repo. Put the new skill next to related skills 
 
 ## Install
 
-`install <id>` adds the feature and keeps everything already installed. Run from the agent-setup repo after `pnpm verify` (it builds `dist/`, which the hooks install from):
+`install <id>` adds the feature and keeps everything already installed. Run from the agent-setup repo after `pnpm check` (it builds `dist/`, which the hooks install from):
 
 ```bash
 pnpm cli install <id>

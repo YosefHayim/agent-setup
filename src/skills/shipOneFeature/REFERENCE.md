@@ -12,7 +12,7 @@ Load each sibling’s `SKILL.md` when you hit that concern:
 | Multi-lane cleanup | `clean-repo-by-feature` | Out of scope — redirect |
 | After merge live web | `deploy-and-check` | Optional, only if user asks |
 
-Orchestrator owns only: Gate A (unit+e2e), confidence rubric, CI, merge, reinstall, done receipt.
+Orchestrator owns only: Gate A (unit+e2e), confidence rubric, sign-off, merge, reinstall, done receipt.
 
 ## Entry modes
 
@@ -32,8 +32,8 @@ Score **belief the feature is correct and matches repo patterns**, not optimism.
 | 4–5 | Works in a narrow demo; weak e2e; style drift. **Do not merge** without human. |
 | 6 | Happy-path unit + e2e green; follows main patterns; minor residual risk. Default minimum to auto-merge. |
 | 7 | Solid coverage; small unknowns (e.g. thin new e2e harness, one flaky host). |
-| 8 | Full gate + CI green; Biome clean and follows `~/.claude/rules/`; edge cases considered. |
-| 9 | High coverage, CI green (PR checks, or local gate plus default-branch run), reinstall smoke clean, little residual risk. |
+| 8 | `pnpm check` green; Biome clean and follows `~/.claude/rules/`; edge cases considered. |
+| 9 | High coverage, `pnpm check` green and signed off, reinstall smoke clean, little residual risk. |
 | 10 | Reserved: production-hardened, multi-surface proof, no known residual risk. Rare. |
 
 **Caps (apply the lowest):**
@@ -41,7 +41,7 @@ Score **belief the feature is correct and matches repo patterns**, not optimism.
 - New thin e2e smoke only → max **7**
 - No AGENTS guidance and inconsistent neighbors → max **5**
 - Unit without e2e (or reverse) → max **4** and **block merge**
-- no CI could run (no hosted run, no act) and no user override → do not merge; score may still describe code quality
+- `pnpm check` could not run and no user override → do not merge; score may still describe code quality
 
 Always write one sentence under **Confidence** in the PR: what would lower the score.
 
@@ -55,13 +55,13 @@ Fixes #<n>
 - <user-visible outcome 2>
 
 ## Confidence
-**7/10** — Unit + CLI e2e green and matches existing command layout; hosted CI ran on Linux only.
+**7/10** — Unit + CLI e2e green and matches existing command layout; checked on macOS only.
 
 ## Test plan
 - [x] Unit: `pnpm test -- <path>` → pass
 - [x] E2E: `pnpm test:integration` → pass
-- [x] Full gate: `pnpm verify` → pass
-- [x] CI: PR checks → pass (private repository: local gate → pass, default-branch run after merge)
+- [x] Full gate: `pnpm check` → pass
+- [x] CI: `pnpm check` (turbo) → pass, signoff <sha>
 
 ## Main safety
 - Base: main @ <sha>
@@ -69,22 +69,16 @@ Fixes #<n>
 - No history rewrite of default.
 ```
 
-## Local act (only when hosted CI cannot run)
+## When Actions cannot start jobs
 
-When GitHub Actions cannot run for the repository, or the user asks, run the workflow files GitHub runs with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow.
-
-Notes:
-
-- If act needs secrets, use repo-documented `.secrets` / `--secret-file` — never invent production secrets.
-- Platform-specific jobs may need `-P` runner images; record skips that are environmental vs real failures.
-- On failure: fix on the feature branch, push, re-run act; do not merge red.
+No act and no Docker for CI. For a PR that changes `.github/**`, `actionlint` is the check and the next nightly or main run is the proof. In a client repo the local gate is the proof; say the run did not start. Run `run-ci-locally` only when the user asks.
 
 ## Test command discovery
 
 Prefer documented scripts in order:
 
 1. `AGENTS.md` / README “Verification”
-2. `package.json`: `test`, `test:unit`, `test:e2e`, `test:integration`, `verify`, `check`
+2. `package.json`: `test`, `test:unit`, `test:e2e`, `test:integration`, `check`
 3. `Makefile` / `justfile` targets
 4. Language defaults (`cargo test`, `go test`, `pytest`) only when no package script exists
 
