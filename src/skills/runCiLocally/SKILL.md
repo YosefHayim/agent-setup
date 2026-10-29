@@ -1,12 +1,14 @@
 ---
 name: run-ci-locally
-description: Use when GitHub Actions cannot run (billing block, no runner) and the repo's CI workflows must pass locally in Docker with act. Runs each job, reports pass or fail, then removes every container, volume, image and file the run made. Say "run CI locally", "run act", or "Actions are blocked".
+description: Use only when the user asks to run the repo's GitHub Actions workflows locally in Docker with act. Runs each job, reports pass or fail, then removes every container, volume, image and file the run made, and quits Docker Desktop. Say "run CI locally" or "run act".
 type: flow
 ---
 
 # Run CI locally
 
 Run the repository's GitHub Actions workflows on this machine with [act](https://nektosact.com) in Docker, report each job, and leave nothing behind.
+
+CI no longer uses act or Docker (own repos sign off with `pnpm check` and `gh signoff`; when Actions cannot start jobs, `actionlint` and the next nightly or main run are the proof). Use this skill only when the user asks.
 
 ## Safety
 

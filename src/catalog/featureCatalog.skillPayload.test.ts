@@ -196,7 +196,7 @@ describe("repeated workflow skills", () => {
 
     const { frontmatter, body: skillInstructions } = parseFrontmatter(skillMd);
     expect(frontmatter?.name).toBe(skillId);
-    expect(frontmatter?.description).toMatch(/^Use when /);
+    expect(frontmatter?.description).toMatch(/^Use (only )?when /);
     expect(skillInstructions).toContain("## Safety");
     expect(skillInstructions).toContain("## Workflow");
     expect(skillInstructions).toContain("## Verification");

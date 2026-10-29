@@ -27,7 +27,6 @@
     "lint": "biome check . && knip",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "verify": "biome ci . && knip && tsc --noEmit && vitest run && pnpm build && pnpm generate-readme:check",
     "prepublishOnly": "npm run build",
     "generate-readme": "tsx src/scripts/generateReadme.ts",
     "generate-readme:check": "tsx src/scripts/generateReadme.ts --check",

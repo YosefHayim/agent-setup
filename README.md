@@ -240,10 +240,10 @@ pnpm generate-readme
 pnpm test
 pnpm typecheck
 pnpm build
-pnpm verify
+pnpm check
 ```
 
-`pnpm generate-readme` rewrites only the marked feature, skill, and settings sections above from `src/catalog/featureCatalog.ts`, `src/skills/*/SKILL.md`, `src/config/configSchema.ts`, and `src/config/environmentVariables.ts`. The pre-commit hook runs `pnpm verify`, whose `generate-readme:check` fails on a stale README; it never rewrites or stages files, so run `pnpm generate-readme` yourself.
+`pnpm generate-readme` rewrites only the marked feature, skill, and settings sections above from `src/catalog/featureCatalog.ts`, `src/skills/*/SKILL.md`, `src/config/configSchema.ts`, and `src/config/environmentVariables.ts`. The pre-push hook runs `pnpm check`, whose `generate-readme:check` fails on a stale README; it never rewrites or stages files, so run `pnpm generate-readme` yourself.
 
 ## License
 

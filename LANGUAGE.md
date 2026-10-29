@@ -195,6 +195,6 @@ _Avoid_: describing their internals here.
 No back-compat shims on renames/pivots. Old installs upgrade by uninstalling with the old version, then installing the new one.
 _Avoid_: "migration", "deprecation".
 
-**verify**
-The one aggregate script that owns every repository check required by CI.
+**check**
+The one aggregate script (`pnpm check`) that owns every repository check required by CI.
 _Avoid_: "qa", "validate".

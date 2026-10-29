@@ -32,7 +32,7 @@ describe("planWorkflowFiles", () => {
   it("fills publish.yml, passes other workflows through verbatim, and drops non-yml", () => {
     const planned = planWorkflowFiles({
       files: [
-        { name: "ci.yml", text: "name: CI\nrun: pnpm verify\n" },
+        { name: "ci.yml", text: "name: CI\nrun: pnpm check\n" },
         { name: "publish.yml", text: "{{OWNER}}/{{REPO}} ships {{PACKAGE}}" },
         { name: "README.md", text: "ignore me" },
       ],
@@ -40,7 +40,7 @@ describe("planWorkflowFiles", () => {
     });
 
     expect(planned).toEqual([
-      { name: "ci.yml", content: "name: CI\nrun: pnpm verify\n" },
+      { name: "ci.yml", content: "name: CI\nrun: pnpm check\n" },
       { name: "publish.yml", content: "Acme/widget ships widget-cli" },
     ]);
   });
@@ -59,7 +59,7 @@ layer(NodeContext.layer)("copyWorkflows", (it) => {
 
       expect(copied.written).toEqual(["ci.yml", "publish.yml", "report-failure.yml"]);
       expect((yield* fileSystem.readDirectory(workflows)).sort()).toEqual(copied.written);
-      expect(ciYml).toContain("run: pnpm verify");
+      expect(ciYml).toContain("run: pnpm check");
       expect(ciYml).not.toContain("YosefHayim/agent-setup");
       expect(ciYml).not.toContain("setup-uv");
       expect(publishYml).toContain("test-pkg");

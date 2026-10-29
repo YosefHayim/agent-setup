@@ -89,7 +89,7 @@ Merge authorized: false | true
 4. If UI surface: run run-local-and-check checks; record evidence.
 5. organize-commits on this branch only. Never commit on default.
 6. finish-and-push: push + open PR with Fixes #<n>, Summary, Confidence N/10, test plan.
-7. CI as finish-and-push Hosted CI says (PR checks if public, local gate if private) — red blocks merge.
+7. Sign-off as finish-and-push Local sign-off says: `pnpm check`, then `gh signoff` — a failing check blocks merge; fix and rerun.
 8. Do NOT merge unless Merge authorized: true and conf ≥ 6.
 9. Do NOT delete remotes. Do NOT touch other lanes.
 
@@ -134,7 +134,7 @@ Fixes #<n>
 - [x] Unit: `<cmd>` → pass
 - [x] E2E: `<cmd>` → pass | skip:<why>
 - [x] QA: run-local-and-check → pass | N/A
-- [ ] CI: PR checks → pass | private: local gate → pass, default-branch run after merge
+- [ ] CI: `pnpm check` (turbo) → pass, signoff <sha>
 
 ## Main safety
 - Base: <default> @ <sha>
@@ -159,9 +159,9 @@ Fixes #<n>
 
 Happy path = primary success scenario. At least one unit and one e2e assertion should fail if the feature is removed.
 
-## act (only when hosted CI cannot run)
+## When Actions cannot start jobs
 
-When GitHub Actions cannot run for the repository, or the user asks, run the workflows with the **run-ci-locally** skill, with the leg options the repo's AGENTS.md names. It runs one act process per job, each holding a machine-wide slot; never run `act` on a whole workflow. Red → fix on branch, push, re-run; do not merge.
+No act and no Docker for CI. For a PR that changes `.github/**`, `actionlint` is the check and the next nightly or main run is the proof. In a client repo the local gate is the proof; say the run did not start. Run `run-ci-locally` only when the user asks.
 
 ## Reinstall / smoke (optional full ship)
 

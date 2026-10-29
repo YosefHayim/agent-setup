@@ -55,7 +55,7 @@ Create branch `feat/<id>` from the default branch, then follow [REFERENCE.md →
 
 ### 7. Check
 
-Run `pnpm vitest run src/catalog/featureCatalog.skillPayload.test.ts src/catalog/featureCatalog.test.ts`, then `pnpm verify`. Fix and re-run until both pass. Never skip or weaken a check to make it pass.
+Run `pnpm vitest run src/catalog/featureCatalog.skillPayload.test.ts src/catalog/featureCatalog.test.ts`, then `pnpm check`. Fix and re-run until both pass. Never skip or weaken a check to make it pass.
 
 ### 8. Install and try it
 
@@ -77,6 +77,6 @@ Report:
 - each tried phrase → which skill it loads;
 - one sentence the user can say to try the skill now.
 
-In agent-setup, also report the branch, the two test commands and `pnpm verify` with results, and the install path. The skill is done when the checks pass and the installed `SKILL.md` exists.
+In agent-setup, also report the branch, the two test commands and `pnpm check` with results, and the install path. The skill is done when the checks pass and the installed `SKILL.md` exists.
 
 Outside agent-setup, report the chosen location. The skill is done when its `SKILL.md` exists there.

@@ -22,7 +22,7 @@ This skill is the **glue**. Load sibling `SKILL.md` files and follow them. Do no
 | Worktree / issue / branch / LANE-BRIEF per lane | **`run-tasks-in-parallel` setup-lanes** |
 | Commits | **`organize-commits`** |
 | Push + open/update PR (pre-merge) | **`finish-and-push`** |
-| Per-lane merge gates + confidence rubric (adapt) | **`ship-one-feature`** REFERENCE (confidence, act) — **merge owned here for multi-lane** |
+| Per-lane merge gates + confidence rubric (adapt) | **`ship-one-feature`** REFERENCE (confidence) — **merge owned here for multi-lane** |
 | Single product feature (not a test campaign) | **Stop** → `ship-one-feature` |
 | Over-engineering lean | **Stop** → `simplify-repo-with-tests` |
 
@@ -194,18 +194,18 @@ Before merge eligibility:
    - green → full merge eligibility
    - skip (no API/sim) → merge only with **confidence cap** and explicit PR note (REFERENCE); or hold if user said e2e-required
 3. **Confidence** (1–10) on PR — same honesty as `ship-one-feature`. **&lt; 6 → do not merge** that lane.
-4. **CI** as `finish-and-push` **Hosted CI** says (PR checks if public, local gate if private) — red blocks merge.
+4. **Sign-off** as `finish-and-push` **Local sign-off** says: `pnpm check`, then `gh signoff`. A failing check blocks merge; fix and rerun.
 
 ### 6. Merge sequence (orchestrator; authorized by default)
 
 Unless `no-merge`:
 
 1. Order merges: **shared/contract** first, then independent features, then UI/e2e-heavy.
-2. After each merge: `git fetch`; rebase/update remaining open lane PRs if needed (`run-tasks-in-parallel` land hygiene — no silent main rewrite).
+2. One PR at a time, per `finish-and-push` **Local sign-off**: rebase on `origin/main`, `pnpm check`, push, `gh signoff`, fetch (main moved: repeat). No silent main rewrite.
 3. Merge:
 
    ```bash
-   gh pr merge <n> --merge   # or repo default squash/rebase
+   gh pr merge <n> --squash --match-head-commit <sha>   # never --delete-branch
    ```
 
 4. Confirm default branch SHA advances. Leave remote feature branches unless user asks delete.
