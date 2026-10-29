@@ -30,7 +30,8 @@
     "verify": "biome ci . && knip && tsc --noEmit && vitest run && pnpm build && pnpm generate-readme:check",
     "prepublishOnly": "npm run build",
     "generate-readme": "tsx src/scripts/generateReadme.ts",
-    "generate-readme:check": "tsx src/scripts/generateReadme.ts --check"
+    "generate-readme:check": "tsx src/scripts/generateReadme.ts --check",
+    "check": "turbo run lint typecheck test build generate-readme:check --output-logs=errors-only"
   },
   "keywords": [
     "claude-code",
@@ -80,6 +81,7 @@
     "husky": "9.1.7",
     "knip": "6.43.0",
     "tsx": "4.22.4",
+    "turbo": "2.11.8",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   }
