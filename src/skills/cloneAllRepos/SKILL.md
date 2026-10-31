@@ -19,9 +19,9 @@ Bootstrap or refresh a multi-repo coding workspace (typically `~/Desktop/Code`) 
 
 ## Workflow
 
-1. Resolve destination (`CODE_ROOT`, default `~/Desktop/Code`) and target remotes (user login + optional orgs). List existing children of `CODE_ROOT`.
+1. Resolve destination (`CODE_ROOT`, default `~/Desktop/Code`) and target remotes (user login + optional orgs). List existing repos under `CODE_ROOT`, including its `private/` and `public/` folders when they exist.
 2. Enumerate remote repos with `gh repo list` (user and each org). Build a plan: clone missing, skip present, note renames/forks.
-3. Present the plan (counts + sample names). On approval, clone with `gh repo clone <owner/name> <dest>` into `CODE_ROOT/<name>` without installing unless requested.
+3. Present the plan (counts + sample names). On approval, clone with `gh repo clone <owner/name> <dest>` into `CODE_ROOT/<name>` without installing unless requested. When `CODE_ROOT` holds `private/` and `public/` folders, clone by repo visibility instead: `CODE_ROOT/private/<name>` or `CODE_ROOT/public/<name>`, with client repos in `clients/<name>` and org repos in `<org>/<name>` under that folder.
 4. When bulk install is requested: for each cloned/local repo with a lockfile, detect package manager (`pnpm-lock.yaml` → pnpm, `package-lock.json` without pnpm workspace → npm unless user said pnpm-for-all-except-npm-only, `yarn.lock` → yarn). Run install only where allowed; capture failures per repo.
 5. Optional pull-all: for each git repo under `CODE_ROOT`, `git fetch --all --prune` and report ahead/behind / dirty / fail.
 6. Write a short matrix: repo → action (cloned/skipped/pulled) → install status → notes.
