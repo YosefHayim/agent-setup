@@ -96,6 +96,7 @@ const hookRegistrationSchema = Schema.Struct({
     "UserPromptSubmit",
     "SessionStart",
     "Stop",
+    "SubagentStop",
     "PreCompact",
     "PostCompact",
     "SessionEnd",
@@ -464,6 +465,35 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
       registrations: [
         {
           event: "SessionEnd",
+          matcher: { _tag: "none" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+      ],
+    },
+  },
+  {
+    id: "leftover-process-cleanup",
+    sourceDirectory: "leftoverProcessCleanup",
+    installedSkill: { _tag: "none" },
+    title: "Leftover process cleanup",
+    summary:
+      "At the end of a turn and when a subagent stops, quietly stop the servers and test browsers that agents left running. It stops a process whose working folder is gone and was under your code folders, e.g. a vite preview or wrangler dev started in a worktree that was removed, and a test browser (Lighthouse, Playwright, Puppeteer) whose temporary profile folder it was left with and that is orphaned and over an hour old. It never stops your own Chrome, Docker, VS Code, shells, Claude Code sessions, or work in a folder that still exists. Each stopped process is added as one line to ~/.local/state/agent-setup/leftover-process-cleanup.log. SubagentStop is registered for Claude Code only.",
+    selectedByDefault: false,
+    dependencies: [],
+    platform: "any",
+    runtime: {
+      _tag: "hook",
+      sourceEntrypoint: "hooks/stopLeftoverProcesses.ts",
+      registrations: [
+        {
+          event: "Stop",
+          matcher: { _tag: "none" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+        {
+          event: "SubagentStop",
           matcher: { _tag: "none" },
           entrypoint: { _tag: "featureDefault" },
           readsAgentId: false,

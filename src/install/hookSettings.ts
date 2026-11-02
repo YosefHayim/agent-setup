@@ -392,6 +392,10 @@ const restoreOrRemove = (input: {
         expectedCurrent: expectedCurrent(input.snapshot),
       };
 
+// Codex and Grok document no SubagentStop event, so only Claude Code gets it.
+const isEventSupportedBy = (event: string, agent: AgentDefinition): boolean =>
+  event !== "SubagentStop" || agent.id === "claude-code";
+
 export const desiredHookGroups = (input: {
   root: string;
   featureIds: ReadonlyArray<string>;
@@ -413,6 +417,10 @@ export const desiredHookGroups = (input: {
     }
 
     for (const registration of feature.runtime.registrations) {
+      if (!isEventSupportedBy(registration.event, input.agent)) {
+        continue;
+      }
+
       const entrypoint = installedHookFile(
         feature.sourceDirectory,
         registrationEntrypoint(feature.runtime, registration),

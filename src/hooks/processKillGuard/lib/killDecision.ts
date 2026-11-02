@@ -1,5 +1,5 @@
+import type { RunningProcess } from "../../lib/processTable.js";
 import type { KillTarget } from "./killTargets.js";
-import type { RunningProcess } from "./processTable.js";
 
 export type KillCheck = {
   readonly killTargets: ReadonlyArray<KillTarget>;

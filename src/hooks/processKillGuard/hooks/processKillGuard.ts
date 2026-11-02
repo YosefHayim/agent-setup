@@ -8,9 +8,9 @@ import { shellCommandOf } from "../../lib/bashHookInput.js";
 import { liveClaudeProcessIds } from "../../lib/claudeLiveSessions.js";
 import { readConfig } from "../../lib/hookConfig.js";
 import { allowAndExit, printDecisionAndExit } from "../../lib/hookOutput.js";
+import { runningProcesses } from "../../lib/processTable.js";
 import { decideKill } from "../lib/killDecision.js";
 import { killTargetsIn } from "../lib/killTargets.js";
-import { runningProcesses } from "../lib/processTable.js";
 
 const runProcessKillGuard = (): never => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
