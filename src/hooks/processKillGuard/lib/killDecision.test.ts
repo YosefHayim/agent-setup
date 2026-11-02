@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-
+import type { RunningProcess } from "../../lib/processTable.js";
 import { decideKill } from "./killDecision.js";
 import { killTargetsIn } from "./killTargets.js";
-import type { RunningProcess } from "./processTable.js";
 
 const sessionProcessId = 32935;
 const processes: ReadonlyArray<RunningProcess> = [
@@ -11,25 +10,29 @@ const processes: ReadonlyArray<RunningProcess> = [
     parentProcessId: 1,
     name: "cmux",
     commandLine: "/Applications/cmux.app/Contents/MacOS/cmux",
+    elapsedSeconds: 0,
   },
-  { processId: 30001, parentProcessId: 22426, name: "zsh", commandLine: "-zsh" },
+  { processId: 30001, parentProcessId: 22426, name: "zsh", commandLine: "-zsh", elapsedSeconds: 0 },
   {
     processId: sessionProcessId,
     parentProcessId: 30001,
     name: "claude",
     commandLine: '/Users/me/.local/bin/claude --settings {"preferredNotifChannel":"notifications_disabled"}',
+    elapsedSeconds: 0,
   },
   {
     processId: 41000,
     parentProcessId: 1,
     name: "Google Chrome",
     commandLine: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    elapsedSeconds: 0,
   },
   {
     processId: 52000,
     parentProcessId: sessionProcessId,
     name: "node",
     commandLine: "node /repo/node_modules/.bin/wrangler dev",
+    elapsedSeconds: 0,
   },
 ];
 

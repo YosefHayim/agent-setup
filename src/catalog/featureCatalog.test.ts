@@ -20,6 +20,7 @@ const expectedFeatureIds = [
   "git-hook-guard",
   "session-rehome",
   "disk-cleanup",
+  "leftover-process-cleanup",
   "image-to-code",
   "github-repo-about",
   "write-blog-post",
@@ -80,6 +81,7 @@ const expectedSourceDirectories = [
   "gitHookGuard",
   "sessionRehome",
   "diskCleanup",
+  "leftoverProcessCleanup",
   "imageToCode",
   "githubRepoAbout",
   "writeBlogPost",
@@ -437,6 +439,25 @@ describe("featureCatalog", () => {
         registrations: [
           {
             event: "SessionEnd",
+            matcher: { _tag: "none" },
+            entrypoint: { _tag: "featureDefault" },
+            readsAgentId: false,
+          },
+        ],
+      },
+      {
+        id: "leftover-process-cleanup",
+        platform: "any",
+        sourceEntrypoint: "hooks/stopLeftoverProcesses.ts",
+        registrations: [
+          {
+            event: "Stop",
+            matcher: { _tag: "none" },
+            entrypoint: { _tag: "featureDefault" },
+            readsAgentId: false,
+          },
+          {
+            event: "SubagentStop",
             matcher: { _tag: "none" },
             entrypoint: { _tag: "featureDefault" },
             readsAgentId: false,

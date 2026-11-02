@@ -9,5 +9,10 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // Install round-trips run beside CLI help spawns; the 5s default flakes under parallel load.
     testTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      include: ["src/hooks/leftoverProcessCleanup/lib/leftoverProcessDecision.ts"],
+      thresholds: { branches: 100 },
+    },
   },
 });

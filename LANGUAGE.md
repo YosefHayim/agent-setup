@@ -120,6 +120,10 @@ _Avoid_: "temp guard", "tmp hook".
 Guard that denies a `pkill`, `killall`, or pgrep-fed `kill` whose pattern also matches a running Claude Code session, the terminal and shells it runs in, or an app the pattern does not name.
 _Avoid_: "kill blocker", "pkill hook".
 
+**leftover-process-cleanup**
+Hook that, at the end of a turn and when a subagent stops, stops servers whose working folder was deleted under the code folders and orphaned test browsers (Lighthouse, Playwright, Puppeteer temporary profile) older than an hour, and logs each one.
+_Avoid_: "process reaper", "port cleaner".
+
 **git-hook-guard**
 Guard that denies a git command that skips or disables git hooks, and a `git commit` or `git push` in a worktree whose hooks are not installed yet.
 _Avoid_: "no-verify blocker", "husky check".

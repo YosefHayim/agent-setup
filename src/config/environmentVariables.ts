@@ -60,4 +60,10 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
     purpose:
       "How long disk-cleanup's watcher waits for the ended session to stop looking live before it logs that it gave up. Tests set it to a fraction of a second.",
   },
+  {
+    name: "AGENT_SETUP_LEFTOVER_PROCESS_CLEANUP_BROWSER_MINIMUM_AGE_SECONDS",
+    defaultValue: "3600 (1 hour)",
+    purpose:
+      "How long an orphaned test browser (Lighthouse, Playwright, Puppeteer temporary profile) must have been running before leftover-process-cleanup stops it. Tests set it to a few seconds.",
+  },
 ]);
