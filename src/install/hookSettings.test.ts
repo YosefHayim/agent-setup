@@ -16,6 +16,7 @@ const packageFiles = {
   "hooks/contextGuard/command/autorunControl.js": "export {};\n",
   "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
   "hooks/contextGuard/watchers/idleCompactWatcher.js": "export {};\n",
+  "hooks/leftoverProcessCleanup/hooks/stopLeftoverProcesses.js": "export {};\n",
 };
 
 const claudeSettingsPath = ".claude/settings.json";
@@ -108,6 +109,25 @@ const legacySettingsOwnership = (input: {
 });
 
 layer(NodeContext.layer)("hook settings", (it) => {
+  it.scoped("writes async true on background hooks for Claude Code only", () =>
+    Effect.gen(function* () {
+      const { root, preparedRoot, readJson } = yield* workspace;
+      const request = {
+        ...installRequest({ root, preparedRoot, agentIds: ["claude-code", "codex"] }),
+        features: { _tag: "selected", ids: ["leftover-process-cleanup"] },
+      };
+
+      yield* install(request);
+
+      const claudeHooks = (yield* readJson(claudeSettingsPath)).hooks;
+      const codexHooks = (yield* readJson(codexHooksPath)).hooks;
+      expect(claudeHooks.Stop[0].hooks[0].async).toBe(true);
+      expect(claudeHooks.SubagentStop[0].hooks[0].async).toBe(true);
+      expect(codexHooks.Stop[0].hooks[0].async).toBeUndefined();
+      expect(codexHooks.SubagentStop).toBeUndefined();
+    }),
+  );
+
   it.scoped("keeps a foreign Stop entry through install, update, and uninstall without reporting drift", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText, readJson, appendForeignStop } = yield* workspace;

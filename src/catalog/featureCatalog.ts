@@ -109,6 +109,12 @@ const hookRegistrationSchema = Schema.Struct({
     description:
       "Whether the hook reads AGENT_SETUP_AGENT_ID, so its command starts with AGENT_SETUP_AGENT_ID=<agent>.",
   }),
+  runsInBackground: Schema.optional(
+    Schema.Boolean.annotations({
+      description:
+        "Whether Claude Code runs the hook without waiting for it (async true). Only for hooks that print nothing the agent needs.",
+    }),
+  ),
 });
 
 const featureRuntimeSchema = Schema.Union(
@@ -491,12 +497,14 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
           matcher: { _tag: "none" },
           entrypoint: { _tag: "featureDefault" },
           readsAgentId: false,
+          runsInBackground: true,
         },
         {
           event: "SubagentStop",
           matcher: { _tag: "none" },
           entrypoint: { _tag: "featureDefault" },
           readsAgentId: false,
+          runsInBackground: true,
         },
       ],
     },
