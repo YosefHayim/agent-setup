@@ -219,6 +219,11 @@ const managedHookGroupSchema = Schema.Struct({
       command: Schema.NonEmptyString.annotations({
         description: "Fully resolved command invoking one installed runtime entrypoint.",
       }),
+      async: Schema.optional(
+        Schema.Literal(true).annotations({
+          description: "Claude Code runs the command in the background without blocking.",
+        }),
+      ),
     }),
   ).annotations({
     description: "Single agent-setup-authored command leaf for this registration.",
@@ -427,9 +432,10 @@ export const desiredHookGroups = (input: {
       );
       const runtime = `node "${input.path.join(input.root, entrypoint)}"`;
       const command = registration.readsAgentId ? `AGENT_SETUP_AGENT_ID=${input.agent.id} ${runtime}` : runtime;
+      const isBackgroundHook = registration.runsInBackground === true && input.agent.id === "claude-code";
       const group = managedHookGroupSchema.make({
         ...(registration.matcher._tag === "pattern" ? { matcher: registration.matcher.value } : {}),
-        hooks: [{ type: "command", command }],
+        hooks: [{ type: "command", command, ...(isBackgroundHook ? { async: true as const } : {}) }],
       });
 
       groups.set(registration.event, [...(groups.get(registration.event) || []), group]);
