@@ -20,8 +20,7 @@ type Frontmatter = {
   name?: string;
   description?: string;
   type?: string;
-  arguments?: string[] | string;
-  "disable-model-invocation"?: string;
+  "disable-model-invocation"?: boolean;
 };
 
 const parseFrontmatter = (file: string): { frontmatter: Frontmatter | null; body: string } => {
@@ -29,20 +28,7 @@ const parseFrontmatter = (file: string): { frontmatter: Frontmatter | null; body
   // e.g. "---\nname: foo\n---\n# body" → groups: frontmatter block, body
   const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
   if (!match) return { frontmatter: null, body: text };
-  const lines = match[1].split("\n");
-  const frontmatter: Frontmatter = {};
-  for (const line of lines) {
-    const colon = line.indexOf(":");
-    if (colon === -1) continue;
-    const key = line.slice(0, colon).trim();
-    const value = line.slice(colon + 1).trim();
-    if (key === "arguments") {
-      // e.g. "stop exit" → ["stop","exit"] (JSON array also accepted)
-      frontmatter.arguments = value.startsWith("[") ? JSON.parse(value) : value.split(/\s+/).filter(Boolean);
-    } else if (key === "name" || key === "description" || key === "type" || key === "disable-model-invocation") {
-      frontmatter[key] = value;
-    }
-  }
+  const frontmatter: Frontmatter = parse(match[1]);
   return { frontmatter, body: match[2] };
 };
 
@@ -127,7 +113,7 @@ describe("manual-only skills", () => {
     const codexPolicyDocument = parse(codexPolicyText);
     const isManualOnly = manualOnlySkillIds.includes(skillId);
 
-    expect(frontmatter?.["disable-model-invocation"] === "true").toBe(isManualOnly);
+    expect(frontmatter?.["disable-model-invocation"] === true).toBe(isManualOnly);
     expect(codexPolicyDocument?.policy?.allow_implicit_invocation === false).toBe(isManualOnly);
     expect(shippedPaths.includes("agents")).toBe(existsSync(codexPolicy));
   });
