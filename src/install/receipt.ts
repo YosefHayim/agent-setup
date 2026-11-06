@@ -40,6 +40,10 @@ const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>) => [
 
 const ownedFileListSchema = Schema.Array(ownedFileSchema).pipe(Schema.filter(ownedFileListIssues));
 
+// The receipt's own features in catalog order. A dependency the receipt does not list stays out of it.
+const listRecordedFeatures = (features: ReadonlyArray<string>, resolvedIds: ReadonlyArray<string>) =>
+  resolvedIds.filter((featureId) => features.includes(featureId));
+
 const receiptFeatureIssues = (features: ReadonlyArray<string>) => {
   const resolved = addDependencies(features);
   if (Either.isLeft(resolved)) {
@@ -47,12 +51,14 @@ const receiptFeatureIssues = (features: ReadonlyArray<string>) => {
     return [{ path: [features.indexOf(featureId)], message: `Receipt feature ${featureId} is unknown.` }];
   }
 
-  const mismatchIndex = features.findIndex((feature, index) => feature !== resolved.right[index]);
-  if (mismatchIndex >= 0 || features.length !== resolved.right.length) {
+  const catalogOrderFeatures = listRecordedFeatures(features, resolved.right);
+  const mismatchIndex = features.findIndex((feature, index) => feature !== catalogOrderFeatures[index]);
+  const isOrderWrong = mismatchIndex >= 0 || features.length !== catalogOrderFeatures.length;
+  if (isOrderWrong) {
     return [
       {
         path: [mismatchIndex >= 0 ? mismatchIndex : features.length],
-        message: "Receipt features must be unique and use fully dependency-resolved catalog order.",
+        message: "Receipt features must be unique and in catalog order.",
       },
     ];
   }
@@ -65,7 +71,9 @@ const withCurrentFeatureIds = (features: ReadonlyArray<string>) => {
   if (!features.some((feature) => retiredFeatureIds.has(feature))) return features;
   const renamed = features.map((feature) => retiredFeatureIds.get(feature) || feature);
   const resolved = addDependencies(renamed);
-  return Either.getOrElse(resolved, () => renamed);
+  if (Either.isLeft(resolved)) return renamed;
+
+  return listRecordedFeatures(renamed, resolved.right);
 };
 
 const featureListSchema = Schema.transform(

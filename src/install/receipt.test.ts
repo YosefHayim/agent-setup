@@ -496,10 +496,15 @@ describe("receiptSchema", () => {
   it.each([
     ["duplicate features", ["context-guard", "context-guard"]],
     ["unknown feature", ["unknown-feature"]],
-    ["missing dependency", ["autorun"]],
     ["non-catalog order", ["autorun", "context-guard"]],
   ])("rejects %s in receipt features", (_case, features) => {
-    expect(() => decodeReceipt({ ...receiptWithFiles([]), features })).toThrow(/feature|dependency|catalog order/i);
+    expect(() => decodeReceipt({ ...receiptWithFiles([]), features })).toThrow(/feature|catalog order/i);
+  });
+
+  it("reads a receipt that lists a feature but not its dependency added later", () => {
+    const features = ["organize-commits", "finish-and-push", "run-local-and-check", "run-tasks-in-parallel"];
+
+    expect(decodeReceipt({ ...receiptWithFiles([]), features }).features).toEqual(features);
   });
 
   it("reads retired feature IDs as the features that replaced them", () => {
