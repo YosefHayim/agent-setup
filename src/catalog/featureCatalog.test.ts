@@ -15,6 +15,7 @@ const expectedFeatureIds = [
   "context-guard",
   "autorun",
   "duplicate-code-guard",
+  "active-run-reminder",
   "scratch-folder-guard",
   "process-kill-guard",
   "git-hook-guard",
@@ -76,6 +77,7 @@ const expectedSourceDirectories = [
   "contextGuard",
   "autorun",
   "duplicateCodeGuard",
+  "activeRunReminder",
   "scratchFolderGuard",
   "processKillGuard",
   "gitHookGuard",
@@ -363,6 +365,25 @@ describe("featureCatalog", () => {
         ],
       },
       {
+        id: "active-run-reminder",
+        platform: "any",
+        sourceEntrypoint: "hooks/activeRunReminder.ts",
+        registrations: [
+          {
+            event: "SessionStart",
+            matcher: { _tag: "none" },
+            entrypoint: { _tag: "featureDefault" },
+            readsAgentId: false,
+          },
+          {
+            event: "SubagentStart",
+            matcher: { _tag: "none" },
+            entrypoint: { _tag: "featureDefault" },
+            readsAgentId: false,
+          },
+        ],
+      },
+      {
         id: "scratch-folder-guard",
         platform: "any",
         sourceEntrypoint: "hooks/scratchFolderGuard.ts",
@@ -490,7 +511,7 @@ describe("featureCatalog", () => {
       ["question-my-plan", ["code-style"]],
       ["make-promo-video", ["plan-page"]],
       ["finish-and-push", ["organize-commits"]],
-      ["run-tasks-in-parallel", ["organize-commits", "finish-and-push", "run-local-and-check"]],
+      ["run-tasks-in-parallel", ["organize-commits", "finish-and-push", "run-local-and-check", "active-run-reminder"]],
       ["ship-one-feature", ["run-tasks-in-parallel", "finish-and-push", "organize-commits"]],
       ["find-missing-tests", ["run-tasks-in-parallel", "organize-commits", "finish-and-push"]],
       [
