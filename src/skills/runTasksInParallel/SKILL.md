@@ -1,6 +1,6 @@
 ---
 name: run-tasks-in-parallel
-description: Use when you have a numbered list of tasks and want one agent per task. Each task gets its own branch, folder, tests, and PR. It can also only set up the branches, or only merge finished ones. Use it for a long run, a run overnight, or work that must survive memory loss across waves. Say "one agent per task" or "run these tasks in parallel". For one feature, use ship-one-feature.
+description: Use when you have a numbered list of tasks and want one agent per task. Each task gets its own branch, folder, tests, and PR. It can also only set up the branches, or only merge finished ones. Use it for a long run, a run overnight, or work that must survive memory loss across waves. Also use it for one big job that needs more than 8 PRs or several waves, even when the user does not say parallel. Say "one agent per task" or "run these tasks in parallel". For one feature, use ship-one-feature.
 type: flow
 ---
 
@@ -84,7 +84,7 @@ This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge
    REPORT="$RUN_DIR/report.md"
    ```
 
-   Write the board as the `## Board` section of `$REPORT` (and an optional `## State` section). Put `RUN_DIR` in every `LANE-BRIEF.md` so all lanes share this run. Resume → use the run folder the user gives, else the newest one: `ls -1 "$RUNS" | tail -n 1` (do not start a new run). Never write the board into the repository. A run that spans waves or hours also uses [Long run mode](#long-run-mode).
+   Write the board as the `## Board` section of `$REPORT` (and an optional `## State` section). Put `RUN_DIR` in every `LANE-BRIEF.md` so all lanes share this run. Resume → use the run folder the user gives, else the newest one: `ls -1 "$RUNS" | tail -n 1` (do not start a new run). Never write the board into the repository. A run that meets the Long run rule also uses [Long run mode](#long-run-mode).
 6. Host mode: **A** subagents (default “just run it”), **B** cmux watchable, **C** briefs only.
 
 #### 2. Fan out lanes (same mechanics as setup-lanes)
@@ -154,13 +154,14 @@ Same fan-out as execute steps 2–3. Lanes run no checks while building. Each la
 
 ## Long run mode
 
-Use when the job spans several waves or many hours, or the user wants it to survive memory summaries or run unattended. Templates and details: [REFERENCE.md](REFERENCE.md#long-run-mode).
+Long run mode is on when the plan has 2 or more waves, or 9 or more parts, or it runs overnight or unattended, or the user asks. Otherwise it is off. Templates and details: [REFERENCE.md](REFERENCE.md#long-run-mode).
 
-- **Run folder.** The execute run folder (execute step 1, item 5) also holds `SPEC.md`, `report.md` (with `## Board`, `## Run log` and `## Handoff`), `briefs/<wave>.md` and `scripts/`.
-- **SPEC.md is the plan.** It has the run's goal, decided rules, final structure, one worked example, waves and parts (each with its files and a checklist), how every part works, and the end check. SPEC.md wins over memory and over the chat. A new owner rule during the run becomes a new wave appended to the waves section.
-- **Active run pointer.** The orchestrator writes `${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/<repo>/active-run.json` with `title`, `specPath` and `reportPath`. The agent-setup `active-run-reminder` hook reads it on session start, resume, clear, compact and subagent start, and tells every agent to re-read SPEC.md. One active run per repo: if the file exists, resume that run or ask.
+- **Plan shows the run files.** Before any agent starts, the plan page (plan-page skill) shows, in order: a first page "Long run mode: on" (or off) with the reason (example: "3 waves, 14 parts"), the SPEC.md draft filled for this task, the report.md draft (Board, empty Run log, first Handoff), each wave brief, then Your call. The owner can flip the mode there. Approve writes the files and active-run.json, then the first wave starts.
+- **Run folder.** The execute run folder (execute step 1, item 5) also holds `SPEC.md`, `report.md` (with `## Board`, `## Run log` and `## Handoff`), `briefs/<wave>.md`, `briefs/<part>.md` (only when one part needs more than its wave brief), `findings/` (scan and audit output that parts read) and `scripts/`.
+- **SPEC.md is the plan.** It starts with Repo, Run folder and Plan page lines, and holds no status line; the state lives only in the Handoff. It has the run's goal, decided rules, final structure, one worked example, waves and parts (each with its files and a checklist), how every part works, and the end check. Every owner decision goes into the decided rules with its date, not into the Run log. SPEC.md wins over memory and over the chat. A new owner rule during the run becomes a new wave appended to the waves section.
+- **Active run pointer.** The orchestrator writes `${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/<repo>/active-run.json` with `title`, `specPath` and `reportPath`. The agent-setup `active-run-reminder` hook reads it on session start, resume, clear, compact and subagent start, and tells every session and agent in the repo whose task is part of the run to re-read SPEC.md. One active run per repo: if the file exists, resume that run or ask.
 - **Every agent brief says:** read SPEC.md and your brief first; re-read SPEC.md after any summary; check your work against your part's checklist in SPEC.md before each commit (the orchestrator ticks it when it merges); reply with the PR link and a short list.
-- **Orchestrator loop.** Each finished agent's notice wakes the orchestrator. Review the diff against SPEC.md, send one fix round, fix a miss that is still there, merge, tick the part's checklist in SPEC.md, add one line to the Run log, and update the Handoff state (merged, running, next).
+- **Orchestrator loop.** Each finished agent's notice wakes the orchestrator. Review the diff against SPEC.md, send one fix round, fix a miss that is still there, merge, tick the part's checklist in SPEC.md, and add one Run log line per event. Replace the Handoff at each merge, never append to it; it stays at most 4 lines (merged, running, next).
 - **Keep lanes full.** Keep max-lanes running while parts with no shared files wait. Start the next part the moment one finishes.
 - **Questions do not block.** A question to the owner never blocks work its answer does not touch: ask, then keep reviewing, merging and starting other parts.
 - **Scripts for repeats.** A review step the orchestrator repeats becomes a script in `RUN_DIR/scripts/` that prints a short summary, including the end check.

@@ -177,7 +177,19 @@ pnpm build && pnpm link --global   # or package-specific
 
 ## Long run mode
 
-Use it when the job spans several waves or many hours, or must survive memory summaries. Start from the execute run folder (SKILL.md, Parse tasks, step 5). The orchestrator writes the files below before any agent starts.
+Long run mode is on when the plan has 2 or more waves, or 9 or more parts, or it runs overnight or unattended, or the user asks. Otherwise it is off. Start from the execute run folder (SKILL.md, Parse tasks, step 5). The plan page shows the drafts below before any agent starts; the files are written only after the owner approves.
+
+### Plan page in Long run mode
+
+The plan page (plan-page skill) shows, in order:
+
+1. "Long run mode: on" (or off), with the reason, for example "3 waves, 14 parts".
+2. The SPEC.md draft, filled for this task.
+3. The report.md draft: Board, an empty Run log and the first Handoff.
+4. Each wave brief.
+5. Your call.
+
+The owner can flip the mode on this page. Approve writes the files and `active-run.json`, then the first wave starts.
 
 ### Run folder
 
@@ -186,19 +198,28 @@ RUN_DIR/
   SPEC.md              the plan; wins over memory and over the chat
   report.md            ## Board, ## Run log, ## Handoff
   briefs/<wave>.md     one brief per wave, shared by its parts
+  briefs/<part>.md     only when one part needs more than its wave brief
+  findings/            scan and audit output that parts read
   scripts/             review and check scripts that print short summaries
 ```
 
 ### SPEC.md skeleton
 
 ```markdown
-# <Run title>
+# <Run title>: spec
+
+Repo: <path>
+Run folder: <path>
+Plan page: <link the owner approved>
+
+This file wins over memory and over the chat. It holds no status; the state lives in report.md, ## Handoff.
 
 ## 1. What this run does
 <goal in 2 to 4 lines>
 
 ## 2. Decided rules
-- <rule decided by the owner or the orchestrator, one line each>
+Every owner decision lands here with its date, never in the Run log.
+- <YYYY-MM-DD> <rule decided by the owner or the orchestrator>
 
 ## 3. Final structure
 <folders, modules and names the result must have>
@@ -257,19 +278,20 @@ When done, reply with the PR link and a short list of what changed.
 
 ### Report: Run log and Handoff
 
-One line per merge in `## Run log`:
+`## Run log` takes one line per event: a merge, a start, a fix round or an owner answer. Merge details stay here:
 
 ```text
 - 2026-11-06 14:10 part 2a merged (#412); 2b running.
 ```
 
-`## Handoff` holds 3 to 4 lines, rewritten after every merge, so a fresh session can resume from it alone:
+`## Handoff` holds at most 4 lines. Replace it at each merge; never append to it. A fresh session resumes from it alone:
 
 ```markdown
 ## Handoff
 
 - State (2026-11-06): waves 0 and 1 merged; wave 2 running: parts 2a and 2b.
 - Next: part 3 after 2a (shares files); part 4 when a slot frees.
+- Waits on the owner: none.
 - Open outside this run: none.
 ```
 
@@ -278,7 +300,7 @@ One line per merge in `## Run log`:
 1. A finished agent's notice wakes the orchestrator. No timer or polling loop is needed.
 2. Review the diff against SPEC.md and the part's checklist.
 3. Send one fix round through SendMessage. Fix a miss that is still there yourself.
-4. Merge (execute orchestrator step 2), tick the part's checklist in SPEC.md, add one Run log line, and update the Handoff state line.
+4. Merge (execute orchestrator step 2), tick the part's checklist in SPEC.md, add one Run log line, and replace the Handoff (at most 4 lines).
 5. Start the next part with no shared files. Keep max-lanes running while the backlog holds such parts.
 6. A question to the owner goes out and does not block parts its answer does not touch.
 
