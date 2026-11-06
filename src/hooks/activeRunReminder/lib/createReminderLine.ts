@@ -4,12 +4,11 @@ export type ActiveRun = {
   readonly reportPath: string;
 };
 
-type ReminderRequest = { readonly activeRun: ActiveRun; readonly isSpecFound: boolean };
+type ReminderRequest = { readonly activeRun: ActiveRun; readonly isSpecMissing: boolean };
 
 export const createReminderLine = (request: ReminderRequest): string => {
-  const { activeRun, isSpecFound } = request;
+  const { activeRun, isSpecMissing } = request;
 
-  const isSpecMissing = !isSpecFound;
   if (isSpecMissing) {
     return `This repo's active-run.json points to a missing spec (${activeRun.specPath}). Tell the user before you continue.`;
   }

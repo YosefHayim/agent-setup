@@ -19,7 +19,7 @@ type HookEvent = { readonly cwd: string; readonly hookEventName: HookEventName }
 const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const stringProperty = (record: Record<string, unknown>, property: string): string | null => {
+const readStringProperty = (record: Record<string, unknown>, property: string): string | null => {
   const candidate = record[property];
   return typeof candidate === "string" ? candidate : null;
 };
@@ -28,30 +28,40 @@ const isHookEventName = (candidate: unknown): candidate is HookEventName =>
   SUPPORTED_HOOK_EVENT_NAMES.some((eventName) => eventName === candidate);
 
 const decodeHookEvent = (candidate: unknown): HookEvent | null => {
-  if (!isRecord(candidate)) return null;
+  const isNotRecord = !isRecord(candidate);
+  if (isNotRecord) return null;
 
-  const cwd = stringProperty(candidate, "cwd");
+  const cwd = readStringProperty(candidate, "cwd");
   const hookEventName = candidate.hook_event_name;
-  if (cwd === null) return null;
 
-  if (!isHookEventName(hookEventName)) return null;
+  const isCwdMissing = cwd === null;
+  if (isCwdMissing) return null;
+
+  const isHookEventUnsupported = !isHookEventName(hookEventName);
+  if (isHookEventUnsupported) return null;
 
   return { cwd, hookEventName };
 };
 
 const decodeActiveRun = (candidate: unknown): ActiveRun | null => {
-  if (!isRecord(candidate)) return null;
+  const isNotRecord = !isRecord(candidate);
+  if (isNotRecord) return null;
 
-  const title = stringProperty(candidate, "title");
-  const specPath = stringProperty(candidate, "specPath");
-  const reportPath = stringProperty(candidate, "reportPath");
-  if (title === null || specPath === null || reportPath === null) return null;
+  const title = readStringProperty(candidate, "title");
+  const specPath = readStringProperty(candidate, "specPath");
+  const reportPath = readStringProperty(candidate, "reportPath");
+
+  const isAnyFieldMissing = title === null || specPath === null || reportPath === null;
+  if (isAnyFieldMissing) return null;
 
   return { title, specPath, reportPath };
 };
 
-const runsFolderPath = (): string => {
-  const stateHome = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+const readRunsFolderPath = (): string => {
+  const homeFolder = homedir();
+  const defaultStateHome = join(homeFolder, ".local", "state");
+  const stateHome = process.env.XDG_STATE_HOME || defaultStateHome;
+
   return join(stateHome, "agent-setup", "runs");
 };
 
@@ -61,37 +71,54 @@ const readRepositoryName = (folder: string): string | null => {
     folder,
     query: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
   });
-  if (gitCommonFolderLines === undefined) return null;
 
-  // The first line is the common folder when git succeeded and printed one.
+  const isGitAnswerMissing = gitCommonFolderLines == null;
+  if (isGitAnswerMissing) return null;
+
   const [gitCommonFolder] = gitCommonFolderLines;
-  if (gitCommonFolder === undefined) return null;
 
-  return basename(dirname(gitCommonFolder));
+  const isGitCommonFolderMissing = gitCommonFolder == null;
+  if (isGitCommonFolderMissing) return null;
+
+  const mainCheckoutFolder = dirname(gitCommonFolder);
+
+  return basename(mainCheckoutFolder);
 };
 
 const readActiveRun = (repositoryName: string): ActiveRun | null => {
-  const activeRunPath = join(runsFolderPath(), repositoryName, ACTIVE_RUN_FILE_NAME);
+  const runsFolder = readRunsFolderPath();
+  const activeRunPath = join(runsFolder, repositoryName, ACTIVE_RUN_FILE_NAME);
+
   const isThereNoActiveRunFile = !existsSync(activeRunPath);
   if (isThereNoActiveRunFile) return null;
 
-  const activeRunFile = JSON.parse(readFileSync(activeRunPath, "utf8"));
+  const activeRunFileContents = readFileSync(activeRunPath, "utf8");
+  const activeRunFile = JSON.parse(activeRunFileContents);
 
   return decodeActiveRun(activeRunFile);
 };
 
 const remindActiveRunSpec = (): void => {
-  const hookEvent = decodeHookEvent(JSON.parse(readFileSync(0, "utf8")));
-  if (hookEvent === null) return;
+  const hookEventFileContents = readFileSync(0, "utf8");
+  const hookEventFile = JSON.parse(hookEventFileContents);
+  const hookEvent = decodeHookEvent(hookEventFile);
+
+  const isNoHookEvent = hookEvent === null;
+  if (isNoHookEvent) return;
 
   const repositoryName = readRepositoryName(hookEvent.cwd);
-  if (repositoryName === null) return;
+
+  const isOutsideRepository = repositoryName === null;
+  if (isOutsideRepository) return;
 
   const activeRun = readActiveRun(repositoryName);
-  if (activeRun === null) return;
+
+  const isThereNoActiveRun = activeRun === null;
+  if (isThereNoActiveRun) return;
 
   const isSpecFound = existsSync(activeRun.specPath);
-  const reminderLine = createReminderLine({ activeRun, isSpecFound });
+  const isSpecMissing = !isSpecFound;
+  const reminderLine = createReminderLine({ activeRun, isSpecMissing });
 
   printDecisionAndExit({
     hookSpecificOutput: { hookEventName: hookEvent.hookEventName, additionalContext: reminderLine },

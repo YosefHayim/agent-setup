@@ -352,7 +352,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     installedSkill: { _tag: "none" },
     title: "Active run reminder",
     summary:
-      "When a Claude Code session or subagent starts in a repo that has an active run, tell it to re-read the run's spec before every commit. Reads the run folder that the run-tasks-in-parallel skill writes. Does nothing when there is no run.",
+      "When a Claude Code session or subagent starts in a repo with an active run, tell it to read the run's spec first. Reads the active-run.json pointer that the run-tasks-in-parallel skill writes. Does nothing when there is no run.",
     selectedByDefault: false,
     dependencies: [],
     platform: "any",
