@@ -14,7 +14,7 @@ export const createReminderLine = (request: ReminderRequest): string => {
   }
 
   return (
-    `This repo has an active run: ${activeRun.title}. If your task is part of this run, read ${activeRun.specPath} in full before you continue.` +
+    `This repo has an active run: ${activeRun.title}. If your task is part of this run, read ${activeRun.specPath} in full before you continue. ` +
     "It holds the decided rules, the final structure and each part's checklist, and it wins over anything you remember or were told earlier. " +
     `Re-read your part's checklist in it before every commit. The lead also reads the Handoff section of ${activeRun.reportPath}.`
   );
