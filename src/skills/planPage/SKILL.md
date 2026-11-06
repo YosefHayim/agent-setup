@@ -14,6 +14,26 @@ Like `mcp-ui`, but for terminal skills. This skill is a **thin consumer of the o
 - **`render()` / `renderHighlighted()`** — `render(<Template {...data} />)` → a self-contained HTML string (Tailwind + Mermaid from CDN, light/dark theme). `await renderHighlighted(…)` also bakes in **real VSCode syntax colour** (Shiki, TS/JS-first) at render time — no CDN, no client JS to read colour. `npx planpage render …` highlights for you.
 - **`serve`** — a never-hang post-back server (OS-assigned ephemeral port 49152+, idle timeout, `file://` + clipboard fallback) that collects one `Decision`.
 
+## Sketch plans and wireframes (the default for plans)
+
+Show every plan as a sketch plan: hand-drawn pages, one picture per page, short notes tied to their part, and a last "Your call" page with options A, B and C.
+
+```bash
+npx planpage recipes                     # list the 80 recipes (flows, systems, data, screens, account, product...)
+npx planpage recipes login-screen        # print one recipe's scene as JSON to copy and change
+npx planpage parts                       # list the 192 hand-drawn UI parts (sk-button, sk-input, sk-phone...)
+npx planpage parts sk-table              # print one part's example HTML
+npx planpage render sketch-plan --data plan.json --out <scratchpad>/plan.html
+npx planpage serve <scratchpad>/plan.html <scratchpad>/decision.json --timeout 3600
+npx planpage render sketch-kit --sample --out <scratchpad>/kit.html   # see every part drawn
+```
+
+- **Start from a recipe.** Pick the closest one, copy its `scene`, change the words. Full app screens (log in, sign up, paywall, settings, dashboard, checkout, pricing, AI chat, search, landing...) are ready as the `account` and `product` recipes.
+- **Wireframes only when asked.** A normal plan uses flow, file, data, system and decision pictures. Draw a screen wireframe (or use the `account` / `product` / `screens` recipes) only when the person asks for a wireframe, mockup or screen sketch.
+- **Wireframes** are scene nodes of kind `screen` (`{ id, kind: "screen", x, y, w, h, html }`). Lay out with Tailwind inside one device frame (`sk-phone`, `sk-browser-window`, `sk-terminal-window`), put `sk-*` parts inside, and give a part `data-part="name"` so a note can point at it with `link: "<screenId>#name"`.
+- **The decision** for a sketch plan is `{ approved, choice, notes }`, where `choice` is the letter picked.
+- The style guide, scene format and full recipe list: `skills/planpage/SKETCH-STYLE.md` in the package.
+
 ## Quick start (how a skill uses it)
 
 1. **Assemble** the page from the package's components (or a whole template):
