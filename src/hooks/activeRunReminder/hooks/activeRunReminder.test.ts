@@ -105,7 +105,7 @@ describe("activeRunReminder process boundary", () => {
     const output = JSON.parse(execution.stdout);
     expect(output.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(output.hookSpecificOutput.additionalContext).toContain(`This repo has an active run: ${ACTIVE_RUN_TITLE}.`);
-    expect(output.hookSpecificOutput.additionalContext).toContain(`read ${specPath} in full`);
+    expect(output.hookSpecificOutput.additionalContext).toContain(`If your task is part of this run, read ${specPath} in full before you continue.`);
   });
 
   it("reminds a subagent at SubagentStart with the same spec line", () => {
