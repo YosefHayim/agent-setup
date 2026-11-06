@@ -1,6 +1,6 @@
 ---
 name: run-tasks-in-parallel
-description: Use when you have a numbered list of tasks and want one agent per task. Each task gets its own branch, folder, tests, and PR. It can also only set up the branches, or only merge finished ones. Say "one agent per task" or "run these tasks in parallel". For one feature, use ship-one-feature.
+description: Use when you have a numbered list of tasks and want one agent per task. Each task gets its own branch, folder, tests, and PR. It can also only set up the branches, or only merge finished ones. Use it for a long run, a run overnight, or work that must survive memory loss across waves. Say "one agent per task" or "run these tasks in parallel". For one feature, use ship-one-feature.
 type: flow
 ---
 
@@ -14,8 +14,8 @@ Slash: **`/run-tasks-in-parallel`**. Also triggered by “setup worktrees”, �
 
 | Mode | When | Outcome |
 |------|------|---------|
-| **execute** (default) | Numbered list / “run these tasks” / full SDLC | Each task: issue → worktree → implement → unit + e2e → UI/manual QA → commits → PR → gates → optional merge |
-| **setup-lanes** | Fan-out only (siblings: clean-repo-by-feature, ship-missing-tests, simplify-repo-with-tests) | Worktree + branch + issue + `LANE-BRIEF.md` + PR path; **no** merge; gates only if brief says so |
+| **execute** (default) | Numbered list / “run these tasks” / full SDLC | Each task: issue → worktree → implement → commits → PR → optional merge; the end check runs once after the last merge |
+| **setup-lanes** | Fan-out only (siblings: clean-repo-by-feature, ship-missing-tests, simplify-repo-with-tests) | Worktree + branch + issue + `LANE-BRIEF.md` + PR path; **no** merge; no checks in the lane |
 | **land-lanes** | Salvage / integrate existing concurrent lanes | Reachable merge onto default **without** lost work |
 
 Default when the user pastes a numbered list or says full SDLC / execute: **execute**.  
@@ -28,14 +28,14 @@ One **task** = one **agent** = one **worktree** = one **branch** = one **issue**
 | Concern | Load and follow |
 |---------|-----------------|
 | Commits / history shape | **`organize-commits`** |
-| Verify + push + open/update PR | **`finish-and-push`** |
+| Push + open/update PR | **`finish-and-push`** |
 | Local browser / manual UI QA | **`run-local-and-check`** |
 | Single feature with merge+reinstall polish | **`ship-one-feature`** (one task only — or run this skill with one line) |
 | Multi-feature cleanup campaign | **`clean-repo-by-feature`** (calls this skill’s setup/land) |
 | Missing tests multi-lane campaign | **`ship-missing-tests`** |
 | Production live prove | **`deploy-and-check`** only if user asks |
 
-This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge sequencing when authorized. Details: [REFERENCE.md](REFERENCE.md).
+This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge sequencing when authorized, long runs. Details: [REFERENCE.md](REFERENCE.md).
 
 ## Safety
 
@@ -46,7 +46,7 @@ This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge
 - Freeze or coordinate active writers before **land-lanes**. Snapshots go stale while another agent writes.
 - No broad reset/clean/checkout-overwrite, blanket stash, forced branch switch, shared rebase, or `ours`/`theirs` conflict strategy.
 - Treat untracked, ignored-but-important, symlink, mode, submodule, sparse-checkout, detached-HEAD, and sequencer state as first-class data.
-- **execute** authorizes per-lane merge **only** when the user said merge / “to main” / full ship, **and** hard gates pass (unit + e2e green, confidence ≥ 6). Default without merge language: **open PR only**.
+- **execute** authorizes per-lane merge **only** when the user said merge / “to main” / full ship, **and** the lane reports an open PR with confidence ≥ 6. Lanes run no checks; the end check runs once after the last merge. Default without merge language: **open PR only**.
 - Headless e2e default. Headed only if user said `headed` / `visible` / `ui`.
 - Never print secrets from `.env` / fixtures.
 - Agent host is agnostic: host subagents, **cmux** per lane, or briefs-only.
@@ -84,7 +84,7 @@ This skill owns: task parsing, lane isolation, SDLC mandate, matrix board, merge
    REPORT="$RUN_DIR/report.md"
    ```
 
-   Write the board as the `## Board` section of `$REPORT` (and an optional `## State` section). Put `RUN_DIR` in every `LANE-BRIEF.md` so all lanes share this run. Resume → use the run folder the user gives, else the newest one: `ls -1 "$RUNS" | tail -n 1` (do not start a new run). Never write the board into the repository.
+   Write the board as the `## Board` section of `$REPORT` (and an optional `## State` section). Put `RUN_DIR` in every `LANE-BRIEF.md` so all lanes share this run. Resume → use the run folder the user gives, else the newest one: `ls -1 "$RUNS" | tail -n 1` (do not start a new run). Never write the board into the repository. A run that spans waves or hours also uses [Long run mode](#long-run-mode).
 6. Host mode: **A** subagents (default “just run it”), **B** cmux watchable, **C** briefs only.
 
 #### 2. Fan out lanes (same mechanics as setup-lanes)
@@ -107,7 +107,7 @@ For each task:
    - **sonnet** (default): bug fixes, tests, dedup, small features.
    - **opus**: design, unclear bugs, cross-cutting refactors, or a lane that failed on sonnet.
    - Split a lane that would need more than about 100 tool calls. Every call re-reads the whole lane context.
-   - Re-run a lane one model up when its checks stay red or it reports a gap it did not fix. An opus lane that still fails gets split or a sharper brief.
+   - Re-run a lane one model up when it reports a gap it did not fix. An opus lane that still fails gets split or a sharper brief.
 5. Run at most `max-lanes` lanes at once (8 unless the user sets another number) and start the next task as one finishes. More lanes do not finish sooner: with 11 to 20 agents running, file reads and shell steps get several times slower on one machine.
 
 #### 3. Per-agent SDLC mandate (every lane)
@@ -116,28 +116,29 @@ Each agent must complete **only its task**:
 
 1. **Clarify** acceptance against issue body; stop if blocked (record on the Board).
 2. **Implement** using repo patterns (`reuse-before-build` only when build-vs-buy is ambiguous).
-3. **Unit happy path** — add/extend; run repo unit command → green. Hard stop if red.
-4. **E2E/integration happy path** — real suite or smallest durable e2e; headless default → green. Hard stop if red when stack exists; honest skip only if env missing (cap confidence).
-5. **Manual / UI QA** — load **`run-local-and-check`** for user-visible web/app flows; record evidence or N/A.
+3. **Unit happy path** — add or extend the test. Do not run it: lanes run no checks while building. The end check runs it.
+4. **E2E/integration happy path** — add the smallest durable e2e test for the happy path. Do not run it.
+5. **Manual / UI QA** — for user-visible web/app flows, write down the flow to prove. The orchestrator proves it in the real app after the end check (**`run-local-and-check`**).
 6. **Commits** — **`organize-commits`** on the topic branch only.
-7. **Ship pre-merge** — **`finish-and-push`**: verify, push, open/update PR with `Fixes #<n>`, Summary, Confidence 1–10, test plan (unit/e2e/QA/check).
-8. **Sign-off** as `finish-and-push` **Local sign-off** says: `pnpm check` in the lane worktree, then `gh signoff`. Never wait for a GitHub run. A failing check is fixed in the same worktree and rerun.
+7. **Ship pre-merge** — **`finish-and-push`**: push, open/update PR with `Fixes #<n>`, Summary, Confidence 1–10, test plan (unit/e2e/QA/check). Skip its verify step: lanes run no checks.
+8. **Sign-off** — none in the lane. The orchestrator runs `gh signoff` when it merges the PR, back to back with the others (see orchestrator step 2). Never wait for a GitHub run.
 9. **Merge** only if orchestrator authorized and confidence ≥ 6; else stop at open PR.
 10. **Do not** delete remotes; do not touch other lanes.
 11. **Lane habits** from the brief: waits that end on failure too, deletes by literal path, heavy tools stopped when done.
 
 #### 4. Orchestrator after lanes
 
-1. Refresh the Board section: task → issue → worktree → branch → model → PR → unit → e2e → QA → confidence → merge.
-2. If merge authorized: order merges (contracts → domain → UI → e2e-heavy last); one PR at a time: rebase on `origin/main`, `pnpm check`, push, `gh signoff`, fetch (if main moved, repeat), then `gh pr merge <n> --squash --match-head-commit <sha>` without `--delete-branch`; remove the lane worktree, keep the branch; never force-push default. No waiting on GitHub runs; a red run after the merge is fixed at once in its own PR.
-3. Optional reinstall/smoke on default tip when user asked full ship (see REFERENCE).
-4. Done receipt (Verification section). Unfinished lanes stay open.
+1. Refresh the Board section: task → issue → worktree → branch → model → PR → confidence → merge. Unit, E2E and QA stay open until the end check.
+2. If merge authorized: order merges (contracts → domain → UI → e2e-heavy last). Merge one PR at a time, back to back, with no check in between: `gh signoff`, then `gh pr merge <n> --squash --match-head-commit <sha>` without `--delete-branch`. Rebase on `origin/main` only when GitHub says the PR conflicts, and push the rebase before signing off. Remove the lane worktree, keep the branch. Never force-push default. Do not wait on GitHub runs; a red run after a merge is fixed at once in its own PR.
+3. End check: after the last merge, run the repo's end check once, on the latest main in a fresh worktree (`pnpm check` in Turborepo repos). Fix every failure in one PR from a fresh worktree, then run the check again until it passes. Then prove the change in the real app or flow.
+4. Optional reinstall/smoke on default tip when user asked full ship (see REFERENCE).
+5. Done receipt (Verification section). Unfinished lanes stay open.
 
 Flags: `no-merge` (default without merge language), `merge` / `to-main`, `no-cmux`, `headed`, `agent=grok|claude|codex`, `max-lanes=N` (default 8 running at once).
 
 ### Mode: setup-lanes
 
-Same fan-out as execute steps 2–3 **without** forcing full SDLC gates unless the calling skill’s brief requires them. Each lane: implement → narrow/full verify as brief says → **`organize-commits`** + **`finish-and-push`** push/PR. **Do not merge** unless asked. Report matrix. Used by clean-repo-by-feature / ship-missing-tests / simplify-repo-with-tests / improve-ux.
+Same fan-out as execute steps 2–3. Lanes run no checks while building. Each lane: implement → **`organize-commits`** + **`finish-and-push`** push/PR (no verify step). **Do not merge** unless asked. Report matrix. Used by clean-repo-by-feature / ship-missing-tests / simplify-repo-with-tests / improve-ux.
 
 ### Mode: land-lanes
 
@@ -148,8 +149,22 @@ Same fan-out as execute steps 2–3 **without** forcing full SDLC gates unless t
 5. Backup refs for target and every committed source. Preserve dirty/untracked with verified methods.
 6. Make each lane reviewable (`organize-commits` when authorized). Prefer landing via open PRs.
 7. Integrate one logical lane at a time; mechanical conflicts only when intent is clear; stop on competing logic.
-8. Focused checks per lane; `pnpm check` after convergence.
+8. No checks per lane. After convergence, run the end check once on the latest main (orchestrator step 3).
 9. Prove original commits + preserved artifacts reachable **before** proposing local cleanup. Remote delete still forbidden unless user asks.
+
+## Long run mode
+
+Use when the job spans several waves or many hours, or the user wants it to survive memory summaries or run unattended. Templates and details: [REFERENCE.md](REFERENCE.md#long-run-mode).
+
+- **Run folder.** The execute run folder (execute step 1, item 5) also holds `SPEC.md`, `report.md` (with `## Board`, `## Run log` and `## Handoff`), `briefs/<wave>.md` and `scripts/`.
+- **SPEC.md is the plan.** It has the run's goal, decided rules, final structure, one worked example, waves and parts (each with its files and a checklist), how every part works, and the end check. SPEC.md wins over memory and over the chat. A new owner rule during the run becomes a new wave appended to the waves section.
+- **Active run pointer.** The orchestrator writes `${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/<repo>/active-run.json` with `title`, `specPath` and `reportPath`. An agent-setup hook reads it on session start, resume, clear, compact and subagent start, and tells every agent to re-read SPEC.md. One active run per repo: if the file exists, resume that run or ask.
+- **Every agent brief says:** read SPEC.md and your brief first; re-read SPEC.md after any summary; tick your part's checklist before each commit; reply with the PR link and a short list.
+- **Orchestrator loop.** Each finished agent's notice wakes the orchestrator. Review the diff against SPEC.md, send one fix round, fix a miss that is still there, merge, add one line to the Run log, and update the Handoff state (merged, running, next).
+- **Keep lanes full.** Keep max-lanes running while parts with no shared files wait. Start the next part the moment one finishes.
+- **Questions do not block.** A question to the owner never blocks work its answer does not touch: ask, then keep reviewing, merging and starting other parts.
+- **Scripts for repeats.** A review step the orchestrator repeats becomes a script in `RUN_DIR/scripts/` that prints a short summary, including the end check.
+- **Finish.** Run the end check once on the latest main. Failures get one fix PR and a rerun until it passes. Then delete `active-run.json` so the hook goes quiet, remove the worktrees and keep the branches.
 
 ## Verification
 
@@ -162,21 +177,21 @@ default: <branch> @ <sha>
 
 host: A|B|C
 lanes:
-  - N | task | issue | worktree | branch | pr | unit | e2e | qa | confidence | merge
+  - N | task | issue | worktree | branch | pr | confidence | merge | end check
 skills_reused: organize-commits, finish-and-push, run-local-and-check[, …]
 residual: <blocked / deferred / overlaps>
 report: <RUN_DIR>/report.md
 ```
 
-Done only when each started lane has issue + worktree + branch + PR (or honest block), unit/e2e evidence (or skip reason), no default-branch product commits, no remote deletes, and merges only when authorized + gates green. **“Agents ran” is not done.**
+Done only when each started lane has issue + worktree + branch + PR (or honest block), no default-branch product commits, no remote deletes, merges only when authorized and signed off back to back, and the end check passes on latest main (or the block is reported). **“Agents ran” is not done.**
 
 ### setup-lanes
 
-Per lane: path, branch, issue URL, host/cmux, `LANE-BRIEF.md`, PR URL, head SHA, verify outcome; no default commits; no remote deletes; leftover unassigned tasks listed.
+Per lane: path, branch, issue URL, host/cmux, `LANE-BRIEF.md`, PR URL, head SHA; no default commits; no remote deletes; leftover unassigned tasks listed.
 
 ### land-lanes
 
-Matrix of every worktree disposition, backups, merge order, conflicts, focused + full gate results, reachability proof, cleanup authorization (local vs remote separate).
+Matrix of every worktree disposition, backups, merge order, conflicts, end check result, reachability proof, cleanup authorization (local vs remote separate).
 
 “Everything landed” = reachability + byte preservation — not empty `git status` alone.  
 “Agents fired” = issue + branch + PR per lane — not directories alone.
