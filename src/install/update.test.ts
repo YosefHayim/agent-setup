@@ -20,9 +20,7 @@ const packageFiles = {
   "skills/organize-commits/SKILL.md": "---\nname: organize-commits\n---\nOrganize commits.\n",
   "skills/organize-commits/REFERENCE.md": "# Reference\n",
   "skills/finish-and-push/SKILL.md": "---\nname: finish-and-push\n---\nFinish and push.\n",
-  "skills/finish-and-push/REFERENCE.md": "# Reference\n",
   "skills/run-local-and-check/SKILL.md": "---\nname: run-local-and-check\n---\nRun locally.\n",
-  "skills/run-local-and-check/REFERENCE.md": "# Reference\n",
   "skills/run-tasks-in-parallel/SKILL.md": "---\nname: run-tasks-in-parallel\n---\nRun tasks in parallel.\n",
   "skills/run-tasks-in-parallel/REFERENCE.md": "# Reference\n",
 };
