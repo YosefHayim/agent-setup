@@ -52,6 +52,10 @@ const runHook = (homeRoot: string) =>
     },
   });
 
+// The short name differs by OS: macOS reports "node", Linux reports Node's main thread name.
+const readProcessName = (processId: number): string =>
+  spawnSync("ps", ["-o", "ucomm=", "-p", String(processId)], { encoding: "utf8" }).stdout.trim();
+
 const readLog = (homeRoot: string): string =>
   readFileSync(path.join(homeRoot, ".local", "state", "agent-setup", "leftover-process-cleanup.log"), "utf8");
 
@@ -72,6 +76,7 @@ describe("stopLeftoverProcesses hook", () => {
     const laneFolder = path.join(homeRoot, "Desktop", "Code", "lane");
     mkdirSync(laneFolder);
     const processId = await startStandIn({ workingFolder: laneFolder, extraArgument: "server-in-deleted-folder" });
+    const processName = readProcessName(processId);
     rmSync(laneFolder, { recursive: true });
 
     const hookRun = runHook(homeRoot);
@@ -80,7 +85,7 @@ describe("stopLeftoverProcesses hook", () => {
     expect(hookRun.stdout).toBe("");
     expect(isProcessAlive(processId)).toBe(false);
     expect(readLog(homeRoot)).toContain(
-      `pid=${processId} name="node" reason=working folder no longer exists: ${laneFolder}\n`,
+      `pid=${processId} name="${processName}" reason=working folder no longer exists: ${laneFolder}\n`,
     );
   });
 
@@ -109,6 +114,7 @@ describe("stopLeftoverProcesses hook", () => {
       workingFolder: homeRoot,
       extraArgument: "--user-data-dir=/Users/owner/chrome-profile",
     });
+    const testBrowserName = readProcessName(testBrowserId);
     await sleep(1_200);
 
     const hookRun = runHook(homeRoot);
@@ -116,7 +122,7 @@ describe("stopLeftoverProcesses hook", () => {
     expect(hookRun.status).toBe(0);
     expect(isProcessAlive(testBrowserId)).toBe(false);
     expect(isProcessAlive(ownerBrowserId)).toBe(true);
-    expect(readLog(homeRoot)).toContain(`pid=${testBrowserId} name="node" reason=orphaned test browser`);
+    expect(readLog(homeRoot)).toContain(`pid=${testBrowserId} name="${testBrowserName}" reason=orphaned test browser`);
   });
 
   it("looks only once in a short time", async () => {
