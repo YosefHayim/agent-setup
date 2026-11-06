@@ -24,12 +24,12 @@
 | Flag / phrase | Meaning |
 |---------------|---------|
 | (default numbered list) | **execute**, open PRs; merge only if user also said merge/to-main/full ship |
-| `merge` / `to main` / `ship all` | Authorize merge after hard gates |
+| `merge` / `to main` / `ship all` | Authorize merge, back to back, after the lane reports confidence ≥ 6 |
 | `no-merge` | Force PR-only even if merge language appears elsewhere |
 | `headed` / `visible` / `ui` | Headed e2e / visible UI QA |
 | `no-cmux` | Host A / in-process only |
 | `agent=grok\|claude\|codex` | cmux lane CLI |
-| `max-lanes=N` | Cap parallel lanes (default soft 8; queue rest) |
+| `max-lanes=N` | Cap parallel lanes (default 8 running at once; queue rest) |
 | `setup-lanes` / `land-lanes` | Force that mode |
 
 ## Artifact paths
@@ -40,8 +40,9 @@ One folder per run, outside the repo: `${XDG_STATE_HOME:-~/.local/state}/agent-s
 |------|-------|
 | Campaign board | `## Board` section of `$RUN_DIR/report.md` |
 | Optional state | `## State` section of `$RUN_DIR/report.md` |
-| Resume | The run folder the user gives, else the newest: `ls -1 "$RUNS" \| tail -n 1`. No pointer file. |
+| Resume | The run folder the user gives, else the newest: `ls -1 "$RUNS" \| tail -n 1`. No pointer file (the long-run pointer below is the one exception). |
 | Lane brief | `<worktree>/LANE-BRIEF.md` only (include `RUN_DIR`) |
+| Long-run files | `$RUN_DIR/SPEC.md`, `$RUN_DIR/briefs/`, `$RUN_DIR/scripts/` (see Long run mode) |
 
 Never write campaign boards into the repository: not at the root, not in a `docs/` folder, not in a gitignored folder.
 
@@ -58,8 +59,10 @@ updated: <iso>
 
 | # | Task | Slug | Issue | Worktree | Branch | PR | Unit | E2E | QA | Conf | Merge | Notes |
 |---|------|------|-------|----------|--------|----|------|-----|----|------|-------|-------|
-| 1 | … | … | #n | .worktrees/… | feat/n-… | url | pass | pass | pass | 7 | no | |
+| 1 | … | … | #n | .worktrees/… | feat/n-… | url | — | — | — | 7 | no | |
 ```
+
+Unit, E2E and QA stay `—` until the end check fills them.
 
 ## LANE-BRIEF.md template (execute)
 
@@ -84,12 +87,12 @@ Merge authorized: false | true
 
 ## Full SDLC (required)
 1. Implement acceptance only in path globs.
-2. Unit happy path — must fail if feature deleted — green.
-3. E2E/integration happy path — headless unless brief says headed — green or honest skip.
-4. If UI surface: run run-local-and-check checks; record evidence.
+2. Unit happy path — add a test that fails if the feature is deleted. Do not run it: no checks while building.
+3. E2E/integration happy path — add the smallest durable e2e test. Do not run it.
+4. If UI surface: write down the user flow to prove; the orchestrator proves it in the real app after the end check.
 5. organize-commits on this branch only. Never commit on default.
-6. finish-and-push: push + open PR with Fixes #<n>, Summary, Confidence N/10, test plan.
-7. Sign-off as finish-and-push Local sign-off says: `pnpm check`, then `gh signoff` — a failing check blocks merge; fix and rerun.
+6. finish-and-push: push + open PR with Fixes #<n>, Summary, Confidence N/10, test plan. Skip its verify step.
+7. No sign-off in the lane. The orchestrator runs gh signoff and merges, back to back with the others.
 8. Do NOT merge unless Merge authorized: true and conf ≥ 6.
 9. Do NOT delete remotes. Do NOT touch other lanes.
 
@@ -104,7 +107,7 @@ Merge authorized: false | true
 Follow AGENTS.md and the rules in ~/.claude/rules/ at repo root of this worktree.
 
 ## Done for implementer
-PR open with gates evidence. Orchestrator owns merge sequencing and campaign board.
+PR open. Orchestrator owns merge sequencing, sign-off and campaign board.
 ```
 
 ## Confidence (same honesty as ship-one-feature)
@@ -113,11 +116,11 @@ PR open with gates evidence. Orchestrator owns merge sequencing and campaign boa
 |------:|---------|
 | 1–3 | Spec unclear / tests missing — **no merge** |
 | 4–5 | Narrow demo / weak e2e — **no merge** without human |
-| 6 | Happy-path unit + e2e green; min auto-merge |
-| 7–8 | Solid coverage + CI green |
+| 6 | Happy-path tests written and acceptance met; min auto-merge |
+| 7–8 | Solid coverage, reviewed against acceptance |
 | 9–10 | Rare; multi-surface hardened |
 
-**Caps:** unit without e2e (or reverse) → max 4 + block merge when stack exists. Thin smoke e2e only → max 7.
+**Caps:** no happy-path test for the feature → max 4 + no merge. Thin smoke e2e only → max 7.
 
 ## PR body skeleton
 
@@ -131,10 +134,9 @@ Fixes #<n>
 **N/10** — <one sentence residual risk>
 
 ## Test plan
-- [x] Unit: `<cmd>` → pass
-- [x] E2E: `<cmd>` → pass | skip:<why>
-- [x] QA: run-local-and-check → pass | N/A
-- [ ] CI: `pnpm check` (turbo) → pass, signoff <sha>
+- [ ] Unit: <what it covers> (run by the end check)
+- [ ] E2E: <what it covers> | N/A
+- [ ] QA: <flow to prove in the real app> | N/A
 
 ## Main safety
 - Base: <default> @ <sha>
@@ -153,15 +155,15 @@ Fixes #<n>
 ## Test command discovery
 
 1. `AGENTS.md` / README Verification  
-2. `package.json`: `test`, `test:unit`, `test:e2e`, `test:integration`, `verify`  
+2. `package.json`: `test`, `test:unit`, `test:e2e`, `test:integration`, `verify`, `check`  
 3. Makefile / just  
 4. Language defaults only if no package script  
 
-Happy path = primary success scenario. At least one unit and one e2e assertion should fail if the feature is removed.
+Happy path = primary success scenario. At least one unit and one e2e assertion should fail if the feature is removed. The end check runs them, never a lane.
 
 ## When Actions cannot start jobs
 
-No act and no Docker for CI. For a PR that changes `.github/**`, `actionlint` is the check and the next nightly or main run is the proof. In a client repo the local gate is the proof; say the run did not start. Run `run-ci-locally` only when the user asks.
+No act and no Docker for CI. For a PR that changes `.github/**`, `actionlint` is the check and the next nightly or main run is the proof. Where Actions cannot start jobs, say the run did not start and name the local check as the proof. Run `run-ci-locally` only when the user asks.
 
 ## Reinstall / smoke (optional full ship)
 
@@ -172,6 +174,120 @@ pnpm build && pnpm link --global   # or package-specific
 <binary> --version
 <primary smoke command>
 ```
+
+## Long run mode
+
+Use it when the job spans several waves or many hours, or must survive memory summaries. Start from the execute run folder (SKILL.md, Parse tasks, step 5). The orchestrator writes the files below before any agent starts.
+
+### Run folder
+
+```text
+RUN_DIR/
+  SPEC.md              the plan; wins over memory and over the chat
+  report.md            ## Board, ## Run log, ## Handoff
+  briefs/<wave>.md     one brief per wave, shared by its parts
+  scripts/             review and check scripts that print short summaries
+```
+
+### SPEC.md skeleton
+
+```markdown
+# <Run title>
+
+## 1. What this run does
+<goal in 2 to 4 lines>
+
+## 2. Decided rules
+- <rule decided by the owner or the orchestrator, one line each>
+
+## 3. Final structure
+<folders, modules and names the result must have>
+
+## 4. Worked example
+<one real case, from start to finish, showing the rules applied>
+
+## 5. Waves and parts
+Each part: its own issue, branch, worktree and one PR that says `Fixes #<n>`. At most 8 agents at once.
+
+### Wave 0
+- **0a. <part name>.** Files: `<path>`, `<path>`.
+  - [ ] <checkable step>
+  - [ ] <checkable step>
+
+### Wave 1
+- **1a. <part name>.** Files: `<path>`. Waits for 0a (shares files).
+  - [ ] <checkable step>
+
+## 6. How every part works
+- Do the work, commit, push, open the PR, and reply with the PR link and a short list of what changed.
+- No checks while building: no test, lint, typecheck, build or CI run. The end check covers the work.
+- Bans: never push to main, never delete branches, no attribution in commits or PRs, no emojis, never write to /tmp, never read `.env` files, never get around a hook.
+- <run-specific bans>
+
+## 7. End check (orchestrator, once, after the last part)
+In a fresh worktree of the latest main:
+1. <the repo's check command> passes.
+2. <proof in the real app or flow, one line per flow>
+
+Every failure is fixed in one PR from a fresh worktree, then the check runs again until it passes. Then the worktrees are removed and the branches kept.
+```
+
+Rule: a new owner rule during the run becomes a new wave appended to section 5. Edit no earlier wave to hide the change.
+
+### active-run.json
+
+Path: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/<repo>/active-run.json`. The agent-setup `active-run-reminder` hook reads it. One active run per repo: if the file already exists, resume that run or ask the owner.
+
+```json
+{
+  "title": "Checkout cleanup",
+  "specPath": "/Users/<user>/.local/state/agent-setup/runs/<repo>/run-tasks-in-parallel/2026-11-06-1400/SPEC.md",
+  "reportPath": "/Users/<user>/.local/state/agent-setup/runs/<repo>/run-tasks-in-parallel/2026-11-06-1400/report.md"
+}
+```
+
+### Text every agent brief carries
+
+```text
+Read SPEC.md and this brief first. Re-read SPEC.md after any context summary.
+Check your work against your part's checklist in SPEC.md before each commit.
+Do not edit SPEC.md; the orchestrator ticks the checklist when it merges.
+When done, reply with the PR link and a short list of what changed.
+```
+
+### Report: Run log and Handoff
+
+One line per merge in `## Run log`:
+
+```text
+- 2026-11-06 14:10 part 2a merged (#412); 2b running.
+```
+
+`## Handoff` holds 3 to 4 lines, rewritten after every merge, so a fresh session can resume from it alone:
+
+```markdown
+## Handoff
+
+- State (2026-11-06): waves 0 and 1 merged; wave 2 running: parts 2a and 2b.
+- Next: part 3 after 2a (shares files); part 4 when a slot frees.
+- Open outside this run: none.
+```
+
+### Orchestrator loop
+
+1. A finished agent's notice wakes the orchestrator. No timer or polling loop is needed.
+2. Review the diff against SPEC.md and the part's checklist.
+3. Send one fix round through SendMessage. Fix a miss that is still there yourself.
+4. Merge (execute orchestrator step 2), tick the part's checklist in SPEC.md, add one Run log line, and update the Handoff state line.
+5. Start the next part with no shared files. Keep max-lanes running while the backlog holds such parts.
+6. A question to the owner goes out and does not block parts its answer does not touch.
+
+### Finish
+
+1. Run the end check once on the latest main (SPEC.md section 7).
+2. Failures get one fix PR, then a rerun until it passes.
+3. Delete `active-run.json` so the hook goes quiet.
+4. Remove the worktrees and keep the branches.
 
 ## Anti-triggers
 
