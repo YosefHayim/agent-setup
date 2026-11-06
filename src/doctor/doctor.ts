@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
 import {
   type AgentEvidence,
@@ -9,6 +9,7 @@ import {
   detectAgents,
 } from "../catalog/agentCatalog.js";
 import {
+  addDependencies,
   type FeatureDefinition,
   featureCatalog,
   featureDefinitionSchema,
@@ -141,11 +142,14 @@ const discrepancySchema = Schema.Union(
   Schema.TaggedStruct("managedAgentNotDetected", {
     agentId: agentIdSchema,
   }),
+  Schema.TaggedStruct("missingFeatureDependency", {
+    featureId: featureIdSchema,
+  }),
 ).annotations({
   description: "Read-only discrepancy that never grants repair or deletion authority.",
 });
 
-type Discrepancy = Schema.Schema.Type<typeof discrepancySchema>;
+export type Discrepancy = Schema.Schema.Type<typeof discrepancySchema>;
 
 const healthReportSchema = Schema.Struct({
   scope: scopeSchema.annotations({
@@ -230,6 +234,17 @@ const checkFeatureHealth = (request: HealthRequest, receipt: Receipt) => {
         });
       }),
   );
+};
+
+// The receipt lists what is installed; a dependency it lacks is reported, and install or update adds it.
+const findMissingDependencies = (receipt: Receipt): Array<Discrepancy> => {
+  const recordedIds = new Set<string>(receipt.features);
+  const requiredResult = addDependencies(receipt.features);
+  const requiredIds = Either.getOrThrow(requiredResult);
+
+  return requiredIds
+    .filter((featureId) => !recordedIds.has(featureId))
+    .map((featureId) => ({ _tag: "missingFeatureDependency" as const, featureId }));
 };
 
 const checkAgentHealth = (evidence: AgentEvidence, receipt: Receipt | undefined) => {
@@ -318,6 +333,9 @@ export const checkHealth = (input: unknown) =>
       if (configSnapshot._tag === "missing") {
         discrepancies.push({ _tag: "missingManagedConfig" });
       }
+
+      const missingDependencies = findMissingDependencies(receipt);
+      discrepancies.push(...missingDependencies);
     }
 
     for (const feature of featureDiagnostics) {

@@ -16,7 +16,30 @@ const packageFiles = {
   "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
   "skills/autorun/SKILL.md": "---\nname: autorun\n---\nRun @@AUTORUN_CONTROL@@ when armed.\n",
   "skills/autorun/agents/openai.yaml": "policy:\n  allow_implicit_invocation: false\n",
+  "hooks/activeRunReminder/hooks/activeRunReminder.js": "export {};\n",
+  "skills/organize-commits/SKILL.md": "---\nname: organize-commits\n---\nOrganize commits.\n",
+  "skills/organize-commits/REFERENCE.md": "# Reference\n",
+  "skills/finish-and-push/SKILL.md": "---\nname: finish-and-push\n---\nFinish and push.\n",
+  "skills/run-local-and-check/SKILL.md": "---\nname: run-local-and-check\n---\nRun locally.\n",
+  "skills/run-tasks-in-parallel/SKILL.md": "---\nname: run-tasks-in-parallel\n---\nRun tasks in parallel.\n",
+  "skills/run-tasks-in-parallel/REFERENCE.md": "# Reference\n",
 };
+
+// A receipt written before active-run-reminder became a dependency of run-tasks-in-parallel.
+const RECEIPT_BEFORE_REMINDER_JSON = JSON.stringify({
+  version: "0.12.0",
+  scope: "project",
+  features: ["organize-commits", "finish-and-push", "run-local-and-check", "run-tasks-in-parallel"],
+  ownedFiles: [],
+});
+
+const REMINDER_RECEIPT_FEATURES = [
+  "active-run-reminder",
+  "organize-commits",
+  "finish-and-push",
+  "run-local-and-check",
+  "run-tasks-in-parallel",
+];
 
 const workspace = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -195,6 +218,60 @@ layer(NodeContext.layer)("update", (it) => {
       const managedConfigFile = receipt.ownedFiles.find((file: { path: string }) => file.path === configPath);
       expect(managedConfigFile.ownership.installedHash).toBe(createHash("sha256").update(configBytes).digest("hex"));
       expect(managedConfigFile.ownership.previous).toEqual({ _tag: "missing" });
+    }),
+  );
+
+  it.scoped("install adds a dependency that an older receipt does not list", () =>
+    Effect.gen(function* () {
+      const { root, preparedRoot, writeFiles, readText, exists } = yield* workspace;
+      yield* writeFiles(root, { ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+
+      const installSummary = yield* install({
+        ...request({ root, preparedRoot, features: ["run-tasks-in-parallel"] }),
+        configuration: selectedDefaults,
+      });
+
+      expect(installSummary.features).toEqual(REMINDER_RECEIPT_FEATURES);
+      expect(yield* exists(".claude/agent-setup/hooks/activeRunReminder/hooks/activeRunReminder.js")).toBe(true);
+      expect(yield* readText(".claude/settings.json")).toContain("SubagentStart");
+      expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual(
+        REMINDER_RECEIPT_FEATURES,
+      );
+    }),
+  );
+
+  it.scoped("update adds a dependency that an older receipt does not list", () =>
+    Effect.gen(function* () {
+      const { root, preparedRoot, writeFiles, readText, exists } = yield* workspace;
+      yield* writeFiles(root, { ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+
+      const updateSummary = yield* update({
+        ...request({ root, preparedRoot, features: [] }),
+        features: { _tag: "preserve" },
+        configuration: selectedDefaults,
+      });
+
+      expect(updateSummary.features).toEqual(REMINDER_RECEIPT_FEATURES);
+      expect(yield* exists(".claude/agent-setup/hooks/activeRunReminder/hooks/activeRunReminder.js")).toBe(true);
+      expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
+      expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual(
+        REMINDER_RECEIPT_FEATURES,
+      );
+    }),
+  );
+
+  it.scoped("update refreshes a dependency that an older receipt does not list", () =>
+    Effect.gen(function* () {
+      const { root, preparedRoot, writeFiles } = yield* workspace;
+      yield* writeFiles(root, { ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+
+      const updateSummary = yield* update({
+        ...request({ root, preparedRoot, features: [] }),
+        features: { _tag: "refresh", ids: ["active-run-reminder"] },
+        configuration: selectedDefaults,
+      });
+
+      expect(updateSummary.features).toEqual(REMINDER_RECEIPT_FEATURES);
     }),
   );
 });

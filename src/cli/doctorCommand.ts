@@ -4,7 +4,7 @@ import { Command } from "@effect/cli";
 import { Effect } from "effect";
 
 import { destinationForScope, scanHost } from "../config/hostScan.js";
-import { checkHealth, type HealthReport } from "../doctor/doctor.js";
+import { checkHealth, type Discrepancy, type HealthReport } from "../doctor/doctor.js";
 import { preparePackage } from "../install/preparePackage.js";
 import { formatOption } from "./cliOptions.js";
 import * as TerminalUI from "./TerminalUI.js";
@@ -40,6 +40,14 @@ export const checkBothScopes = Effect.gen(function* () {
   );
 });
 
+// A missing dependency names the command that adds it; every other discrepancy shows its tag.
+const describeDiscrepancy = (discrepancy: Discrepancy) => {
+  const isMissingDependency = discrepancy._tag === "missingFeatureDependency";
+  if (!isMissingDependency) return discrepancy._tag;
+
+  return `missingFeatureDependency: ${discrepancy.featureId} is required but not recorded; run install or update to add it`;
+};
+
 // Reports every discrepancy without offering a repair.
 export const showScopeHealth = ({ scope, report }: ScopeHealth) =>
   Effect.gen(function* () {
@@ -54,7 +62,7 @@ export const showScopeHealth = ({ scope, report }: ScopeHealth) =>
       yield* TerminalUI.detail(`watcher ${abbreviatedSessionId(watcher.sessionId)}: live (pid ${String(watcher.pid)})`);
     }
     for (const discrepancy of report.discrepancies) {
-      yield* TerminalUI.warn(discrepancy._tag);
+      yield* TerminalUI.warn(describeDiscrepancy(discrepancy));
     }
   });
 

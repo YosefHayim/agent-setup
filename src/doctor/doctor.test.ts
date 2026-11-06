@@ -201,6 +201,27 @@ layer(NodeContext.layer)("doctor", (it) => {
     }),
   );
 
+  it.scoped("reports a dependency the receipt does not list as missing, without changing the receipt", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspace = yield* makeWorkspace({
+        config: true,
+        receipt: {
+          version: "1.0.0",
+          scope: "project",
+          features: ["organize-commits", "finish-and-push", "run-local-and-check", "run-tasks-in-parallel"],
+          ownedFiles: [],
+        },
+      });
+      const receiptBefore = yield* fileSystem.readFile(workspace.receiptPath);
+
+      const report = yield* checkHealth(workspace.requestFor());
+
+      expect(report.discrepancies).toEqual([{ _tag: "missingFeatureDependency", featureId: "active-run-reminder" }]);
+      expect([...(yield* fileSystem.readFile(workspace.receiptPath))]).toEqual([...receiptBefore]);
+    }),
+  );
+
   it.scoped("lists live autorun watchers from the install root's state folder in either scope", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
