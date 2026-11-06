@@ -79,7 +79,9 @@ describe("stopLeftoverProcesses hook", () => {
     expect(hookRun.status).toBe(0);
     expect(hookRun.stdout).toBe("");
     expect(isProcessAlive(processId)).toBe(false);
-    expect(readLog(homeRoot)).toContain(`pid=${processId} name="node" reason=working folder no longer exists`);
+    expect(readLog(homeRoot)).toContain(
+      `pid=${processId} name="node" reason=working folder no longer exists: ${laneFolder}\n`,
+    );
   });
 
   it("keeps a server whose working folder still exists", async () => {
