@@ -95,6 +95,7 @@ const hookRegistrationSchema = Schema.Struct({
     "PostToolUse",
     "UserPromptSubmit",
     "SessionStart",
+    "SubagentStart",
     "Stop",
     "SubagentStop",
     "PreCompact",
@@ -339,6 +340,35 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
         {
           event: "PreToolUse",
           matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+      ],
+    },
+  },
+  {
+    id: "active-run-reminder",
+    sourceDirectory: "activeRunReminder",
+    installedSkill: { _tag: "none" },
+    title: "Active run reminder",
+    summary:
+      "When a Claude Code session or subagent starts in a repo that has an active run, tell it to re-read the run's spec before every commit. Reads the run folder that the run-tasks-in-parallel skill writes. Does nothing when there is no run.",
+    selectedByDefault: false,
+    dependencies: [],
+    platform: "any",
+    runtime: {
+      _tag: "hook",
+      sourceEntrypoint: "hooks/activeRunReminder.ts",
+      registrations: [
+        {
+          event: "SessionStart",
+          matcher: { _tag: "none" },
+          entrypoint: { _tag: "featureDefault" },
+          readsAgentId: false,
+        },
+        {
+          event: "SubagentStart",
+          matcher: { _tag: "none" },
           entrypoint: { _tag: "featureDefault" },
           readsAgentId: false,
         },
@@ -758,7 +788,7 @@ export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { o
     title: "Run tasks in parallel",
     summary: "Give a numbered task list, and each task gets its own agent, branch, tests, and PR.",
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
-    dependencies: ["organize-commits", "finish-and-push", "run-local-and-check"],
+    dependencies: ["organize-commits", "finish-and-push", "run-local-and-check", "active-run-reminder"],
   }),
   skillFeature({
     id: "ship-one-feature",
