@@ -250,7 +250,8 @@ Path: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-setup/runs/<repo>/active-run.
 
 ```text
 Read SPEC.md and this brief first. Re-read SPEC.md after any context summary.
-Tick your part's checklist lines in SPEC.md before each commit.
+Check your work against your part's checklist in SPEC.md before each commit.
+Do not edit SPEC.md; the orchestrator ticks the checklist when it merges.
 When done, reply with the PR link and a short list of what changed.
 ```
 
@@ -277,7 +278,7 @@ One line per merge in `## Run log`:
 1. A finished agent's notice wakes the orchestrator. No timer or polling loop is needed.
 2. Review the diff against SPEC.md and the part's checklist.
 3. Send one fix round through SendMessage. Fix a miss that is still there yourself.
-4. Merge (execute orchestrator step 2), add one Run log line, and update the Handoff state line.
+4. Merge (execute orchestrator step 2), tick the part's checklist in SPEC.md, add one Run log line, and update the Handoff state line.
 5. Start the next part with no shared files. Keep max-lanes running while the backlog holds such parts.
 6. A question to the owner goes out and does not block parts its answer does not touch.
 
