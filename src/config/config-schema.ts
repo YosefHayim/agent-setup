@@ -18,12 +18,14 @@ type ConfigKey = keyof Config;
 
 // A key set to undefined is rejected here, before defaults fill it in; JSON files can never carry one.
 const rejectUndefinedProperties = (input: unknown, context: z.RefinementCtx) => {
-  if (typeof input !== "object" || input === null) {
+  const isNotPlainObject = typeof input !== "object" || input === null;
+  if (isNotPlainObject) {
     return;
   }
 
   for (const [key, value] of Object.entries(input)) {
-    if (value === undefined) {
+    const isUndefinedValue = value === undefined;
+    if (isUndefinedValue) {
       context.addIssue({ code: "custom", message: "Properties must not be undefined.", path: [key] });
     }
   }

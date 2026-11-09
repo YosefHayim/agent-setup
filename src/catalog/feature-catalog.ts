@@ -866,19 +866,19 @@ export const addDependencies = (requestedIds: ReadonlyArray<string>): AddDepende
     return { status: "unknown", featureId: unknownId };
   }
 
-  const resolvedIds = new Set<string>();
+  const includedIds = new Set<string>();
   // The catalog schema already proves every dependency exists and the graph is acyclic.
   const visitFeature = (feature: FeatureDefinition): void => {
-    if (resolvedIds.has(feature.id)) {
+    if (includedIds.has(feature.id)) {
       return;
     }
 
-    resolvedIds.add(feature.id);
+    includedIds.add(feature.id);
     featureCatalog.filter((candidate) => feature.dependencies.includes(candidate.id)).forEach(visitFeature);
   };
   featureCatalog.filter((feature) => requestedIds.includes(feature.id)).forEach(visitFeature);
 
-  const featureIds = featureCatalog.filter((feature) => resolvedIds.has(feature.id)).map((feature) => feature.id);
+  const featureIds = featureCatalog.filter((feature) => includedIds.has(feature.id)).map((feature) => feature.id);
   return { status: "ready", featureIds };
 };
 

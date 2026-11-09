@@ -225,13 +225,13 @@ const checkFeatureHealth = (request: HealthRequest, receipt: Receipt) => {
 // The receipt lists what is installed; a dependency it lacks is reported, and install or update adds it.
 const findMissingDependencies = (receipt: Receipt): Array<Discrepancy> => {
   const recordedIds = new Set<string>(receipt.features);
-  const requiredResult = addDependencies(receipt.features);
-  const isRequiredFeatureUnknown = requiredResult.status === "unknown";
+  const dependencyCheck = addDependencies(receipt.features);
+  const isRequiredFeatureUnknown = dependencyCheck.status === "unknown";
   if (isRequiredFeatureUnknown) {
-    throw new Error(`Unknown feature ${requiredResult.featureId}.`);
+    throw new Error(`Unknown feature ${dependencyCheck.featureId}.`);
   }
 
-  const requiredIds = requiredResult.featureIds;
+  const requiredIds = dependencyCheck.featureIds;
 
   return requiredIds
     .filter((featureId) => !recordedIds.has(featureId))

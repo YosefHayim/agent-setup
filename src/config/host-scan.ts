@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 
 import { type AgentDefinition, type AgentEvidence, agentCatalog } from "../catalog/agent-catalog.js";
-import { formatZodIssues } from "../zod-issues.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,18 +106,21 @@ const captureAgentEvidence = async (homeRoot: string): Promise<AgentEvidence> =>
 
 export const scanHost = async (): Promise<HostScan> => {
   const homeRoot = absoluteRoot(process.env.HOME || process.env.USERPROFILE || "");
-  const isHomeRootUsable = homeRoot !== "/" && homeRoot !== "";
-  if (!isHomeRootUsable) {
+  const isHomeRootUnusable = homeRoot === "/" || homeRoot === "";
+  if (isHomeRootUnusable) {
     throw new Error("Cannot scan host: HOME (or USERPROFILE) must resolve to an absolute home directory.");
   }
 
   const projectRoot = absoluteRoot(process.cwd());
   const platformCheck = hostPlatformSchema.safeParse({ operatingSystem: process.platform });
-  const isPlatformValid = platformCheck.success;
-  if (!isPlatformValid) {
-    throw new Error(`Cannot scan host: Host platform evidence is invalid: ${formatZodIssues(platformCheck.error)}`, {
-      cause: platformCheck.error,
-    });
+  const isPlatformInvalid = !platformCheck.success;
+  if (isPlatformInvalid) {
+    throw new Error(
+      `Cannot scan host: Host platform evidence is invalid: ${joinZodIssueMessages(platformCheck.error)}`,
+      {
+        cause: platformCheck.error,
+      },
+    );
   }
 
   const agentEvidence = await captureAgentEvidence(homeRoot);

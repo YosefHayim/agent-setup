@@ -28,7 +28,7 @@ const makeRepository = (): string => {
 };
 
 describe("fillPublishTemplate", () => {
-  it("substitutes every [DEVICECHECK_PRIVATE_KEY hidden]", () => {
+  it("substitutes every OWNER, REPO and PACKAGE placeholder", () => {
     const filled = fillPublishTemplate({ template: "{{OWNER}}/{{REPO}} ships {{PACKAGE}} — {{OWNER}} again", inputs });
 
     expect(filled).toBe("Acme/widget ships widget-cli — Acme again");

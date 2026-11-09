@@ -54,16 +54,18 @@ const decodeStrictly =
       Effect.mapError((error) => new InstallError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) })),
     );
 
-const resolveFeatures = (request: InstallRequest): Either.Either<ReadonlyArray<FeatureId>, InstallError> => {
+const listFeaturesWithDependencies = (
+  request: InstallRequest,
+): Either.Either<ReadonlyArray<FeatureId>, InstallError> => {
   const ids = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
 
-  const resolved = addDependencies(ids);
-  const isFeatureUnknown = resolved.status === "unknown";
+  const dependencyCheck = addDependencies(ids);
+  const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
-    return Either.left(new InstallError({ issue: `Unknown feature ${resolved.featureId}.` }));
+    return Either.left(new InstallError({ issue: `Unknown feature ${dependencyCheck.featureId}.` }));
   }
 
-  return Either.right(resolved.featureIds);
+  return Either.right(dependencyCheck.featureIds);
 };
 
 const resolveSelectedAgents = (
@@ -284,7 +286,7 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       return yield* new InstallError({ issue: "Existing receipt scope does not match the requested destination." });
     }
 
-    const featureIds = yield* resolveFeatures(request);
+    const featureIds = yield* listFeaturesWithDependencies(request);
     const selectedAgents = yield* resolveAgents(request);
     const hookWrites = yield* createHookWrites({ request, featureIds, previousReceipt });
     const preparedSkills = yield* readPreparedSkills({ request, featureIds });

@@ -7,7 +7,7 @@ import { findDuplicateJsonKey } from "../install/find-duplicate-json-key.js";
 import type { PreviousFileValue } from "../install/ownership.js";
 import type { WriteOperation } from "../install/plan.js";
 import type { Scope } from "../install/receipt.js";
-import { formatZodIssues } from "../zod-issues.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
 import { type Config, configSchema, defaultConfig } from "./config-schema.js";
 
 export const managedConfigPath = ".claude/agent-setup/config.json";
@@ -82,10 +82,10 @@ const decodeConfigFileBytes = (input: { readonly bytes: Uint8Array; readonly con
   }
 
   const configCheck = configSchema.safeParse(json);
-  const isConfigValid = configCheck.success;
-  if (!isConfigValid) {
+  const isConfigInvalid = !configCheck.success;
+  if (isConfigInvalid) {
     throw new Error(
-      `Managed config at ${input.configPath} is invalid: ${formatZodIssues(configCheck.error)}. Fix or remove it, then retry.`,
+      `Managed config at ${input.configPath} is invalid: ${joinZodIssueMessages(configCheck.error)}. Fix or remove it, then retry.`,
       { cause: configCheck.error },
     );
   }
@@ -119,19 +119,19 @@ export const readConfigFile = async (configPath: string): Promise<ConfigFileSnap
   return { _tag: "present", bytes, config };
 };
 
-const renderManagedConfigBytes = (config: Config): Uint8Array =>
+const encodeManagedConfigBytes = (config: Config): Uint8Array =>
   textEncoder.encode(`${JSON.stringify(config, null, 2)}\n`);
 
 // A present snapshot must decode from its own bytes to exactly the config it carries.
 const addSnapshotMatchIssues = (snapshot: ConfigFileSnapshot, context: z.RefinementCtx) => {
-  const isPresentSnapshot = snapshot._tag === "present";
-  if (!isPresentSnapshot) {
+  const isSnapshotMissing = snapshot._tag === "missing";
+  if (isSnapshotMissing) {
     return;
   }
 
   const decodedConfig = decodeConfigFileBytes({ bytes: snapshot.bytes, configPath: "managed configuration snapshot" });
-  const isDecodedConfigMatching = JSON.stringify(decodedConfig) === JSON.stringify(snapshot.config);
-  if (!isDecodedConfigMatching) {
+  const isDecodedConfigMismatched = JSON.stringify(decodedConfig) !== JSON.stringify(snapshot.config);
+  if (isDecodedConfigMismatched) {
     context.addIssue({
       code: "custom",
       path: ["config"],
@@ -160,13 +160,13 @@ const addFirstProjectInstallIssues = (
   },
   context: z.RefinementCtx,
 ) => {
-  const isFirstProjectInstall = request.selection._tag === "firstProjectInstall";
-  if (!isFirstProjectInstall) {
+  const isSelectionNotFirstProjectInstall = request.selection._tag !== "firstProjectInstall";
+  if (isSelectionNotFirstProjectInstall) {
     return;
   }
 
-  const isProjectScope = request.scope === "project";
-  if (!isProjectScope) {
+  const isScopeNotProject = request.scope !== "project";
+  if (isScopeNotProject) {
     context.addIssue({
       code: "custom",
       path: ["selection", "_tag"],
@@ -174,8 +174,8 @@ const addFirstProjectInstallIssues = (
     });
   }
 
-  const isTargetMissing = request.previousConfigFile._tag === "missing";
-  if (!isTargetMissing) {
+  const isTargetAlreadyPresent = request.previousConfigFile._tag !== "missing";
+  if (isTargetAlreadyPresent) {
     context.addIssue({
       code: "custom",
       path: ["previousConfigFile"],
@@ -196,7 +196,7 @@ const managedConfigRequestSchema = z
   .superRefine(addFirstProjectInstallIssues);
 
 const createManagedConfigWrite = (config: Config, previous: PreviousFileValue): WriteOperation => {
-  const bytes = renderManagedConfigBytes(config);
+  const bytes = encodeManagedConfigBytes(config);
 
   return {
     _tag: "write",
@@ -210,14 +210,14 @@ const createManagedConfigWrite = (config: Config, previous: PreviousFileValue): 
   };
 };
 
-const resolveSelectedConfig = (request: ManagedConfigRequest): Config => {
+const pickSelectedConfig = (request: ManagedConfigRequest): Config => {
   switch (request.selection._tag) {
     case "selected":
       return request.selection.config;
     case "firstProjectInstall": {
       const globalSnapshot = request.selection.globalConfig;
-      const isGlobalConfigPresent = globalSnapshot._tag === "present";
-      if (!isGlobalConfigPresent) {
+      const isGlobalConfigMissing = globalSnapshot._tag === "missing";
+      if (isGlobalConfigMissing) {
         return defaultConfig;
       }
 
@@ -228,10 +228,10 @@ const resolveSelectedConfig = (request: ManagedConfigRequest): Config => {
 
 // Throws when a plan's bytes do not encode its config or its ownership hash does not match those bytes.
 export const assertManagedConfigPlan = (plan: ManagedConfigPlan): void => {
-  const bytes = renderManagedConfigBytes(plan.config);
+  const bytes = encodeManagedConfigBytes(plan.config);
   const write = plan.managedConfigWrite;
-  const isBytesEncodingConfig = bytesEqual(write.bytes, bytes);
-  if (!isBytesEncodingConfig) {
+  const isBytesDrifted = !bytesEqual(write.bytes, bytes);
+  if (isBytesDrifted) {
     throw new Error(
       "Cannot plan managed configuration: Managed-config bytes must encode the returned complete configuration.",
     );
@@ -239,8 +239,8 @@ export const assertManagedConfigPlan = (plan: ManagedConfigPlan): void => {
 
   const ownership = write.file.ownership;
   const isWholeFile = ownership._tag === "wholeFile";
-  const isOwnershipHashMatching = !isWholeFile || ownership.installedHash === hashBytes(write.bytes);
-  if (!isOwnershipHashMatching) {
+  const isOwnershipHashMismatched = isWholeFile && ownership.installedHash !== hashBytes(write.bytes);
+  if (isOwnershipHashMismatched) {
     throw new Error(
       "Cannot plan managed configuration: Managed-config ownership hash must match its exact desired bytes.",
     );
@@ -250,15 +250,15 @@ export const assertManagedConfigPlan = (plan: ManagedConfigPlan): void => {
 // Plans one managed config without I/O: validate the request, resolve one source, then check the planned write.
 export const planManagedConfig = (input: unknown): ManagedConfigPlan => {
   const requestCheck = managedConfigRequestSchema.safeParse(input);
-  const isRequestValid = requestCheck.success;
-  if (!isRequestValid) {
-    throw new Error(`Cannot plan managed configuration: ${formatZodIssues(requestCheck.error)}`, {
+  const isRequestInvalid = !requestCheck.success;
+  if (isRequestInvalid) {
+    throw new Error(`Cannot plan managed configuration: ${joinZodIssueMessages(requestCheck.error)}`, {
       cause: requestCheck.error,
     });
   }
 
   const request = requestCheck.data;
-  const config = resolveSelectedConfig(request);
+  const config = pickSelectedConfig(request);
   const plan = {
     config,
     managedConfigWrite: createManagedConfigWrite(config, request.previousConfigFile),

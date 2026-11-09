@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 
 import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
-import { formatZodIssues } from "../zod-issues.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,8 +59,8 @@ export const planWorkflowFiles = (planRequest: { files: ReadonlyArray<TemplateFi
     }));
 
 const readTemplates = async (templateDirectory: string): Promise<Array<TemplateFile>> => {
-  const isTemplateDirectoryPresent = existsSync(templateDirectory);
-  if (!isTemplateDirectoryPresent) {
+  const isTemplateDirectoryMissing = !existsSync(templateDirectory);
+  if (isTemplateDirectoryMissing) {
     throw new Error(
       `Cannot copy workflows: src/templates/workflows missing at ${templateDirectory} — reinstall agent-setup.`,
     );
@@ -107,8 +107,8 @@ const parseJsonText = (text: string): unknown => {
 };
 
 const readPackageName = async (packageJsonPath: string): Promise<string | null> => {
-  const isPackageJsonPresent = existsSync(packageJsonPath);
-  if (!isPackageJsonPresent) {
+  const isPackageJsonMissing = !existsSync(packageJsonPath);
+  if (isPackageJsonMissing) {
     return null;
   }
 
@@ -139,11 +139,14 @@ const pathExists = async (filePath: string): Promise<boolean> => {
 
 export const copyWorkflows = async (copyRequest: unknown): Promise<CopiedWorkflows> => {
   const requestCheck = copyWorkflowsRequestSchema.safeParse(copyRequest);
-  const isRequestValid = requestCheck.success;
-  if (!isRequestValid) {
-    throw new Error(`Cannot copy workflows: Invalid workflow copy request: ${formatZodIssues(requestCheck.error)}`, {
-      cause: requestCheck.error,
-    });
+  const isRequestInvalid = !requestCheck.success;
+  if (isRequestInvalid) {
+    throw new Error(
+      `Cannot copy workflows: Invalid workflow copy request: ${joinZodIssueMessages(requestCheck.error)}`,
+      {
+        cause: requestCheck.error,
+      },
+    );
   }
 
   const request = requestCheck.data;
