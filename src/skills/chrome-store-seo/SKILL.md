@@ -93,5 +93,5 @@ When unsure, cut keywords — suspension risk beats rank fantasy.
 ## Files
 
 - [REFERENCE.md](REFERENCE.md) — official links, limits, ranking, GEO, tool stack
-- [scripts/validateListingCopy.mjs](scripts/validateListingCopy.mjs) — zero-dep copy validator
+- [scripts/validate-listing-copy.mjs](scripts/validate-listing-copy.mjs) — zero-dep copy validator
 - [templates/listing-copy.example.json](templates/listing-copy.example.json) — input shape for the script

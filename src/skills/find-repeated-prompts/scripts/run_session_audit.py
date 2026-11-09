@@ -4,8 +4,8 @@
 Privacy-preserving. Never modifies session stores. Writes only under --out.
 
 Usage:
-  python3 scripts/runSessionAudit.py
-  python3 scripts/runSessionAudit.py --out /tmp/session-audit --home "$HOME"
+  python3 scripts/run_session_audit.py
+  python3 scripts/run_session_audit.py --out /tmp/session-audit --home "$HOME"
 """
 
 from __future__ import annotations

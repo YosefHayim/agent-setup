@@ -4,7 +4,7 @@
 # the real-user trend, not the just-shipped change. Requires:
 #   - secret   PSI_API_KEY     (a Google API key with the "Chrome UX Report API" enabled)
 #   - variable PSI_TARGET_URL  (fallback URL for scheduled runs)
-#   - .github/perf/runCrux.mjs (copied from the skill's scripts/)
+#   - .github/perf/run-crux.mjs (copied from the skill's scripts/)
 name: Field check (Core Web Vitals)
 on:
   deployment_status:
@@ -32,6 +32,6 @@ jobs:
           URL="${{ github.event.inputs.url || github.event.deployment_status.target_url || vars.PSI_TARGET_URL }}"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
       - name: CrUX field check (real users)
-        run: node .github/perf/runCrux.mjs "${{ steps.target.outputs.url }}" --form-factor=PHONE
+        run: node .github/perf/run-crux.mjs "${{ steps.target.outputs.url }}" --form-factor=PHONE
         env:
           CRUX_API_KEY: ${{ secrets.PSI_API_KEY }}

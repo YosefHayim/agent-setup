@@ -21,9 +21,9 @@ Turn repeated user requests into evidence-backed skill candidates. The audit is 
 1. Prefer the **one-command pipeline** when this skill is installed with scripts:
 
    ```bash
-   python3 scripts/runSessionAudit.py
+   python3 scripts/run_session_audit.py
    # or with an explicit session home:
-   python3 scripts/runSessionAudit.py --home "$HOME"
+   python3 scripts/run_session_audit.py --home "$HOME"
    ```
 
    Resolve `scripts/run_session_audit.py` from this skill’s install directory (global or project). The script discovers Claude Code (every `~/.claude*` account), Codex, and Grok stores under `$HOME`, writes coverage, prompts, clusters, intent buckets, shards, and `report.md`. It covers all sessions, not one repo, so each run gets a new folder `${XDG_STATE_HOME:-~/.local/state}/agent-setup/runs/global/find-repeated-prompts/<YYYY-MM-DD-HHMM>/`, outside every repo. Never write the audit into a repository `docs/` folder.

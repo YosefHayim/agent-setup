@@ -32,6 +32,8 @@ const workspace = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-hook-settings-root-" });
+  // The installer writes to the canonical root, where macOS turns /var into /private/var.
+  const canonicalRoot = yield* fileSystem.realPath(root);
   const preparedRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-hook-settings-prepared-" });
   const writeFiles = (base: string, files: Readonly<Record<string, string>>) =>
     Effect.forEach(Object.entries(files), ([relativePath, contents]) =>
@@ -56,7 +58,7 @@ const workspace = Effect.gen(function* () {
 
   yield* writeFiles(preparedRoot, packageFiles);
 
-  return { root, preparedRoot, writeFiles, readText, readJson, appendForeignStop };
+  return { root, canonicalRoot, preparedRoot, writeFiles, readText, readJson, appendForeignStop };
 });
 
 const installRequest = (input: { root: string; preparedRoot: string; agentIds: ReadonlyArray<string> }) => ({
@@ -128,9 +130,9 @@ layer(NodeContext.layer)("hook settings", (it) => {
 
   it.scoped("replaces old camelCase hook entries that have no receipt and keeps a foreign Stop entry", () =>
     Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, readJson } = yield* workspace;
+      const { root, canonicalRoot, preparedRoot, writeFiles, readJson } = yield* workspace;
       const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
-      const oldHookCommand = `node "${root}/.claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js"`;
+      const oldHookCommand = `node "${canonicalRoot}/.claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js"`;
       const oldInstalledStop = { hooks: [{ type: "command", command: oldHookCommand }] };
       yield* writeFiles(root, {
         [claudeSettingsPath]: jsonText({ hooks: { Stop: [oldInstalledStop, foreignStop] } }),

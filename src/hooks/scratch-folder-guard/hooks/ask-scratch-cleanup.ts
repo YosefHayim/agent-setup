@@ -56,7 +56,7 @@ const runAskScratchCleanup = (): never => {
   // The command has this file's extension: .js when installed, .ts under tsx in tests.
   const hookFile = fileURLToPath(import.meta.url);
   const hookFolder = path.dirname(hookFile);
-  const commandFile = path.join(hookFolder, "..", "command", `clearScratch${path.extname(hookFile)}`);
+  const commandFile = path.join(hookFolder, "..", "command", `clear-scratch${path.extname(hookFile)}`);
   const decision = decideScratchCleanup({
     alreadyContinuing: hookInput.stop_hook_active === true,
     // Claude Code lists what is still in flight or scheduled; Codex sends neither list.
