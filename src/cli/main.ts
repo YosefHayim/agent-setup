@@ -9,17 +9,17 @@ import { CliConfig, Command, ValidationError } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, ParseResult } from "effect";
 
-import { readPackageVersion } from "../install/packageRoot.js";
-import { catalogCommand } from "./catalogCommand.js";
-import { CliUsageError } from "./cliOptions.js";
-import { configCommand } from "./configCommand.js";
-import { doctorCommand } from "./doctorCommand.js";
-import { installCommand } from "./installCommand.js";
-import { menuCommand } from "./menuCommand.js";
-import * as TerminalUI from "./TerminalUI.js";
-import { uninstallCommand } from "./uninstallCommand.js";
-import { updateCommand } from "./updateCommand.js";
-import { workflowCommand } from "./workflowCommand.js";
+import { readPackageVersion } from "../install/package-root.js";
+import { catalogCommand } from "./catalog-command.js";
+import { CliUsageError } from "./cli-options.js";
+import { configCommand } from "./config-command.js";
+import { doctorCommand } from "./doctor-command.js";
+import { installCommand } from "./install-command.js";
+import { menuCommand } from "./menu-command.js";
+import * as TerminalUI from "./terminal-ui.js";
+import { uninstallCommand } from "./uninstall-command.js";
+import { updateCommand } from "./update-command.js";
+import { workflowCommand } from "./workflow-command.js";
 
 const agentSetup = Command.make("agent-setup").pipe(
   Command.withDescription("Install a personal set of AI coding-agent skills, hooks, and copyable workflows."),

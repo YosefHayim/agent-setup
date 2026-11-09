@@ -11,7 +11,7 @@ An installable unit with a public kebab-case ID, such as `scratch-folder-guard` 
 _Avoid_: "plugin", "extension".
 
 **sourceDirectory**
-The camelCase folder that names a feature's code under `src/skills/` or `src/hooks/`, such as `scratchFolderGuard`; it is not the public ID.
+The kebab-case folder that names a feature's code under `src/skills/` or `src/hooks/`, such as `scratch-folder-guard`; it is not the public ID.
 _Avoid_: "skill folder name" (when used as the public ID).
 
 **skill**
@@ -43,7 +43,7 @@ A pure function that says what should happen next (`decideScratchWrite`, `decide
 _Avoid_: "policy engine", "rule engine".
 
 **catalog**
-The allowlist in `src/catalog/featureCatalog.ts` that declares every feature and what it ships.
+The allowlist in `src/catalog/feature-catalog.ts` that declares every feature and what it ships.
 _Avoid_: "registry", "`FEATURES`" (alone).
 
 **receipt**
@@ -75,15 +75,15 @@ _Avoid_: "rollback", "revert".
 _Avoid_: "diagnostics", "status check".
 
 **setting**
-One `config.json` key defined in `src/config/configSchema.ts`, named by its area word (`contextWarnPercent`); the CLI form is kebab-case (`context-warn-percent`).
+One `config.json` key defined in `src/config/config-schema.ts`, named by its area word (`contextWarnPercent`); the CLI form is kebab-case (`context-warn-percent`).
 _Avoid_: "option", "flag" (those are CLI arguments).
 
 **environment variable**
-An `AGENT_SETUP_<AREA>_<SETTING>` name listed in `src/config/environmentVariables.ts`, such as `AGENT_SETUP_REHOME_STATE_DIR`.
+An `AGENT_SETUP_<AREA>_<SETTING>` name listed in `src/config/environment-variables.ts`, such as `AGENT_SETUP_REHOME_STATE_DIR`.
 _Avoid_: "env key".
 
 **native hook adapter**
-Catalog evidence (`nativeHookAdapterSchema` in `src/catalog/agentCatalog.ts`) that an agent's lifecycle events, config path and compact command were verified.
+Catalog evidence (`nativeHookAdapterSchema` in `src/catalog/agent-catalog.ts`) that an agent's lifecycle events, config path and compact command were verified.
 _Avoid_: "supported" (without evidence).
 
 **scratch-folder-guard**
@@ -142,7 +142,7 @@ _Avoid_: "linter", "prettier".
 _Avoid_: "test/ dir".
 
 **SSOT**
-Single source of truth: `src/config/configSchema.ts` holds the managed-configuration contract, `src/config/environmentVariables.ts` every environment variable, and `src/hooks/lib/hookConfig.ts` the hook projection.
+Single source of truth: `src/config/config-schema.ts` holds the managed-configuration contract, `src/config/environment-variables.ts` every environment variable, and `src/hooks/lib/hook-config.ts` the hook projection.
 _Avoid_: "source of truth".
 
 **agent-voice / free-model-router**

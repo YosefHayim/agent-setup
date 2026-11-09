@@ -25,9 +25,9 @@ Read these before changing code. This file is a routing digest — open the link
 | `src/hooks/<sourceDirectory>/` | Feature-local executable hook code |
 | [`README.md` → Settings](README.md#settings) | Every setting and environment variable (generated) |
 
-Public feature and installed-skill IDs are decoded catalog data and can differ from the authored camelCase directory name.
+Public feature and installed-skill IDs are decoded catalog data and can differ from the authored kebab-case directory name.
 
-Golden paths: mirror `src/skills/githubRepoAbout/` for a copied skill, `src/hooks/scratchFolderGuard/` for dependency-free policy/mechanism separation, and an existing file in `src/cli/` for a command adapter. Reuse the nearest capability seam; do not create a generic layer.
+Golden paths: mirror `src/skills/github-repo-about/` for a copied skill, `src/hooks/scratch-folder-guard/` for dependency-free policy/mechanism separation, and an existing file in `src/cli/` for a command adapter. Reuse the nearest capability seam; do not create a generic layer.
 
 Names are plain English, one word per idea; the approved words live in [`LANGUAGE.md`](LANGUAGE.md).
 
@@ -35,11 +35,11 @@ Names are plain English, one word per idea; the approved words live in [`LANGUAG
 
 Hard rules agents must hold every turn.
 
-- **Check gate** — `pnpm check` = Turborepo running lint (Biome + knip), typecheck, tests, build and the generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/imageToCode/scripts/` is the single sanctioned exception.
+- **Check gate** — `pnpm check` = Turborepo running lint (Biome + knip), typecheck, tests, build and the generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/image-to-code/scripts/` is the single sanctioned exception.
 - **Effect / Schema** — capabilities return Effect; only `src/cli/main.ts` starts the runtime. Runtime, persisted, catalog, CLI, and agent-format data begin as Effect Schema. Application failures use `Schema.TaggedError`. No hand-rolled `isX` / `parseX` pairs for literals and numbers.
 - **Hooks** — installed hooks stay dependency-free plain Node (`node:*`, `src/hooks/lib/**`, own feature code only), **fail-open**. Application code imports hook code only through a feature's `command/` module.
 - **Ownership** — inspect → plan → validate → apply → write receipt last. A receipt is the only deletion authority. Catalog-closed shipping: the feature catalog owns exact shipped paths.
-- **Shape** — capability-owned paths; camelCase authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
+- **Shape** — capability-owned paths; kebab-case authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
 - **Local tooling** — local `src/scripts/dev/` for personal/one-off scripts. All maintained build/check tools live under `src/scripts/`, and product code never imports them.
 - **Git hooks** — there is no pre-commit hook; pre-push runs `pnpm check`. A new worktree needs `pnpm install` before its first push. Hooks report drift and never rewrite or stage files.
 
@@ -56,11 +56,11 @@ pnpm check
 For image-to-code script changes:
 
 ```bash
-pnpm --dir src/skills/imageToCode/scripts typecheck
+pnpm --dir src/skills/image-to-code/scripts typecheck
 ```
 
 ## Issues
 
 - Issues live on GitHub (`YosefHayim/agent-setup`); use the `gh` CLI.
 - Triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
-- Before changing image-to-code, read `src/skills/imageToCode/CONTEXT.md` and `TECH-GLOSSARY.md`.
+- Before changing image-to-code, read `src/skills/image-to-code/CONTEXT.md` and `TECH-GLOSSARY.md`.

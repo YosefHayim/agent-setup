@@ -1,0 +1,24 @@
+{
+  "name": "image-to-code-scripts",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Verification + inspection scripts for the image-to-code skill (render+diff, color sampling, SVG optimize).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "diff": "tsx src/bin/pixel-diff.ts",
+    "inspect": "tsx src/bin/inspect-png.ts",
+    "frames": "tsx src/bin/frames.ts"
+  },
+  "dependencies": {
+    "pixelmatch": "6.0.0",
+    "playwright": "1.61.1",
+    "pngjs": "7.0.0",
+    "svgo": "3.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "tsx": "4.22.4",
+    "typescript": "5.9.3"
+  }
+}

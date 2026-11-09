@@ -1,8 +1,8 @@
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
-import { type AgentDefinition, agentCatalog, detectAgents } from "../catalog/agentCatalog.js";
-import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "../catalog/featureCatalog.js";
+import { type AgentDefinition, agentCatalog, detectAgents } from "../catalog/agent-catalog.js";
+import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "../catalog/feature-catalog.js";
 import {
   type ConfigFileSnapshot,
   type ManagedConfigPlan,
@@ -10,12 +10,12 @@ import {
   managedConfigPath,
   planManagedConfig,
   readConfigFile,
-} from "../config/configFile.js";
-import { defaultConfig } from "../config/configSchema.js";
-import { createAgentWrites } from "./agentFiles.js";
-import { applyPlan } from "./applyPlan.js";
-import { hashBytes } from "./fileBytes.js";
-import { type DecodedSettings, decodeSettings, desiredHookGroups, planSettings } from "./hookSettings.js";
+} from "../config/config-file.js";
+import { defaultConfig } from "../config/config-schema.js";
+import { createAgentWrites } from "./agent-files.js";
+import { applyPlan } from "./apply-plan.js";
+import { hashBytes } from "./file-bytes.js";
+import { type DecodedSettings, decodeSettings, desiredHookGroups, planSettings } from "./hook-settings.js";
 import {
   applicationOwner,
   checkFileChange,
@@ -25,19 +25,19 @@ import {
   previousReceiptFile,
   previousWholeFile,
   readFileSnapshot,
-} from "./hostFiles.js";
-import { receiptPath, settingsPath } from "./installPaths.js";
+} from "./host-files.js";
+import { hooksPath, receiptPath, settingsPath } from "./install-paths.js";
 import {
   InstallError,
   type InstallRequest,
   type InstallSummary,
   installRequestSchema,
   toInstallError,
-} from "./installRequest.js";
+} from "./install-request.js";
 import type { PreviousFileValue } from "./ownership.js";
-import { createHookWrites, readPreparedSkills } from "./packageFiles.js";
+import { createHookWrites, readPreparedSkills } from "./package-files.js";
 import type { FileChange, ReceiptTarget } from "./plan.js";
-import { planInstall } from "./planChanges.js";
+import { planInstall } from "./plan-changes.js";
 import { type Receipt, type ReceiptSnapshot, readReceipt, receiptJsonSchema } from "./receipt.js";
 import { planStaleRestorations } from "./restore.js";
 
@@ -247,6 +247,7 @@ const planHookSettings = (input: {
             agent,
             path,
           }),
+          installedHooksFolder: path.join(input.request.destination.root, hooksPath),
         });
       }),
     );

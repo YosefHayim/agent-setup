@@ -5,7 +5,7 @@
     "includes": [
       "src/**/*.{ts,tsx,js,mjs,json,jsonc}",
       "*.{ts,tsx,js,mjs,json,jsonc}",
-      "!src/skills/makePromoVideo/scripts/assembleCut.mjs"
+      "!src/skills/make-promo-video/scripts/assemble-cut.mjs"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },

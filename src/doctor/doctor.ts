@@ -7,19 +7,19 @@ import {
   agentEvidenceSchema,
   agentIdSchema,
   detectAgents,
-} from "../catalog/agentCatalog.js";
+} from "../catalog/agent-catalog.js";
 import {
   addDependencies,
   type FeatureDefinition,
   featureCatalog,
   featureDefinitionSchema,
   featureIdSchema,
-} from "../catalog/featureCatalog.js";
-import { managedConfigPath, readConfigFile } from "../config/configFile.js";
-import { configSchema } from "../config/configSchema.js";
-import { hostPlatformSchema } from "../config/hostScan.js";
-import { installationDestinationSchema, receiptPath } from "../install/installPaths.js";
-import { preparedPackageSchema } from "../install/installRequest.js";
+} from "../catalog/feature-catalog.js";
+import { managedConfigPath, readConfigFile } from "../config/config-file.js";
+import { configSchema } from "../config/config-schema.js";
+import { hostPlatformSchema } from "../config/host-scan.js";
+import { installationDestinationSchema, receiptPath } from "../install/install-paths.js";
+import { preparedPackageSchema } from "../install/install-request.js";
 import { relativePathSchema } from "../install/ownership.js";
 import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } from "../install/receipt.js";
 
