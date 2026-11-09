@@ -37,7 +37,6 @@ Add a specific skill or hook set. `install` only adds: features that are already
 
 ```bash
 npx agent-setup install write-readme update-agent-docs
-npx agent-setup install duplicate-code-guard
 npx agent-setup install image-to-code
 ```
 
@@ -45,7 +44,7 @@ Keep an existing install and refresh its copied skills and hooks. Named IDs must
 
 ```bash
 agent-setup update
-agent-setup update context-guard
+agent-setup update scratch-folder-guard
 ```
 
 To drop some features, open `agent-setup menu`, pick Update, then Choose features: it starts from the installed set, and the features you untick are removed.
@@ -67,26 +66,16 @@ Inspect or change the managed configuration one setting at a time:
 
 ```bash
 agent-setup config show
-agent-setup config set context-warn-percent 15
-agent-setup config set context-block-percent 22
-agent-setup config set idle-compact-after 1m
+agent-setup config set debug-logs true
 ```
 
 Every setting and `AGENT_SETUP_*` environment variable is listed under [Settings](#settings).
 
-Scaffold the copyable workflow set or scan a workspace for duplicates:
+Scaffold the copyable workflow set:
 
 ```bash
 agent-setup workflow scaffold .
-agent-setup duplicates . --staged
 ```
-
-### Idle compact
-
-Idle compact is off by default (`idle-compact-after off`). On macOS with Ghostty 1.3+, verified native
-hooks for Claude Code, Codex, and Grok bind each session to its exact terminal.
-Override one launched agent without changing persistent config, for example
-`AGENT_SETUP_IDLE_COMPACT_AFTER=30s codex` or `AGENT_SETUP_IDLE_COMPACT_AFTER=off grok`.
 
 ### Status lines
 
@@ -99,14 +88,11 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 
 ## What it installs
 
-`scratch-folder-guard`, `process-kill-guard`, and `git-hook-guard` are the safe defaults. `process-kill-guard` blocks a `pkill` or `killall` whose pattern would also stop a running Claude Code session, the terminal it runs in, or an app the pattern does not name. `git-hook-guard` blocks `--no-verify`, `git commit -n`, `HUSKY=0`, and `core.hooksPath` overrides, and a commit or push from a worktree whose hooks are not installed yet. `scratch-folder-guard` keeps agents from writing into `/tmp`, `/private/tmp`, or the macOS temporary folder, asks the agent at the end of a turn to delete the files its session left in its scratch folder, and clears each ended Claude Code session's scratch folder unless its subagents were still running. The other hooks are opt-in. `context-guard` warns and then blocks edits as a session nears its context cap, and can compact idle sessions. `duplicate-code-guard` blocks duplicate TypeScript functions and type shapes at write time where the agent platform supports it. `session-rehome` moves each ended session into the repo it was about. `disk-cleanup` pushes and removes the finished worktrees a session made or worked in when it ends, pushes the unpushed branches of the repos it named, and once a day clears stale build folders and caches. `autorun` is a macOS-specific convenience driven in-session by `/autorun`. The remaining entries are pure skills with no hooks — no configuration needed, just ask your agent to do the thing (e.g. "convert this PNG to code"). Skills authored by others are bundled too, but credited separately under [Recommended community skills](#recommended-community-skills).
+`scratch-folder-guard`, `process-kill-guard`, and `git-hook-guard` are the safe defaults. `process-kill-guard` blocks a `pkill` or `killall` whose pattern would also stop a running Claude Code session, the terminal it runs in, or an app the pattern does not name. `git-hook-guard` blocks `--no-verify`, `git commit -n`, `HUSKY=0`, and `core.hooksPath` overrides, and a commit or push from a worktree whose hooks are not installed yet. `scratch-folder-guard` keeps agents from writing into `/tmp`, `/private/tmp`, or the macOS temporary folder, asks the agent at the end of a turn to delete the files its session left in its scratch folder, and clears each ended Claude Code session's scratch folder unless its subagents were still running. The other hooks are opt-in. `session-rehome` moves each ended session into the repo it was about. `disk-cleanup` pushes and removes the finished worktrees a session made or worked in when it ends, pushes the unpushed branches of the repos it named, and once a day clears stale build folders and caches. The remaining entries are pure skills with no hooks — no configuration needed, just ask your agent to do the thing (e.g. "convert this PNG to code"). Skills authored by others are bundled too, but credited separately under [Recommended community skills](#recommended-community-skills).
 
 <!-- AUTO:FEATURES:START -->
 | Feature | What it does | Runs on |
 | --- | --- | --- |
-| **context-guard** | Guard long sessions near their context cap and optionally compact idle Claude Code, Codex, or Grok sessions in their exact Ghostty terminal. | 🟢 any OS |
-| **autorun** | Let the agent keep working alone. When the context is almost full and a fresh handoff note exists, it runs /compact and continues the task. macOS + Ghostty only (it types into your terminal). The hook code lives in context-guard. | 🔴 macOS + Ghostty |
-| **duplicate-code-guard** | Block a Write/Edit that pastes a function body or interface/type shape already defined elsewhere in the repo — DRY enforced at the moment of the write. Uses the repo's own TypeScript; blocks by default (tune with `agent-setup config set duplicate-code-mode warn`). Agents without edit hooks can run `agent-setup duplicates` as a pre-commit or CI check. | 🟢 any OS |
 | **active-run-reminder** | When a Claude Code session or subagent starts in a repo with an active run, tell it to read the run's spec first. Reads the active-run.json pointer that the run-tasks-in-parallel skill writes. Does nothing when there is no run. | 🟢 any OS |
 | **scratch-folder-guard** | Block every agent write into system temporary folders (/tmp, /private/tmp, /var/tmp, /dev/shm, $TMPDIR) — files, edits, shell redirects, copies, and mktemp — so logs and scratch files stay in a gitignored repo folder. When a turn ends with files left in the session's scratch folder, asks the agent to delete them once the user's tasks are finished, and deletes each ended Claude Code session's own scratch folder unless its subagents were still running. | 🟢 any OS |
 | **process-kill-guard** | Block pkill, killall, and pgrep-fed kill commands whose pattern would also stop a running Claude Code session, the terminal and shells it runs in, or an app in /Applications the pattern does not name — e.g. `pkill -f cat` matches every "/Applications" path and every session whose settings mention "notifications". The agent is told to kill only the pids it started. | 🟢 any OS |
@@ -183,28 +169,17 @@ agent-setup keeps one `config.json` in its install root: `~/.claude/agent-setup/
 
 | Setting | config.json key | Default | What it does |
 | --- | --- | --- | --- |
-| `context-warn-percent` | `contextWarnPercent` | `18` | Context use, as a whole percent of the model window, that starts the handoff warning (18 means 18%). |
-| `context-block-percent` | `contextBlockPercent` | `20` | Context use, as a whole percent of the model window, that blocks new code edits. |
-| `autorun-default-cycles` | `autorunDefaultCycles` | `10` | Compact cycles /autorun allows when no count is given. |
-| `autorun-max-cycles` | `autorunMaxCycles` | `50` | Hard limit on compact cycles for one autorun, whatever count is given. |
-| `autorun-check-every-seconds` | `autorunCheckEverySeconds` | `5` | Seconds between the autorun watcher's checks. |
-| `autorun-idle-after-seconds` | `autorunIdleAfterSeconds` | `8` | Seconds without transcript activity before autorun treats the turn as idle. |
-| `idle-compact-after` | `idleCompactAfter` | `"off"` | How long an agent session sits idle before agent-setup submits a waiting draft or runs /compact: off, or a time like 30s, 2m, 1h. |
-| `duplicate-code-mode` | `duplicateCodeMode` | `"block"` | What the duplicate-code guard does with a copied function or type shape: block the edit, warn, or off. |
-| `duplicate-code-skip-folders` | `duplicateCodeSkipFolders` | `[]` | Folder names the duplicate-code guard skips, on top of its built-in skips such as node_modules. |
 | `session-rehome-roots` | `sessionRehomeRoots` | `["Desktop/Code","Code","Projects","dev","src","repos"]` | Folders (home-relative or absolute) whose git repos session-rehome may move Claude Code and Codex sessions into. Repos are found one and two levels deep. |
 | `disk-cleanup-roots` | `diskCleanupRoots` | `["Desktop/Code","Code","Projects","dev","src","repos"]` | Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove, and for unpushed branches to push. Repos are found one and two levels deep. |
 | `debug-logs` | `debugLogs` | `false` | Print agent-setup hook errors to stderr. |
 
-Lists (`duplicate-code-skip-folders`) take comma-separated values on the command line.
+Lists (`session-rehome-roots`, `disk-cleanup-roots`) take comma-separated values on the command line.
 
 ### Environment variables
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `AGENT_SETUP_AGENT_ID` | set by agent-setup in hook commands | Which agent ran a hook (claude-code, codex, grok). Install writes AGENT_SETUP_AGENT_ID=<agent> in front of the hook commands that read it: idle compact, session rehome, and the scratch cleanup question. |
-| `AGENT_SETUP_IDLE_COMPACT_AFTER` | unset (idleCompactAfter in config.json applies) | Overrides idleCompactAfter for one agent session: off, or a time like 30s. Set it when starting the agent, e.g. `AGENT_SETUP_IDLE_COMPACT_AFTER=30s codex`. |
-| `AGENT_SETUP_AUTORUN_DRY_RUN` | off | When 1, true, or yes, the autorun watcher logs the keystrokes it would type instead of typing them (safe manual testing). |
+| `AGENT_SETUP_AGENT_ID` | set by agent-setup in hook commands | Which agent ran a hook (claude-code, codex, grok). Install writes AGENT_SETUP_AGENT_ID=<agent> in front of the hook commands that read it: session rehome and the scratch cleanup question. |
 | `AGENT_SETUP_REHOME_STATE_DIR` | ~/.claude/agent-setup/state/session-rehome for a global install, .claude/agent-setup/state/session-rehome for a project install | Folder for session-rehome's ledger of moved, kept, and deleted sessions, its watcher lock, and its sweep stamp. Tests point it at a temporary folder. |
 | `AGENT_SETUP_DISK_CLEANUP_STATE_DIR` | ~/.claude/agent-setup/state/disk-cleanup for a global install, .claude/agent-setup/state/disk-cleanup for a project install | Folder for disk-cleanup's watcher lock, the stamp that limits the cache cleanup to once a day, the list of kept worktrees to look at again, and the log of what each pass did. Tests point it at a temporary folder. |
 | `AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS` | 600000 (10 minutes) | How long disk-cleanup's watcher waits for the ended session to stop looking live before it logs that it gave up. Tests set it to a fraction of a second. |

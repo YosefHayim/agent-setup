@@ -4,11 +4,10 @@ import { Path } from "@effect/platform";
 import { Effect, Either } from "effect";
 
 import type { AgentDefinition } from "../catalog/agentCatalog.js";
-import { featureCatalog } from "../catalog/featureCatalog.js";
 import { instructionPath, planInstructionFile } from "./agentFormats/instructionFile.js";
 import { planInstructionLink } from "./agentFormats/instructionLink.js";
 import { planRuleFiles } from "./agentFormats/ruleFile.js";
-import { planSkillDirectory, renderSkillBytes } from "./agentFormats/skillDirectory.js";
+import { planSkillDirectory } from "./agentFormats/skillDirectory.js";
 import {
   checkFileChange,
   expectedCurrent,
@@ -18,7 +17,7 @@ import {
   readFileSnapshot,
 } from "./hostFiles.js";
 import { InstallError, type InstallRequest, toInstallError } from "./installRequest.js";
-import { installedHookFile, type PreparedSkill } from "./packageFiles.js";
+import { type PreparedSkill } from "./packageFiles.js";
 import type { Receipt } from "./receipt.js";
 
 type AgentWritesRequest = {
@@ -28,7 +27,7 @@ type AgentWritesRequest = {
   previousReceipt: Receipt | undefined;
 };
 
-type FormatWritesRequest = AgentWritesRequest & { agent: AgentDefinition; controlScript: string };
+type FormatWritesRequest = AgentWritesRequest & { agent: AgentDefinition };
 
 type InspectedFile = { path: string; snapshot: FileSnapshot };
 
@@ -66,18 +65,6 @@ const withExpectedCurrent = (
     }),
   );
 
-const controlScriptPath = (root: string, path: Path.Path): Either.Either<string, InstallError> => {
-  // Loop control lives under context-guard (autorunControl), not the skill-only autorun feature.
-  const feature = featureCatalog.find((candidate) => candidate.id === "context-guard");
-  if (feature?.runtime._tag !== "hook") {
-    return Either.left(
-      new InstallError({ issue: "The context-guard catalog feature must declare one runtime entrypoint." }),
-    );
-  }
-
-  return Either.right(path.join(root, installedHookFile(feature.sourceDirectory, "command/autorunControl.js")));
-};
-
 const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
   Effect.gen(function* () {
     if (input.agent.target._tag !== "skillDirectory") {
@@ -91,7 +78,7 @@ const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
         input.preparedSkills.flatMap((skill) =>
           skill.sourceFiles.map((file): [string, Uint8Array] => [
             `${target.path}/${skill.installedSkill.id}/${file.path}`,
-            renderSkillBytes(file.bytes, input.controlScript),
+            file.bytes,
           ]),
         ),
       ),
@@ -99,7 +86,6 @@ const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
     const plan = yield* Either.mapLeft(
       planSkillDirectory({
         agent: input.agent,
-        controlScript: input.controlScript,
         skills: input.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
         previousFiles: files.map(({ path, previous }) => ({ path, previous })),
       }),
@@ -128,7 +114,6 @@ const createRuleFileWrites = (input: FormatWritesRequest) =>
     const plan = yield* Either.mapLeft(
       planRuleFiles({
         agent: input.agent,
-        controlScript: input.controlScript,
         skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
         previousFiles: files.map(({ path, previous }) => ({ path, previous })),
       }),
@@ -174,7 +159,7 @@ const createSharedFileWrite = (input: {
     return [yield* checkFileChange({ ...plan, expectedCurrent: expectedCurrent(snapshot) })];
   });
 
-const createInstructionWrites = (input: AgentWritesRequest & { controlScript: string }) =>
+const createInstructionWrites = (input: AgentWritesRequest) =>
   Effect.gen(function* () {
     if (input.preparedSkills.length === 0) {
       return [];
@@ -196,7 +181,6 @@ const createInstructionWrites = (input: AgentWritesRequest & { controlScript: st
                 .filter((agent) => instructionPath(agent) === filePath)
                 .map((agent) => agent.id),
               skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
-              controlScript: input.controlScript,
             },
             ...files,
           }),
@@ -229,15 +213,13 @@ const createInstructionLinkWrites = (input: AgentWritesRequest) =>
 
 export const createAgentWrites = (input: AgentWritesRequest) =>
   Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const controlScript = yield* controlScriptPath(input.request.destination.root, path);
     const directoryWrites = yield* Effect.forEach(input.selectedAgents, (agent) =>
-      createSkillDirectoryWrites({ ...input, agent, controlScript }),
+      createSkillDirectoryWrites({ ...input, agent }),
     );
     const ruleWrites = yield* Effect.forEach(input.selectedAgents, (agent) =>
-      createRuleFileWrites({ ...input, agent, controlScript }),
+      createRuleFileWrites({ ...input, agent }),
     );
-    const instructionWrites = yield* createInstructionWrites({ ...input, controlScript });
+    const instructionWrites = yield* createInstructionWrites(input);
     const instructionLinkWrites = yield* createInstructionLinkWrites(input);
 
     return [...directoryWrites.flat(), ...ruleWrites.flat(), ...instructionWrites, ...instructionLinkWrites];

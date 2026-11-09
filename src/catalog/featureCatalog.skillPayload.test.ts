@@ -67,7 +67,7 @@ const expectValidSkillFrontmatter = (skillMd: string, expectedName: string): voi
   const { frontmatter } = parseFrontmatter(skillMd);
   expect(frontmatter).not.toBeNull();
   expect(frontmatter?.name).toBe(expectedName);
-  // e.g. "image-to-code", "autorun" — not "ImageToCode"
+  // e.g. "image-to-code", "make-code-readable" — not "ImageToCode"
   expect(frontmatter?.name).toMatch(/^[a-z0-9-]+$/);
   expect((frontmatter?.name || "").length).toBeLessThanOrEqual(64);
   expect(frontmatter?.description).toBeTruthy();
@@ -89,7 +89,6 @@ describe("shipped skills", () => {
 
 // Skills with side effects the user starts by name; the model never runs them on its own.
 const manualOnlySkillIds = [
-  "autorun",
   "benchmark-agents",
   "clean-repo-by-feature",
   "clone-all-repos",

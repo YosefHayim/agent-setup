@@ -27,14 +27,13 @@ const decode = (value: Uint8Array): string => textDecoder.decode(value);
 
 const hash = (value: Uint8Array): string => createHash("sha256").update(value).digest("hex");
 
-const desiredSkill = (markdown = "Alpha uses @@AUTORUN_CONTROL@@.") => ({
+const desiredSkill = (markdown = "Alpha body.") => ({
   installedSkill: makeCodeReadableSkill,
   markdown,
 });
 
 const request = (input?: {
   agentIds?: ReadonlyArray<string>;
-  controlScript?: string;
   currentBytes?: Uint8Array;
   desired?: "present" | "absent";
   path?: string;
@@ -49,7 +48,6 @@ const request = (input?: {
           _tag: "present",
           agentIds: input?.agentIds || ["aider"],
           skills: input?.skills || [desiredSkill()],
-          controlScript: input?.controlScript || "agent-setup",
         },
   currentFile: input?.currentBytes === undefined ? { _tag: "missing" } : { _tag: "file", bytes: input.currentBytes },
   previousFile: input?.previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: input.previousFile },
@@ -81,16 +79,15 @@ const restore = (input?: RequestInput) => {
 };
 
 describe("planInstructionFile", () => {
-  it("renders exact catalog skills in order and substitutes the control script literally", () => {
+  it("renders exact catalog skills in order", () => {
     const operation = write({
-      controlScript: "$&/$`/$'",
       skills: [
-        desiredSkill("---\nname: make-code-readable\n---\nReadable uses @@AUTORUN_CONTROL@@.\n"),
+        desiredSkill("---\nname: make-code-readable\n---\nReadable body.\n"),
         { installedSkill: simplifyCodeSkill, markdown: "---\r\nname: simplify-code\r\n---\r\nV2 body.\r\n" },
       ],
     });
     const expectedContent =
-      "\n## make-code-readable\n\nReadable uses $&/$`/$'.\n\n---\n\n## simplify-code\n\nV2 body.\n";
+      "\n## make-code-readable\n\nReadable body.\n\n---\n\n## simplify-code\n\nV2 body.\n";
     const exactInstructionKind: "instruction" = operation.file.kind._tag;
 
     expectTypeOf(exactInstructionKind).toEqualTypeOf<"instruction">();
@@ -232,11 +229,6 @@ describe("planInstructionFile", () => {
   });
 
   it.each([
-    ["whitespace control script", { ...request(), desired: { ...request().desired, controlScript: "   " } }],
-    [
-      "unresolved control token",
-      { ...request(), desired: { ...request().desired, controlScript: "@@AUTORUN_CONTROL@@/control" } },
-    ],
     ["unknown request property", { ...request(), unexpected: true }],
   ])("rejects %s at the strict request boundary", (_case, input) => {
     expect(rejects(input)).toBe(true);

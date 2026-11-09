@@ -14,7 +14,6 @@ import { catalogCommand } from "./catalogCommand.js";
 import { CliUsageError } from "./cliOptions.js";
 import { configCommand } from "./configCommand.js";
 import { doctorCommand } from "./doctorCommand.js";
-import { duplicatesCommand } from "./duplicatesCommand.js";
 import { installCommand } from "./installCommand.js";
 import { menuCommand } from "./menuCommand.js";
 import * as TerminalUI from "./TerminalUI.js";
@@ -32,7 +31,6 @@ const agentSetup = Command.make("agent-setup").pipe(
     catalogCommand,
     configCommand,
     doctorCommand,
-    duplicatesCommand,
     workflowCommand,
   ]),
 );

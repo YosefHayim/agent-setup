@@ -23,16 +23,15 @@ const installedSkillFor = (featureId: string) => {
   return feature.installedSkill;
 };
 
-const autorunSkill = installedSkillFor("autorun");
+const makeCodeReadableSkill = installedSkillFor("make-code-readable");
 const imageToCodeSkill = installedSkillFor("image-to-code");
 
 const ruleFileRequest = {
   agent: cursor,
-  controlScript: "/workspace/.claude/agent-setup/hooks/contextGuard/command/autorunControl.js",
   skills: [
     {
-      installedSkill: autorunSkill,
-      markdown: "---\nname: autorun\ndescription: Run autonomously.\n---\nStart with @@AUTORUN_CONTROL@@.\n",
+      installedSkill: makeCodeReadableSkill,
+      markdown: "---\nname: make-code-readable\ndescription: Make code readable.\n---\nStart with a plain step.\n",
     },
     {
       installedSkill: imageToCodeSkill,
@@ -40,7 +39,7 @@ const ruleFileRequest = {
     },
   ],
   previousFiles: [
-    { path: ".cursor/rules/autorun.mdc", previous: missingPrevious },
+    { path: ".cursor/rules/make-code-readable.mdc", previous: missingPrevious },
     { path: ".cursor/rules/image-to-code.mdc", previous: priorFile },
   ],
 };
@@ -58,11 +57,11 @@ describe("planRuleFiles", () => {
     const plan = unwrap(planRuleFiles(ruleFileRequest));
 
     expect(plan.writes.map((write) => write.file.path)).toEqual([
-      ".cursor/rules/autorun.mdc",
+      ".cursor/rules/make-code-readable.mdc",
       ".cursor/rules/image-to-code.mdc",
     ]);
     expect(plan.writes.map((write) => textDecoder.decode(write.bytes))).toEqual([
-      "Start with /workspace/.claude/agent-setup/hooks/contextGuard/command/autorunControl.js.\n",
+      "Start with a plain step.\n",
       "Convert a PNG.\n\n---\nThis divider is body content.\n",
     ]);
 
@@ -86,20 +85,19 @@ describe("planRuleFiles", () => {
   it("strips CRLF frontmatter without trimming the markdown body", () => {
     const request = {
       ...ruleFileRequest,
-      controlScript: "$&/control",
       skills: [
         {
-          installedSkill: autorunSkill,
-          markdown: "---\r\nname: autorun\r\n---\r\n\r\n  Run @@AUTORUN_CONTROL@@.\r\n",
+          installedSkill: makeCodeReadableSkill,
+          markdown: "---\r\nname: make-code-readable\r\n---\r\n\r\n  Run the steps.\r\n",
         },
       ],
-      previousFiles: [{ path: ".cursor/rules/autorun.mdc", previous: missingPrevious }],
+      previousFiles: [{ path: ".cursor/rules/make-code-readable.mdc", previous: missingPrevious }],
     };
 
     const plan = unwrap(planRuleFiles(request));
     const write = writeAt(plan, 0);
 
-    expect(textDecoder.decode(write.bytes)).toBe("\r\n  Run $&/control.\r\n");
+    expect(textDecoder.decode(write.bytes)).toBe("\r\n  Run the steps.\r\n");
   });
 
   it.each([
@@ -109,11 +107,11 @@ describe("planRuleFiles", () => {
         ...ruleFileRequest,
         skills: [
           {
-            installedSkill: autorunSkill,
-            markdown: "---\nname: autorun\nNo closing delimiter.\n",
+            installedSkill: makeCodeReadableSkill,
+            markdown: "---\nname: make-code-readable\nNo closing delimiter.\n",
           },
         ],
-        previousFiles: [{ path: ".cursor/rules/autorun.mdc", previous: missingPrevious }],
+        previousFiles: [{ path: ".cursor/rules/make-code-readable.mdc", previous: missingPrevious }],
       },
       issue: "frontmatter",
     },
@@ -123,11 +121,11 @@ describe("planRuleFiles", () => {
         ...ruleFileRequest,
         skills: [
           {
-            installedSkill: autorunSkill,
-            markdown: "---\nname: autorun\n---\n",
+            installedSkill: makeCodeReadableSkill,
+            markdown: "---\nname: make-code-readable\n---\n",
           },
         ],
-        previousFiles: [{ path: ".cursor/rules/autorun.mdc", previous: missingPrevious }],
+        previousFiles: [{ path: ".cursor/rules/make-code-readable.mdc", previous: missingPrevious }],
       },
       issue: "body",
     },
@@ -196,11 +194,3 @@ describe("planRuleFiles", () => {
     expect(String(Option.getOrThrow(Either.getLeft(ruleMerge)))).toContain("unexpected");
   });
 
-  it.each([
-    "   ",
-    "@@AUTORUN_CONTROL@@",
-    "node @@AUTORUN_CONTROL@@ status",
-  ])("rejects a non-concrete control command %j", (controlScript) => {
-    expect(Either.isLeft(planRuleFiles({ ...ruleFileRequest, controlScript }))).toBe(true);
-  });
-});

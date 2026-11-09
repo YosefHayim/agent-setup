@@ -11,6 +11,8 @@ import {
   withSettingValue,
 } from "./configSchema.js";
 
+const DEFAULT_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
+
 const decodeConfig = Schema.decodeUnknownSync(configSchema, { onExcessProperty: "error" });
 
 const settingNamed = (name: string) => {
@@ -24,17 +26,8 @@ const settingNamed = (name: string) => {
 describe("configSchema", () => {
   it("decodes the complete executable defaults", () => {
     expect(decodeConfig({})).toEqual({
-      contextWarnPercent: 18,
-      contextBlockPercent: 20,
-      autorunDefaultCycles: 10,
-      autorunMaxCycles: 50,
-      autorunCheckEverySeconds: 5,
-      autorunIdleAfterSeconds: 8,
-      idleCompactAfter: "off",
-      duplicateCodeMode: "block",
-      duplicateCodeSkipFolders: [],
-      sessionRehomeRoots: ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"],
-      diskCleanupRoots: ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"],
+      sessionRehomeRoots: DEFAULT_ROOT_FOLDERS,
+      diskCleanupRoots: DEFAULT_ROOT_FOLDERS,
       debugLogs: false,
     });
     expect(defaultConfig).toEqual(decodeConfig({}));
@@ -48,19 +41,16 @@ describe("configSchema", () => {
   });
 
   it("derives kebab-case CLI names and value kinds from the schema keys", () => {
-    expect(configSettings.map((setting) => setting.name)).toContain("duplicate-code-skip-folders");
-    expect(settingNamed("context-warn-percent").kind).toBe("number");
+    expect(configSettings.map((setting) => setting.name)).toContain("session-rehome-roots");
     expect(settingNamed("debug-logs").kind).toBe("boolean");
-    expect(settingNamed("duplicate-code-skip-folders").kind).toBe("list");
-    expect(settingNamed("duplicate-code-mode").kind).toBe("text");
-    expect(settingNamed("duplicate-code-mode").choices).toEqual(["block", "warn", "off"]);
-    expect(settingNamed("duplicate-code-mode").optional).toBe(false);
+    expect(settingNamed("session-rehome-roots").kind).toBe("list");
+    expect(settingNamed("disk-cleanup-roots").kind).toBe("list");
   });
 
   it("fills omitted properties but rejects excess properties", () => {
-    expect(decodeConfig({ duplicateCodeMode: "warn" })).toEqual({
+    expect(decodeConfig({ debugLogs: true })).toEqual({
       ...defaultConfig,
-      duplicateCodeMode: "warn",
+      debugLogs: true,
     });
     expect(() => decodeConfig({ unknownProperty: true })).toThrow();
   });
@@ -69,82 +59,14 @@ describe("configSchema", () => {
     expect(() => decodeConfig({ [property]: undefined })).toThrow();
   });
 
-  it("accepts inclusive numeric boundaries", () => {
-    expect(
-      decodeConfig({
-        contextWarnPercent: 1,
-        contextBlockPercent: 99,
-        autorunDefaultCycles: 1,
-        autorunMaxCycles: 1000,
-        autorunCheckEverySeconds: 1,
-        autorunIdleAfterSeconds: 600,
-      }),
-    ).toMatchObject({
-      contextWarnPercent: 1,
-      contextBlockPercent: 99,
-      autorunDefaultCycles: 1,
-      autorunMaxCycles: 1000,
-      autorunCheckEverySeconds: 1,
-      autorunIdleAfterSeconds: 600,
+  it("accepts a list of root folders", () => {
+    expect(decodeConfig({ diskCleanupRoots: ["Work", "Clients"] })).toMatchObject({
+      diskCleanupRoots: ["Work", "Clients"],
     });
   });
 
-  it.each([
-    ["contextWarnPercent below", { contextWarnPercent: 0.99 }],
-    ["contextWarnPercent above", { contextWarnPercent: 95.01, contextBlockPercent: 99 }],
-    ["contextBlockPercent below", { contextWarnPercent: 0.5, contextBlockPercent: 0.9 }],
-    ["contextBlockPercent above", { contextBlockPercent: 99.01 }],
-    ["autorunDefaultCycles below", { autorunDefaultCycles: 0.999 }],
-    ["autorunDefaultCycles above", { autorunDefaultCycles: 1000.001, autorunMaxCycles: 1000 }],
-    ["autorunMaxCycles below", { autorunDefaultCycles: 1, autorunMaxCycles: 0.999 }],
-    ["autorunMaxCycles above", { autorunMaxCycles: 1000.001 }],
-    ["autorunCheckEverySeconds below", { autorunCheckEverySeconds: 0.999 }],
-    ["autorunCheckEverySeconds above", { autorunCheckEverySeconds: 600.001 }],
-    ["autorunIdleAfterSeconds below", { autorunIdleAfterSeconds: 0.999 }],
-    ["autorunIdleAfterSeconds above", { autorunIdleAfterSeconds: 600.001 }],
-  ])("rejects rather than clamps %s", (_case, input) => {
-    expect(() => decodeConfig(input)).toThrow();
-  });
-
-  it("permits fractional counts and seconds", () => {
-    expect(
-      decodeConfig({
-        autorunDefaultCycles: 10.5,
-        autorunMaxCycles: 50.5,
-        autorunCheckEverySeconds: 5.5,
-        autorunIdleAfterSeconds: 8.5,
-      }),
-    ).toMatchObject({
-      autorunDefaultCycles: 10.5,
-      autorunMaxCycles: 50.5,
-      autorunCheckEverySeconds: 5.5,
-      autorunIdleAfterSeconds: 8.5,
-    });
-  });
-
-  it.each([
-    ["contextWarnPercent", { contextWarnPercent: 20, contextBlockPercent: 20 }],
-    ["autorunDefaultCycles", { autorunDefaultCycles: 51, autorunMaxCycles: 50 }],
-  ])("reports a path-aware cross-field issue on %s", (property, settings) => {
-    expect(() => decodeConfig(settings)).toThrow(property);
-  });
-
-  it("trims documented text", () => {
-    expect(decodeConfig({ duplicateCodeMode: " warn " })).toMatchObject({ duplicateCodeMode: "warn" });
-  });
-
-  it("accepts a list of skip folders", () => {
-    expect(decodeConfig({ duplicateCodeSkipFolders: ["templates", "fixtures"] })).toMatchObject({
-      duplicateCodeSkipFolders: ["templates", "fixtures"],
-    });
-  });
-
-  it("rejects an empty skip folder", () => {
-    expect(() => decodeConfig({ duplicateCodeSkipFolders: [""] })).toThrow();
-  });
-
-  it.each([{ duplicateCodeMode: "BLOCK" }])("does not case-fold %o", (settings) => {
-    expect(() => decodeConfig(settings)).toThrow();
+  it("rejects an empty root folder", () => {
+    expect(() => decodeConfig({ diskCleanupRoots: [""] })).toThrow();
   });
 });
 
@@ -154,24 +76,24 @@ describe("setting values from CLI text", () => {
       Effect.flatMap((value) => withSettingValue({ config: defaultConfig, key: settingNamed(name).key, value })),
     );
 
-  it.effect("parses numbers, booleans, and comma lists by the setting's kind", () =>
+  it.effect("parses booleans and comma lists by the setting's kind", () =>
     Effect.gen(function* () {
-      expect((yield* applyText("context-warn-percent", "15")).contextWarnPercent).toBe(15);
       expect((yield* applyText("debug-logs", "true")).debugLogs).toBe(true);
-      expect(
-        (yield* applyText("duplicate-code-skip-folders", "vendor, generated ,, tmp")).duplicateCodeSkipFolders,
-      ).toEqual(["vendor", "generated", "tmp"]);
+      expect((yield* applyText("session-rehome-roots", "vendor, generated ,, tmp")).sessionRehomeRoots).toEqual([
+        "vendor",
+        "generated",
+        "tmp",
+      ]);
     }),
   );
 
   it("reads a setting's schema default", () => {
-    expect(defaultSettingValue("duplicateCodeMode")).toEqual(Option.some("block"));
+    expect(defaultSettingValue("debugLogs")).toEqual(Option.some(false));
   });
 
   it.effect("rejects text the setting cannot hold", () =>
     Effect.gen(function* () {
       expect(yield* Effect.flip(applyText("debug-logs", "sometimes"))).toBeDefined();
-      expect(yield* Effect.flip(applyText("context-warn-percent", "0.5"))).toBeDefined();
     }),
   );
 });
@@ -181,6 +103,6 @@ describe("configJsonSchema", () => {
     const json = Schema.encodeSync(configJsonSchema)(defaultConfig);
 
     expect(JSON.parse(json)).toEqual(defaultConfig);
-    expect(Object.keys(JSON.parse(json))).toHaveLength(12);
+    expect(Object.keys(JSON.parse(json))).toHaveLength(3);
   });
 });

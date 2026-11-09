@@ -31,9 +31,6 @@ export const hostPlatformSchema = Schema.Struct({
   ).annotations({
     description: "Node operating-system identifier used to evaluate feature platform requirements.",
   }),
-  ghosttyAvailable: Schema.Boolean.annotations({
-    description: "Whether Ghostty was observed on this host.",
-  }),
 }).annotations({
   description: "Read-only host observations used by feature diagnostics.",
 });
@@ -72,19 +69,6 @@ const commandAvailable = (commandName: string) =>
     ),
     Effect.catchAll(() => Effect.succeed(false)),
   );
-
-const ghosttyAvailable = Effect.gen(function* () {
-  if (process.env.TERM_PROGRAM?.toLowerCase() === "ghostty") {
-    return true;
-  }
-
-  const fileSystem = yield* FileSystem.FileSystem;
-  if (yield* fileSystem.exists("/Applications/Ghostty.app")) {
-    return true;
-  }
-
-  return yield* commandAvailable("ghostty");
-});
 
 const declaredEvidence = (select: (detection: AgentDefinition["detection"]) => ReadonlyArray<string>) =>
   uniqueSorted(agentCatalog.flatMap((agent) => select(agent.detection)));
@@ -126,7 +110,6 @@ export const scanHost = Effect.gen(function* () {
   const projectRoot = absoluteRoot(process.cwd(), path);
   const platform = yield* Schema.decodeUnknown(hostPlatformSchema, { onExcessProperty: "error" })({
     operatingSystem: process.platform,
-    ghosttyAvailable: yield* ghosttyAvailable,
   }).pipe(
     Effect.mapError((error) => new HostScanError({ issue: `Host platform evidence is invalid: ${String(error)}` })),
   );

@@ -14,7 +14,7 @@ Ask only what the description and exploration left open. Offer concrete options 
 | Questions | Does it ask questions as it goes, or run alone after one approval? | Workflow gates |
 | Edits | Does it change files, or only advise? | Safety, Workflow |
 | Scope | One file, one feature, a whole repo, or many repos? | Workflow |
-| Platform | Any OS, macOS only, or macOS + Ghostty? | catalog `platform` |
+| Platform | Any OS or macOS only? | catalog `platform` |
 | Extra files | Does it need scripts, templates, or reference docs next to `SKILL.md`? | catalog `shippedPaths` |
 | Siblings | Which existing skills does it use or hand off to? | catalog `dependencies`, Workflow |
 | Proof | How will we both know it worked? | Verification |
@@ -36,7 +36,7 @@ Fill this in and show it before writing anything.
 | type | flow (repeated workflow with gates), or omitted (short instruction) |
 | shippedPaths | SKILL.md[, REFERENCE.md, scripts, templates] |
 | dependencies | <catalog ids it needs installed, or none> |
-| platform | any / macos / macos+ghostty |
+| platform | any / macos |
 
 **Description:** Use when you want … It … Say "…", "…", or "…". For …, use <sibling>.
 

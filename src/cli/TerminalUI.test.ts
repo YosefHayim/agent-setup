@@ -48,8 +48,8 @@ describe("TerminalUI", () => {
     expect(
       TerminalUI.formatPlan([
         { label: "Scope", detail: "global" },
-        { label: "Features", detail: "context-guard" },
+        { label: "Features", detail: "scratch-folder-guard" },
       ]),
-    ).toEqual(["1. Scope: global", "2. Features: context-guard"]);
+    ).toEqual(["1. Scope: global", "2. Features: scratch-folder-guard"]);
   });
 });

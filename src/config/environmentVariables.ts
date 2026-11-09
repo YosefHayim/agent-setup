@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-// e.g. "AGENT_SETUP_IDLE_COMPACT_AFTER" — AGENT_SETUP_<AREA>_<SETTING>
+// e.g. "AGENT_SETUP_REHOME_STATE_DIR" — AGENT_SETUP_<AREA>_<SETTING>
 const ENVIRONMENT_VARIABLE_PATTERN = /^AGENT_SETUP_[A-Z]+(?:_[A-Z]+)+$/;
 
 const environmentVariableSchema = Schema.Struct({
@@ -26,19 +26,7 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
     name: "AGENT_SETUP_AGENT_ID",
     defaultValue: "set by agent-setup in hook commands",
     purpose:
-      "Which agent ran a hook (claude-code, codex, grok). Install writes AGENT_SETUP_AGENT_ID=<agent> in front of the hook commands that read it: idle compact, session rehome, and the scratch cleanup question.",
-  },
-  {
-    name: "AGENT_SETUP_IDLE_COMPACT_AFTER",
-    defaultValue: "unset (idleCompactAfter in config.json applies)",
-    purpose:
-      "Overrides idleCompactAfter for one agent session: off, or a time like 30s. Set it when starting the agent, e.g. `AGENT_SETUP_IDLE_COMPACT_AFTER=30s codex`.",
-  },
-  {
-    name: "AGENT_SETUP_AUTORUN_DRY_RUN",
-    defaultValue: "off",
-    purpose:
-      "When 1, true, or yes, the autorun watcher logs the keystrokes it would type instead of typing them (safe manual testing).",
+      "Which agent ran a hook (claude-code, codex, grok). Install writes AGENT_SETUP_AGENT_ID=<agent> in front of the hook commands that read it: session rehome and the scratch cleanup question.",
   },
   {
     name: "AGENT_SETUP_REHOME_STATE_DIR",

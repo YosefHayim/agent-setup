@@ -10,7 +10,6 @@ import {
   wholeFileOwnershipSchema,
 } from "../ownership.js";
 import { writeOperationSchema } from "../plan.js";
-import { controlScriptSchema, controlToken, fillControlScript } from "./skillText.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -114,9 +113,6 @@ const skillDirectoryRequestFieldsSchema = Schema.Struct({
     target: agentDefinitionSchema.fields.target.members[0],
   }).annotations({
     description: "Catalog agent whose skill-directory target receives the desired files.",
-  }),
-  controlScript: controlScriptSchema.annotations({
-    description: "Concrete control command substituted into UTF-8 prepared files.",
   }),
   skills: Schema.Array(preparedSkillSchema).annotations({
     description: "Ordered installed skills with complete prepared source snapshots.",
@@ -233,15 +229,6 @@ const skillDirectoryPlanSchema = Schema.Struct({
 
 export type SkillDirectoryPlan = Schema.Schema.Type<typeof skillDirectoryPlanSchema>;
 
-// Binary files pass through untouched; only UTF-8 text gets the control command filled in.
-export const renderSkillBytes = (bytes: Uint8Array, controlScript: string): Uint8Array => {
-  const text = Either.try(() => textDecoder.decode(bytes));
-
-  return Either.isRight(text) && text.right.includes(controlToken)
-    ? textEncoder.encode(fillControlScript(text.right, controlScript))
-    : bytes;
-};
-
 const createSkillWrite = (
   request: SkillDirectoryRequest,
   file: { destination: string; source: { bytes: Uint8Array } },
@@ -253,7 +240,7 @@ const createSkillWrite = (
     );
   }
 
-  const bytes = renderSkillBytes(file.source.bytes, request.controlScript);
+  const bytes = file.source.bytes;
 
   return Either.right({
     _tag: "write",

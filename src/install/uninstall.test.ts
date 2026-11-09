@@ -8,14 +8,10 @@ import { install } from "./install.js";
 import { uninstall, uninstallRequestSchema } from "./uninstall.js";
 
 const packageFiles = {
-  "hooks/contextGuard/hooks/contextGuard.js": "export {};\n",
-  "hooks/contextGuard/hooks/startAutorunWatcher.js": "export {};\n",
-  "hooks/contextGuard/command/autorunControl.js": "export {};\n",
-  "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
-  "hooks/contextGuard/watchers/autorunWatcher.js": "export {};\n",
-  "hooks/contextGuard/watchers/idleCompactWatcher.js": "export {};\n",
-  "skills/autorun/SKILL.md": "---\nname: autorun\n---\nRun @@AUTORUN_CONTROL@@ when armed.\n",
-  "skills/autorun/agents/openai.yaml": "policy:\n  allow_implicit_invocation: false\n",
+  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
+  "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
+  "skills/makeCodeReadable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
 };
 
 const workspace = Effect.gen(function* () {
@@ -45,10 +41,10 @@ const installRequest = (input: { root: string; preparedRoot: string }) => ({
   destination: { _tag: "project", root: input.root },
   host: { homeRoot: input.root },
   preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: ["autorun"] },
+  features: { _tag: "selected", ids: ["make-code-readable"] },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
-  configuration: { _tag: "selected", config: { ...defaultConfig, duplicateCodeSkipFolders: ["vendor"] } },
+  configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["vendor"] } },
 });
 
 const uninstallRequest = (root: string) => ({
@@ -75,10 +71,8 @@ layer(NodeContext.layer)("uninstall", (it) => {
         ...Object.keys(packageFiles)
           .filter((packagePath) => packagePath.startsWith("hooks/"))
           .map((packagePath) => `.claude/agent-setup/${packagePath}`),
-        ".claude/skills/autorun/SKILL.md",
-        ".claude/skills/autorun/agents/openai.yaml",
-        ".agents/skills/autorun/agents/openai.yaml",
-        ".cursor/rules/autorun.mdc",
+        ".claude/skills/make-code-readable/SKILL.md",
+        ".cursor/rules/make-code-readable.mdc",
       ];
       yield* writeFiles(root, originals);
       yield* install(installRequest({ root, preparedRoot }));
@@ -122,7 +116,7 @@ layer(NodeContext.layer)("uninstall", (it) => {
 
       yield* uninstall(uninstallRequest(root));
 
-      for (const emptied of [".claude/agent-setup", ".claude/skills/autorun", ".agents", ".cursor"]) {
+      for (const emptied of [".claude/agent-setup", ".claude/skills/make-code-readable", ".agents", ".cursor"]) {
         expect(yield* exists(emptied)).toBe(false);
       }
       expect(yield* exists(".claude/skills/user/SKILL.md")).toBe(true);
@@ -144,7 +138,7 @@ layer(NodeContext.layer)("uninstall", (it) => {
   it.scoped("still removes installer-created files when their bytes drifted after install", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, exists } = yield* workspace;
-      const hookFile = ".claude/agent-setup/hooks/contextGuard/hooks/startAutorunWatcher.js";
+      const hookFile = ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js";
       yield* install(installRequest({ root, preparedRoot }));
       yield* writeFiles(root, { [hookFile]: "user changed this\n" });
 

@@ -101,15 +101,15 @@ const ownedFile = (kind: string, file: { owner: object; path: string; ownership:
 const completeReceiptInput = {
   version: "1.0.0",
   scope: "project",
-  features: ["context-guard", "autorun"],
+  features: ["scratch-folder-guard", "make-code-readable"],
   ownedFiles: [
     ownedFile("runtime", {
       owner: applicationOwner,
-      path: ".claude/agent-setup/hooks/contextGuard/hooks/contextGuard.js",
+      path: ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
       ownership: { ...wholeFileOwnership, previous: { _tag: "priorFile", bytes: "AQID" } },
     }),
-    ownedFile("skill", { owner: agentOwner, path: ".claude/skills/autorun/SKILL.md", ownership: wholeFileOwnership }),
-    ownedFile("rule", { owner: agentOwner, path: ".cursor/rules/autorun.mdc", ownership: wholeFileOwnership }),
+    ownedFile("skill", { owner: agentOwner, path: ".claude/skills/make-code-readable/SKILL.md", ownership: wholeFileOwnership }),
+    ownedFile("rule", { owner: agentOwner, path: ".cursor/rules/make-code-readable.mdc", ownership: wholeFileOwnership }),
     ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
     ownedFile("instructionLink", { owner: agentOwner, path: ".continue/config.json", ownership: jsonValuesOwnership }),
     ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),
@@ -146,7 +146,7 @@ const completeReceiptJson = encodeReceiptJson(completeReceipt);
 const receiptWithFiles = (files: ReadonlyArray<unknown>) => ({
   version: "1.0.0",
   scope: "project",
-  features: ["context-guard"],
+  features: ["scratch-folder-guard"],
   ownedFiles: files,
 });
 
@@ -494,9 +494,9 @@ describe("receiptSchema", () => {
   });
 
   it.each([
-    ["duplicate features", ["context-guard", "context-guard"]],
+    ["duplicate features", ["scratch-folder-guard", "scratch-folder-guard"]],
     ["unknown feature", ["unknown-feature"]],
-    ["non-catalog order", ["autorun", "context-guard"]],
+    ["non-catalog order", ["make-code-readable", "scratch-folder-guard"]],
   ])("rejects %s in receipt features", (_case, features) => {
     expect(() => decodeReceipt({ ...receiptWithFiles([]), features })).toThrow(/feature|catalog order/i);
   });
@@ -536,7 +536,7 @@ describe("readReceipt", () => {
 
   it.effect("rejects malformed UTF-8 instead of accepting replacement characters", () =>
     Effect.gen(function* () {
-      const markerIndex = completeReceiptJson.indexOf("contextGuard.js");
+      const markerIndex = completeReceiptJson.indexOf("scratchFolderGuard.js");
       const bytes = new Uint8Array([
         ...textEncoder.encode(completeReceiptJson.slice(0, markerIndex)),
         0xff,

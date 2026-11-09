@@ -1,4 +1,4 @@
-// The one config.json reader and writer behind the `config` and `duplicates` commands.
+// The one config.json reader and writer behind the `config` command.
 
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Either, type Schema } from "effect";

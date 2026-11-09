@@ -1,86 +1,13 @@
 import { Effect, Option, Schema, SchemaAST, type ParseResult as SchemaParseIssue, Struct } from "effect";
 
-import { durationSchema } from "./durationSchema.js";
-
 const withDefault = <Value, Encoded>(schema: Schema.Schema<Value, Encoded>, fallback: Value) =>
   Schema.optionalWith(schema, { default: () => fallback, exact: true });
-
-const numberSetting = (setting: {
-  readonly range: readonly [number, number];
-  readonly outOfRange: string;
-  readonly fallback: number;
-  readonly title: string;
-  readonly description: string;
-}) =>
-  withDefault(
-    Schema.Number.pipe(Schema.between(...setting.range, { message: () => setting.outOfRange })),
-    setting.fallback,
-  ).annotations({ title: setting.title, description: setting.description });
-
-const trimmed = <Value, Encoded extends string>(schema: Schema.Schema<Value, Encoded>) =>
-  Schema.Trim.pipe(Schema.compose(schema));
 
 const CODE_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
 
 // Every setting carries its CLI label (title) and meaning (description) on its property signature,
 // so the CLI, the menu, and the README settings table all read one declaration.
 export const configSchema = Schema.Struct({
-  contextWarnPercent: numberSetting({
-    range: [1, 95],
-    outOfRange: "Context warning percent must be between 1 and 95.",
-    fallback: 18,
-    title: "context warn (%)",
-    description: "Context use, as a whole percent of the model window, that starts the handoff warning (18 means 18%).",
-  }),
-  contextBlockPercent: numberSetting({
-    range: [1, 99],
-    outOfRange: "Context block percent must be between 1 and 99.",
-    fallback: 20,
-    title: "context block (%)",
-    description: "Context use, as a whole percent of the model window, that blocks new code edits.",
-  }),
-  autorunDefaultCycles: numberSetting({
-    range: [1, 1000],
-    outOfRange: "Default autorun cycles must be between 1 and 1000.",
-    fallback: 10,
-    title: "autorun default cycles",
-    description: "Compact cycles /autorun allows when no count is given.",
-  }),
-  autorunMaxCycles: numberSetting({
-    range: [1, 1000],
-    outOfRange: "Maximum autorun cycles must be between 1 and 1000.",
-    fallback: 50,
-    title: "autorun max cycles",
-    description: "Hard limit on compact cycles for one autorun, whatever count is given.",
-  }),
-  autorunCheckEverySeconds: numberSetting({
-    range: [1, 600],
-    outOfRange: "Autorun check interval must be between 1 and 600 seconds.",
-    fallback: 5,
-    title: "autorun check every (seconds)",
-    description: "Seconds between the autorun watcher's checks.",
-  }),
-  autorunIdleAfterSeconds: numberSetting({
-    range: [1, 600],
-    outOfRange: "Autorun idle time must be between 1 and 600 seconds.",
-    fallback: 8,
-    title: "autorun idle after (seconds)",
-    description: "Seconds without transcript activity before autorun treats the turn as idle.",
-  }),
-  idleCompactAfter: withDefault(durationSchema, "off").annotations({
-    title: "idle compact after",
-    description:
-      "How long an agent session sits idle before agent-setup submits a waiting draft or runs /compact: off, or a time like 30s, 2m, 1h.",
-  }),
-  duplicateCodeMode: withDefault(trimmed(Schema.Literal("block", "warn", "off")), "block").annotations({
-    title: "duplicate code mode",
-    description:
-      "What the duplicate-code guard does with a copied function or type shape: block the edit, warn, or off.",
-  }),
-  duplicateCodeSkipFolders: withDefault(Schema.Array(Schema.NonEmptyTrimmedString), []).annotations({
-    title: "duplicate code skip folders",
-    description: "Folder names the duplicate-code guard skips, on top of its built-in skips such as node_modules.",
-  }),
   sessionRehomeRoots: withDefault(Schema.Array(Schema.NonEmptyTrimmedString), CODE_ROOT_FOLDERS).annotations({
     title: "session rehome roots",
     description:
@@ -95,22 +22,7 @@ export const configSchema = Schema.Struct({
     title: "debug logs",
     description: "Print agent-setup hook errors to stderr.",
   }),
-}).pipe(
-  Schema.filter((config) => [
-    config.contextWarnPercent < config.contextBlockPercent
-      ? undefined
-      : {
-          path: ["contextWarnPercent"],
-          message: "Context warning percent must be below contextBlockPercent.",
-        },
-    config.autorunDefaultCycles <= config.autorunMaxCycles
-      ? undefined
-      : {
-          path: ["autorunDefaultCycles"],
-          message: "Default autorun cycles must not exceed autorunMaxCycles.",
-        },
-  ]),
-);
+});
 
 export type Config = Schema.Schema.Type<typeof configSchema>;
 
@@ -159,7 +71,7 @@ const literalChoices = (valueAst: SchemaAST.AST): ReadonlyArray<string> => {
   return members.flatMap((member) => (SchemaAST.isLiteral(member) ? [String(member.literal)] : []));
 };
 
-// e.g. "duplicateCodeSkipFolders" → "duplicate-code-skip-folders"
+// e.g. "debugLogs" → "debug-logs"
 const settingNameFor = (key: ConfigKey): string => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
 type ConfigSetting = {
