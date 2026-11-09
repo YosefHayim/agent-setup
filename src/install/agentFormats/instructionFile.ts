@@ -5,7 +5,7 @@ import { type AgentDefinition, agentCatalog, agentIdSchema } from "../../catalog
 import { installedSkillSchema } from "../../catalog/featureCatalog.js";
 import { bytesEqual, hashBytes } from "../fileBytes.js";
 import { fileKindSchema, fileOwnerSchema, managedBlockOwnershipSchema, relativePathSchema } from "../ownership.js";
-import { controlScriptSchema, fillControlScript, stripFrontmatter, withCompleteFrontmatter } from "./skillText.js";
+import { stripFrontmatter, withCompleteFrontmatter } from "./skillText.js";
 
 const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
@@ -116,11 +116,8 @@ const instructionSkillSchema = Schema.Struct({
 
 type InstructionSkill = Schema.Schema.Type<typeof instructionSkillSchema>;
 
-const renderSkillSection = (skill: InstructionSkill, controlScript: string) => {
-  const documentText = fillControlScript(
-    stripFrontmatter(skill.markdown).replaceAll("\r\n", "\n"),
-    controlScript,
-  ).trim();
+const renderSkillSection = (skill: InstructionSkill) => {
+  const documentText = stripFrontmatter(skill.markdown).replaceAll("\r\n", "\n").trim();
   if (documentText.length === 0) {
     return Either.left(planError(`skill ${skill.installedSkill.id} has no markdown body after frontmatter.`));
   }
@@ -132,8 +129,8 @@ const renderSkillSection = (skill: InstructionSkill, controlScript: string) => {
   return Either.right(`## ${skill.installedSkill.id}\n\n${documentText}`);
 };
 
-const renderManagedSection = (skills: ReadonlyArray<InstructionSkill>, controlScript: string) =>
-  Either.map(Either.all(skills.map((skill) => renderSkillSection(skill, controlScript))), (sections) =>
+const renderManagedSection = (skills: ReadonlyArray<InstructionSkill>) =>
+  Either.map(Either.all(skills.map((skill) => renderSkillSection(skill))), (sections) =>
     textEncoder.encode(`\n${sections.join("\n\n---\n\n")}\n`),
   );
 
@@ -233,9 +230,6 @@ const presentInstructionSchema = Schema.TaggedStruct("present", {
       description: "Ordered catalog skills rendered into the desired managed block.",
     }),
   ),
-  controlScript: controlScriptSchema.annotations({
-    description: "Concrete control command substituted for every @@AUTORUN_CONTROL@@ placeholder.",
-  }),
 });
 
 type PresentInstruction = Schema.Schema.Type<typeof presentInstructionSchema>;
@@ -361,7 +355,7 @@ const planInstructionWrite = (input: {
   desired: PresentInstruction;
   currentBlock: CurrentBlock;
 }): Either.Either<InstructionFilePlan, InstructionFilePlanError> =>
-  Either.flatMap(renderManagedSection(input.desired.skills, input.desired.controlScript), (section) =>
+  Either.flatMap(renderManagedSection(input.desired.skills), (section) =>
     Either.flatMap(
       placeBlock({ ...input, block: concatenateBytes([startMarkerBytes, section, endMarkerBytes]) }),
       ({ bytes, filePreviouslyPresent }) => {

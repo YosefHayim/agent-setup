@@ -27,7 +27,7 @@ Read these before changing code. This file is a routing digest — open the link
 
 Public feature and installed-skill IDs are decoded catalog data and can differ from the authored camelCase directory name.
 
-Golden paths: mirror `src/skills/githubRepoAbout/` for a copied skill, `src/hooks/duplicateCodeGuard/` for dependency-free policy/mechanism separation, and an existing file in `src/cli/` for a command adapter. Reuse the nearest capability seam; do not create a generic layer.
+Golden paths: mirror `src/skills/githubRepoAbout/` for a copied skill, `src/hooks/scratchFolderGuard/` for dependency-free policy/mechanism separation, and an existing file in `src/cli/` for a command adapter. Reuse the nearest capability seam; do not create a generic layer.
 
 Names are plain English, one word per idea; the approved words live in [`LANGUAGE.md`](LANGUAGE.md).
 

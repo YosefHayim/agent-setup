@@ -19,21 +19,21 @@ const expectedMissing = { _tag: "missing" };
 const expectedPresent = { _tag: "file", sha256: oldHash };
 
 const runtimeFile = {
-  path: ".claude/agent-setup/hooks/contextGuard.js",
+  path: ".claude/agent-setup/hooks/scratchFolderGuard.js",
   kind: { _tag: "runtime" },
   owner: applicationOwner,
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: missingPrevious },
 };
 
 const skillFile = {
-  path: ".claude/skills/autorun/SKILL.md",
+  path: ".claude/skills/make-code-readable/SKILL.md",
   kind: { _tag: "skill" },
   owner: agentOwner(["claude-code"]),
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: { _tag: "priorFile", bytes: previousSkillBytes } },
 };
 
 const ruleFileEntry = {
-  path: ".cursor/rules/autorun.mdc",
+  path: ".cursor/rules/make-code-readable.mdc",
   kind: { _tag: "rule" },
   owner: agentOwner(["cursor"]),
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: missingPrevious },
@@ -133,7 +133,7 @@ const receiptTarget = { path: ".claude/agent-setup/receipt.json", kind: { _tag: 
 const desiredReceipt = {
   version: "0.12.0",
   scope: "project",
-  features: ["context-guard", "autorun"],
+  features: ["scratch-folder-guard", "make-code-readable"],
   ownedFiles: desiredFiles,
 };
 
@@ -359,7 +359,7 @@ describe("checkPlan", () => {
       name: "parent and child targets",
       operations: [
         write({ ...managedConfigFile, path: ".claude/agent-setup" }),
-        write({ ...runtimeFile, path: ".claude/agent-setup/hooks/contextGuard.js" }),
+        write({ ...runtimeFile, path: ".claude/agent-setup/hooks/scratchFolderGuard.js" }),
       ],
       message: "conflicts with",
     },
@@ -371,8 +371,8 @@ describe("checkPlan", () => {
   });
 
   it("rejects case-folded target collisions on common macOS and Windows filesystems", () => {
-    const first = { ...runtimeFile, path: ".agent-setup/Hooks/contextGuard.js" };
-    const second = { ...managedConfigFile, path: ".agent-setup/hooks/CONTEXTGUARD.JS" };
+    const first = { ...runtimeFile, path: ".agent-setup/Hooks/scratchFolderGuard.js" };
+    const second = { ...managedConfigFile, path: ".agent-setup/hooks/SCRATCHFOLDERGUARD.JS" };
 
     expect(issues(checkPlan(removalPlan([remove(first), remove(second)])))).toContain(
       '["operations"][1]["file"]["path"]',

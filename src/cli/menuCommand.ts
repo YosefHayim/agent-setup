@@ -2,7 +2,7 @@
 
 import { Command } from "@effect/cli";
 import { Path } from "@effect/platform";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 
 import { detectAgents } from "../catalog/agentCatalog.js";
 import { defaultFeatureIds, featureCatalog } from "../catalog/featureCatalog.js";
@@ -16,7 +16,6 @@ import { update } from "../install/update.js";
 import { copyWorkflows } from "../workflows/copyWorkflows.js";
 import { showFeatureList } from "./catalogCommand.js";
 import { checkBothScopes, showScopeHealth } from "./doctorCommand.js";
-import { checkWorkspaceDuplicates } from "./duplicatesCommand.js";
 import { showInstallation } from "./installCommand.js";
 import { applyIfApproved, pickScope, runConfig } from "./menuSettings.js";
 import * as TerminalUI from "./TerminalUI.js";
@@ -166,43 +165,6 @@ const runWorkflow = Effect.gen(function* () {
   });
 });
 
-const runDuplicates = Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const workspace = yield* TerminalUI.optionalText({
-    message: "Workspace to scan",
-    fallback: path.resolve(process.cwd()),
-  });
-  const mode = yield* TerminalUI.selectOne<"all" | "staged" | "since">({
-    message: "Scan mode",
-    choices: [
-      { title: "Full workspace", value: "all", description: "scan the whole tree" },
-      { title: "Staged only", value: "staged", description: "git-staged source files" },
-      { title: "Since git ref", value: "since", description: "files changed since a ref" },
-    ],
-    initial: "all",
-  });
-  const since = yield* TerminalUI.optionalText({
-    message: "Git ref (e.g. origin/main, HEAD~3)",
-    fallback: "HEAD~1",
-  }).pipe(Effect.when(() => mode === "since"));
-  const targetRoot = path.resolve(workspace);
-  yield* TerminalUI.showPlan({
-    title: "Duplicates scan",
-    steps: [
-      { label: "Action", detail: "find duplicate function bodies and type shapes" },
-      { label: "Workspace", detail: targetRoot },
-      { label: "Mode", detail: Option.match(since, { onNone: () => mode, onSome: (ref) => `since ${ref}` }) },
-    ],
-  });
-  // A read-only scan, so the plan preview needs no approval.
-  yield* checkWorkspaceDuplicates({
-    workspace: targetRoot,
-    staged: mode === "staged",
-    since: Option.getOrUndefined(since),
-    format: "text",
-  });
-});
-
 const screens = {
   install: runInstall,
   update: runUpdate,
@@ -211,7 +173,6 @@ const screens = {
   doctor: checkBothScopes.pipe(Effect.flatMap((scopes) => Effect.forEach(scopes, showScopeHealth))),
   catalog: TerminalUI.intro("catalog").pipe(Effect.zipRight(showFeatureList)),
   workflow: runWorkflow,
-  duplicates: runDuplicates,
 };
 
 export const menuCommand = Command.make("menu", {}, () =>
@@ -227,7 +188,6 @@ export const menuCommand = Command.make("menu", {}, () =>
         { title: "Doctor", value: "doctor", description: "read-only health check" },
         { title: "Catalog", value: "catalog", description: "list feature IDs" },
         { title: "Workflow scaffold", value: "workflow", description: "CI + publish templates" },
-        { title: "Duplicates", value: "duplicates", description: "duplicate-code scan" },
         { title: "Exit", value: "exit", description: "close the menu" },
       ],
       initial: "install",

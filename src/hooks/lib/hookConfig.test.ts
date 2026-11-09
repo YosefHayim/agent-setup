@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { managedConfigPath } from "../../config/configFile.js";
 import { defaultConfig } from "../../config/configSchema.js";
 import { hooksPath } from "../../install/installPaths.js";
-import { decodeHookConfig, resolveIdleCompactSeconds } from "./hookConfig.js";
+import { decodeHookConfig } from "./hookConfig.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const configModuleSource = fileURLToPath(new URL("./hookConfig.ts", import.meta.url));
@@ -27,17 +27,14 @@ describe("hook config resolution", () => {
     const installRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "agent-setup-hook-config-")));
     try {
       // Install copies src/hooks/lib into each feature's lib/ under hooksPath.
-      const installedModule = path.join(installRoot, hooksPath, "contextGuard", "lib", "hookConfig.ts");
+      const installedModule = path.join(installRoot, hooksPath, "scratchFolderGuard", "lib", "hookConfig.ts");
       const installedConfig = path.join(installRoot, managedConfigPath);
       mkdirSync(path.dirname(installedModule), { recursive: true });
       copyFileSync(configModuleSource, installedModule);
       // Installed hooks are .js that Node detects as ES modules. On Node 22, tsx loads a .ts copy outside any
       // package as CommonJS and drops its named exports, so mark the temp tree as ESM.
       writeFileSync(path.join(installRoot, "package.json"), `${JSON.stringify({ type: "module" })}\n`);
-      writeFileSync(
-        installedConfig,
-        `${JSON.stringify({ contextWarnPercent: 31, duplicateCodeMode: "warn", duplicateCodeSkipFolders: ["vendor"] })}\n`,
-      );
+      writeFileSync(installedConfig, `${JSON.stringify({ debugLogs: true, sessionRehomeRoots: ["Work"] })}\n`);
 
       const printConfig = [
         `const { installRoot, readConfig } = await import(${JSON.stringify(pathToFileURL(installedModule).href)});`,
@@ -52,19 +49,16 @@ describe("hook config resolution", () => {
       expect(execution.status).toBe(0);
       const printed = JSON.parse(execution.stdout);
       expect(printed.installRoot).toBe(path.join(installRoot, ".claude", "agent-setup"));
-      expect(printed.config.contextWarnPercent).toBe(31);
-      expect(printed.config.duplicateCodeMode).toBe("warn");
-      expect(printed.config.duplicateCodeSkipFolders).toEqual(["vendor"]);
-      expect(printed.config.contextBlockPercent).toBe(defaultConfig.contextBlockPercent);
+      expect(printed.config.debugLogs).toBe(true);
+      expect(printed.config.sessionRehomeRoots).toEqual(["Work"]);
+      expect(printed.config.diskCleanupRoots).toEqual(defaultConfig.diskCleanupRoots);
     } finally {
       rmSync(installRoot, { recursive: true, force: true });
     }
   });
 
   it("keeps the default for a field whose value has the wrong shape", () => {
-    const config = decodeHookConfig({ contextWarnPercent: "15", duplicateCodeMode: "strict", debugLogs: "yes" });
-    expect(config.contextWarnPercent).toBe(defaultConfig.contextWarnPercent);
-    expect(config.duplicateCodeMode).toBe(defaultConfig.duplicateCodeMode);
+    const config = decodeHookConfig({ debugLogs: "yes" });
     expect(config.debugLogs).toBe(defaultConfig.debugLogs);
   });
 
@@ -75,16 +69,5 @@ describe("hook config resolution", () => {
     });
     expect(config.sessionRehomeRoots).toEqual(["Desktop/Code"]);
     expect(config.diskCleanupRoots).toEqual(["Projects"]);
-  });
-
-  it.each([
-    [{ AGENT_SETUP_IDLE_COMPACT_AFTER: "45s" }, 45],
-    [{ AGENT_SETUP_IDLE_COMPACT_AFTER: "1h" }, 3_600],
-    [{ AGENT_SETUP_IDLE_COMPACT_AFTER: "off" }, null],
-    [{ AGENT_SETUP_IDLE_COMPACT_AFTER: "soon" }, null],
-    [{ AGENT_SETUP_IDLE_COMPACT_AFTER: "2d" }, null],
-    [{}, 120],
-  ])("resolves idle compact seconds from %o over a 2m config value", (env, seconds) => {
-    expect(resolveIdleCompactSeconds({ env, configValue: "2m" })).toBe(seconds);
   });
 });

@@ -11,9 +11,6 @@ import * as TerminalUI from "./TerminalUI.js";
 
 type ScopeHealth = { readonly scope: HealthReport["scope"]; readonly report: HealthReport };
 
-const abbreviatedSessionId = (sessionId: string): string =>
-  sessionId.length > 12 ? `${sessionId.slice(0, 8)}…` : sessionId;
-
 const installationLine = (installation: HealthReport["installation"]): string =>
   installation._tag === "present"
     ? `installation v${installation.version}: ${installation.features.join(", ") || "(no features)"}`
@@ -55,12 +52,6 @@ export const showScopeHealth = ({ scope, report }: ScopeHealth) =>
     yield* TerminalUI.detail(installationLine(report.installation));
     yield* TerminalUI.detail(report.config._tag === "present" ? "config: present" : "config: missing");
     yield* TerminalUI.detail(agentsLine(report.agents));
-    if (report.watchers.length === 0) {
-      yield* TerminalUI.detail("watcher: none running");
-    }
-    for (const watcher of report.watchers) {
-      yield* TerminalUI.detail(`watcher ${abbreviatedSessionId(watcher.sessionId)}: live (pid ${String(watcher.pid)})`);
-    }
     for (const discrepancy of report.discrepancies) {
       yield* TerminalUI.warn(describeDiscrepancy(discrepancy));
     }

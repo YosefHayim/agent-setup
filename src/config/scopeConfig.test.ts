@@ -27,12 +27,12 @@ layer(NodeContext.layer)("readConfigAt", (it) => {
   it.scoped("reads the root's own config.json before the global one", () =>
     Effect.gen(function* () {
       const { homeRoot, projectRoot } = yield* makeRoots;
-      yield* writeConfig({ root: homeRoot, config: { duplicateCodeMode: "warn" } });
-      yield* writeConfig({ root: projectRoot, config: { duplicateCodeSkipFolders: ["vendor"] } });
+      yield* writeConfig({ root: homeRoot, config: { debugLogs: true } });
+      yield* writeConfig({ root: projectRoot, config: { sessionRehomeRoots: ["vendor"] } });
 
       const config = yield* readConfigAt({ root: projectRoot, homeRoot });
 
-      expect(config).toEqual({ ...defaultConfig, duplicateCodeSkipFolders: ["vendor"] });
+      expect(config).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
     }),
   );
 
@@ -42,8 +42,8 @@ layer(NodeContext.layer)("readConfigAt", (it) => {
 
       expect(yield* readConfigAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
 
-      yield* writeConfig({ root: homeRoot, config: { duplicateCodeMode: "warn" } });
-      expect((yield* readConfigAt({ root: projectRoot, homeRoot })).duplicateCodeMode).toBe("warn");
+      yield* writeConfig({ root: homeRoot, config: { debugLogs: true } });
+      expect((yield* readConfigAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);
     }),
   );
 });

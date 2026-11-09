@@ -14,17 +14,18 @@ const textEncoder = new TextEncoder();
 
 const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
-const contextGuardRuntime = {
-  "hooks/contextGuard/hooks/contextGuard.js": "export {};\n",
-  "hooks/contextGuard/hooks/startAutorunWatcher.js": "export {};\n",
-  "hooks/contextGuard/command/autorunControl.js": "export {};\n",
-  "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
-  "hooks/contextGuard/watchers/idleCompactWatcher.js": "export {};\n",
+const scratchFolderRuntime = {
+  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
+  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
+  "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
 };
 
-const autorunSkill = {
-  "skills/autorun/SKILL.md": "---\nname: autorun\n---\nRun @@AUTORUN_CONTROL@@ when armed.\n",
-  "skills/autorun/agents/openai.yaml": "policy:\n  allow_implicit_invocation: false\n",
+const makeCodeReadableSkill = {
+  "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/references/examples.md": "# Examples\n",
+  "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
 };
 
 const sessionRehomeRuntime = {
@@ -65,7 +66,7 @@ const installRequest = (input: { root: string; preparedRoot: string }) => ({
   destination: { _tag: "project", root: input.root },
   host: { homeRoot: input.root },
   preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: ["context-guard"] },
+  features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code"] },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: defaultConfig },
@@ -77,7 +78,7 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("installs one decoded prepared runtime, managed config, settings hook, and ownership receipt", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText, readReceipt } = yield* workspace;
-      yield* writeFiles(preparedRoot, contextGuardRuntime);
+      yield* writeFiles(preparedRoot, scratchFolderRuntime);
       yield* writeFiles(root, {
         ".claude/settings.json":
           '{\n  "theme": "dark",\n  "hooks": {\n    "Stop": [{ "hooks": [{ "type": "command", "command": "user-command" }] }]\n  }\n}\n',
@@ -88,26 +89,28 @@ layer(NodeContext.layer)("install", (it) => {
       expect(installation).toMatchObject({
         _tag: "installed",
         scope: "project",
-        features: ["context-guard"],
+        features: ["scratch-folder-guard"],
         agents: ["claude-code"],
       });
-      expect(installation.platformRequirements).toEqual([{ featureId: "context-guard", platform: "any" }]);
-      expect(yield* readText(".claude/agent-setup/hooks/contextGuard/hooks/contextGuard.js")).toBe("export {};\n");
+      expect(installation.platformRequirements).toEqual([{ featureId: "scratch-folder-guard", platform: "any" }]);
+      expect(yield* readText(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe(
+        "export {};\n",
+      );
       expect(JSON.parse(yield* readText(".claude/agent-setup/config.json"))).toEqual(defaultConfig);
 
       const settings = yield* readText(".claude/settings.json");
       expect(settings).toContain('"theme": "dark"');
       expect(settings).toContain("user-command");
-      expect(settings).toContain("contextGuard/hooks/contextGuard.js");
+      expect(settings).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
 
       const receipt = yield* readReceipt;
-      expect(receipt.features).toEqual(["context-guard"]);
+      expect(receipt.features).toEqual(["scratch-folder-guard"]);
       expect(receipt.ownedFiles.map((file: { path: string }) => file.path)).toEqual([
-        ".claude/agent-setup/hooks/contextGuard/command/autorunControl.js",
-        ".claude/agent-setup/hooks/contextGuard/hooks/contextGuard.js",
-        ".claude/agent-setup/hooks/contextGuard/hooks/recordIdleCompactEvent.js",
-        ".claude/agent-setup/hooks/contextGuard/hooks/startAutorunWatcher.js",
-        ".claude/agent-setup/hooks/contextGuard/watchers/idleCompactWatcher.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/command/clearScratch.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/clearSessionScratch.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/watchers/scratchWatcher.js",
         ".claude/agent-setup/config.json",
         ".claude/settings.json",
       ]);
@@ -117,7 +120,7 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("adds named features to the installed selection and keeps every installed feature", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText, exists, readReceipt } = yield* workspace;
-      yield* writeFiles(preparedRoot, { ...contextGuardRuntime, ...sessionRehomeRuntime });
+      yield* writeFiles(preparedRoot, { ...scratchFolderRuntime, ...sessionRehomeRuntime });
       yield* install(installRequest({ root, preparedRoot }));
 
       const installation = yield* install({
@@ -125,11 +128,11 @@ layer(NodeContext.layer)("install", (it) => {
         features: { _tag: "selected", ids: ["session-rehome"] },
       });
 
-      expect(installation.features).toEqual(["context-guard", "session-rehome"]);
-      expect((yield* readReceipt).features).toEqual(["context-guard", "session-rehome"]);
-      expect(yield* exists(".claude/agent-setup/hooks/contextGuard/hooks/contextGuard.js")).toBe(true);
+      expect(installation.features).toEqual(["scratch-folder-guard", "session-rehome"]);
+      expect((yield* readReceipt).features).toEqual(["scratch-folder-guard", "session-rehome"]);
+      expect(yield* exists(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe(true);
       const commands = hookCommands(yield* readText(".claude/settings.json"));
-      expect(commands.some((command) => command.includes("contextGuard/hooks/contextGuard.js"))).toBe(true);
+      expect(commands.some((command) => command.includes("scratchFolderGuard/hooks/scratchFolderGuard.js"))).toBe(true);
       expect(commands.some((command) => command.includes("sessionRehome/hooks/rehomeEndedSession.js"))).toBe(true);
     }),
   );
@@ -137,7 +140,7 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("installs native hooks for detected Codex and Grok without replacing user hooks", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText, exists } = yield* workspace;
-      yield* writeFiles(preparedRoot, contextGuardRuntime);
+      yield* writeFiles(preparedRoot, sessionRehomeRuntime);
       yield* writeFiles(root, {
         ".codex/hooks.json":
           '{\n  "keep": true,\n  "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "user-stop" }] }] }\n}\n',
@@ -145,26 +148,18 @@ layer(NodeContext.layer)("install", (it) => {
 
       yield* install({
         ...installRequest({ root, preparedRoot }),
+        features: { _tag: "selected", ids: ["session-rehome"] },
         agents: { _tag: "selected", ids: ["codex", "grok"] },
-        configuration: { _tag: "selected", config: { ...defaultConfig, idleCompactAfter: "1m" } },
       });
 
       const codex = yield* readText(".codex/hooks.json");
       expect(codex).toContain('"keep": true');
       expect(codex).toContain("user-stop");
-      // Hooks read config.json themselves, so a command carries at most the agent id.
-      const commands = hookCommands(codex).filter((command) => command !== "user-stop");
-      expect(commands.filter((command) => command.includes("recordIdleCompactEvent.js"))).not.toEqual([]);
-      for (const command of commands) {
-        const expectedPrefix = command.includes("recordIdleCompactEvent.js")
-          ? 'AGENT_SETUP_AGENT_ID=codex node "'
-          : 'node "';
-        expect(command.startsWith(expectedPrefix)).toBe(true);
-      }
+      expect(codex).toContain("AGENT_SETUP_AGENT_ID=codex node ");
 
       const grok = yield* readText(".grok/hooks/agent-setup.json");
       expect(grok).toContain("AGENT_SETUP_AGENT_ID=grok");
-      expect(grok).toContain("recordIdleCompactEvent.js");
+      expect(grok).toContain("rehomeEndedSession.js");
       expect(yield* exists(".claude/settings.json")).toBe(false);
     }),
   );
@@ -193,7 +188,7 @@ layer(NodeContext.layer)("install", (it) => {
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
       const request = installRequest({ root, preparedRoot });
-      yield* writeFiles(preparedRoot, contextGuardRuntime);
+      yield* writeFiles(preparedRoot, scratchFolderRuntime);
 
       yield* install(request);
       const before = yield* readText(".claude/agent-setup/receipt.json");
@@ -207,20 +202,21 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("adopts a receipted skill file an external sync rewrote with the exact desired bytes", () =>
     Effect.gen(function* () {
       const { fileSystem, path, root, preparedRoot, writeFiles, readText, readReceipt } = yield* workspace;
-      const installedSkill = ".claude/skills/autorun/SKILL.md";
+      const installedSkill = ".claude/skills/make-code-readable/SKILL.md";
       const request = {
         ...installRequest({ root, preparedRoot }),
-        features: { _tag: "selected", ids: ["autorun"] },
+        features: { _tag: "selected", ids: ["make-code-readable"] },
         agents: { _tag: "selected", ids: ["claude-code"] },
       };
-      yield* writeFiles(preparedRoot, { ...contextGuardRuntime, ...autorunSkill });
+      yield* writeFiles(preparedRoot, { ...scratchFolderRuntime, ...makeCodeReadableSkill });
       yield* install(request);
 
       // Ship a newer skill, then let an external sync write that same rendered content first.
       yield* writeFiles(preparedRoot, {
-        "skills/autorun/SKILL.md": "---\nname: autorun\n---\nRun @@AUTORUN_CONTROL@@ after every handoff.\n",
+        "skills/make-code-readable/SKILL.md":
+          "---\nname: make-code-readable\n---\nRun the steps after every handoff.\n",
       });
-      const synced = (yield* readText(installedSkill)).replace("when armed.", "after every handoff.");
+      const synced = "---\nname: make-code-readable\n---\nRun the steps after every handoff.\n";
       yield* writeFiles(root, { [installedSkill]: synced });
 
       const installation = yield* install(request);
@@ -238,14 +234,14 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("still refuses a receipted skill file rewritten with content it would not write", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      const installedSkill = ".claude/skills/autorun/SKILL.md";
-      const handWritten = "---\nname: autorun\n---\nMy own hand-written notes.\n";
+      const installedSkill = ".claude/skills/make-code-readable/SKILL.md";
+      const handWritten = "---\nname: make-code-readable\n---\nMy own hand-written notes.\n";
       const request = {
         ...installRequest({ root, preparedRoot }),
-        features: { _tag: "selected", ids: ["autorun"] },
+        features: { _tag: "selected", ids: ["make-code-readable"] },
         agents: { _tag: "selected", ids: ["claude-code"] },
       };
-      yield* writeFiles(preparedRoot, { ...contextGuardRuntime, ...autorunSkill });
+      yield* writeFiles(preparedRoot, { ...scratchFolderRuntime, ...makeCodeReadableSkill });
       yield* install(request);
       yield* writeFiles(root, { [installedSkill]: handWritten });
 
@@ -259,24 +255,22 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("plans all four native agent formats without duplicate instruction destinations", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText, exists, readReceipt } = yield* workspace;
-      yield* writeFiles(preparedRoot, { ...contextGuardRuntime, ...autorunSkill });
+      yield* writeFiles(preparedRoot, { ...scratchFolderRuntime, ...makeCodeReadableSkill });
 
       yield* install({
         ...installRequest({ root, preparedRoot }),
-        features: { _tag: "selected", ids: ["autorun"] },
+        features: { _tag: "selected", ids: ["make-code-readable"] },
         agents: { _tag: "selected", ids: ["continue", "aider", "codex", "cursor", "claude-code"] },
       });
 
-      expect(yield* readText(".claude/skills/autorun/SKILL.md")).toContain("Run");
-      expect(yield* readText(".agents/skills/autorun/SKILL.md")).toContain("Run");
-      expect(yield* exists(".codex/skills/autorun/SKILL.md")).toBe(false);
-      expect(yield* readText(".cursor/rules/autorun.mdc")).toContain(
-        ".claude/agent-setup/hooks/contextGuard/command/autorunControl.js",
-      );
+      expect(yield* readText(".claude/skills/make-code-readable/SKILL.md")).toContain("Run");
+      expect(yield* readText(".agents/skills/make-code-readable/SKILL.md")).toContain("Run");
+      expect(yield* exists(".codex/skills/make-code-readable/SKILL.md")).toBe(false);
+      expect(yield* readText(".cursor/rules/make-code-readable.mdc")).toContain("Run the steps.");
 
       const instructions = yield* readText("AGENTS.md");
       expect(instructions.match(/<!-- agent-setup:skills start -->/g)).toHaveLength(1);
-      expect(instructions).toContain("## autorun");
+      expect(instructions).toContain("## make-code-readable");
       expect(yield* readText(".aider.conf.yml")).toContain("AGENTS.md");
       expect(JSON.parse(yield* readText(".continue/config.json")).rules).toEqual(["AGENTS.md"]);
 
@@ -289,35 +283,20 @@ layer(NodeContext.layer)("install", (it) => {
     }),
   );
 
-  it.scoped("installs a skill control runtime when Claude is not selected", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      yield* writeFiles(preparedRoot, { ...contextGuardRuntime, ...autorunSkill });
-
-      yield* install({
-        ...installRequest({ root, preparedRoot }),
-        features: { _tag: "selected", ids: ["autorun"] },
-        agents: { _tag: "selected", ids: ["cursor"] },
-      });
-
-      expect(yield* readText(".claude/agent-setup/hooks/contextGuard/command/autorunControl.js")).toBe("export {};\n");
-      expect(yield* readText(".cursor/rules/autorun.mdc")).toContain(
-        ".claude/agent-setup/hooks/contextGuard/command/autorunControl.js",
-      );
-    }),
-  );
-
   it.scoped("rejects an extra prepared skill file before writing host files", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, exists } = yield* workspace;
       yield* writeFiles(preparedRoot, {
-        ...contextGuardRuntime,
-        ...autorunSkill,
-        "skills/autorun/EXTRA.md": "not catalog-shipped\n",
+        ...scratchFolderRuntime,
+        ...makeCodeReadableSkill,
+        "skills/make-code-readable/EXTRA.md": "not catalog-shipped\n",
       });
 
       const exit = yield* Effect.exit(
-        install({ ...installRequest({ root, preparedRoot }), features: { _tag: "selected", ids: ["autorun"] } }),
+        install({
+          ...installRequest({ root, preparedRoot }),
+          features: { _tag: "selected", ids: ["make-code-readable"] },
+        }),
       );
 
       expect(exit._tag).toBe("Failure");
@@ -330,7 +309,7 @@ layer(NodeContext.layer)("install", (it) => {
     Effect.gen(function* () {
       const { fileSystem, root: homeRoot, preparedRoot, writeFiles } = yield* workspace;
       const projectRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-install-project-" });
-      const globalConfig = { ...defaultConfig, duplicateCodeSkipFolders: ["vendor"] };
+      const globalConfig = { ...defaultConfig, sessionRehomeRoots: ["vendor"] };
       const writeGlobalConfig = (config: object) =>
         writeFiles(homeRoot, { ".claude/agent-setup/config.json": `${JSON.stringify(config, null, 2)}\n` });
       const request = {
@@ -338,11 +317,11 @@ layer(NodeContext.layer)("install", (it) => {
         host: { homeRoot },
         configuration: { _tag: "automatic" },
       };
-      yield* writeFiles(preparedRoot, contextGuardRuntime);
+      yield* writeFiles(preparedRoot, scratchFolderRuntime);
       yield* writeGlobalConfig(globalConfig);
 
       yield* install(request);
-      yield* writeGlobalConfig({ ...globalConfig, duplicateCodeSkipFolders: ["generated"] });
+      yield* writeGlobalConfig({ ...globalConfig, sessionRehomeRoots: ["generated"] });
       yield* install(request);
 
       expect(JSON.parse(yield* fileSystem.readFileString(`${projectRoot}/.claude/agent-setup/config.json`))).toEqual(
@@ -358,7 +337,7 @@ layer(NodeContext.layer)("install", (it) => {
       const linkedRoot = path.join(container, "linkedRoot");
       yield* fileSystem.makeDirectory(realRoot);
       yield* fileSystem.symlink(realRoot, linkedRoot);
-      yield* writeFiles(preparedRoot, contextGuardRuntime);
+      yield* writeFiles(preparedRoot, scratchFolderRuntime);
 
       yield* install(installRequest({ root: linkedRoot, preparedRoot }));
 
@@ -371,8 +350,8 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("removes installer-created whole files even when they drifted or vanished", () =>
     Effect.gen(function* () {
       const { root, writeFiles } = yield* workspace;
-      const driftedPath = ".claude/agent-setup/hooks/contextGuard/hooks/contextGuard.js";
-      const exactPath = ".claude/agent-setup/hooks/contextGuard/lib/hookConfig.js";
+      const driftedPath = ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js";
+      const exactPath = ".claude/agent-setup/hooks/scratchFolderGuard/lib/hookConfig.js";
       yield* writeFiles(root, { [driftedPath]: "drifted after install\n", [exactPath]: "exact\n" });
       const wholeFile = (filePath: string, hash: string) => ({
         owner: { _tag: "application" as const },
@@ -385,7 +364,7 @@ layer(NodeContext.layer)("install", (it) => {
         root,
         files: [
           wholeFile(driftedPath, sha256("old\n")),
-          wholeFile(".claude/agent-setup/hooks/contextGuard/lib/stateFiles.js", sha256("old\n")),
+          wholeFile(".claude/agent-setup/hooks/scratchFolderGuard/lib/scratchState.js", sha256("old\n")),
           wholeFile(exactPath, sha256("exact\n")),
         ],
       });

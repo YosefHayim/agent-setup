@@ -12,9 +12,6 @@ import {
 } from "./featureCatalog.js";
 
 const expectedFeatureIds = [
-  "context-guard",
-  "autorun",
-  "duplicate-code-guard",
   "active-run-reminder",
   "scratch-folder-guard",
   "process-kill-guard",
@@ -74,9 +71,6 @@ const expectedFeatureIds = [
 ];
 
 const expectedSourceDirectories = [
-  "contextGuard",
-  "autorun",
-  "duplicateCodeGuard",
   "activeRunReminder",
   "scratchFolderGuard",
   "processKillGuard",
@@ -188,19 +182,14 @@ describe("featureCatalog", () => {
 
   it("keeps public IDs, authored directories, and installed IDs distinct", () => {
     expect(featureCatalog.map((feature) => feature.sourceDirectory)).toEqual(expectedSourceDirectories);
-    expect(featureCatalog.find((feature) => feature.id === "autorun")).toMatchObject({
-      sourceDirectory: "autorun",
-      installedSkill: { _tag: "skill", id: "autorun" },
-    });
   });
 
   it("derives defaults, installed skills, and exact shipped allowlists", () => {
     expect(defaultFeatureIds).toEqual(["scratch-folder-guard", "process-kill-guard", "git-hook-guard"]);
-    expect(skillsForFeatures(["context-guard", "duplicate-code-guard"])).toEqual([]);
+    expect(skillsForFeatures(["scratch-folder-guard", "git-hook-guard"])).toEqual([]);
     expect(
       skillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => [skill.id, skill.shippedPaths]),
     ).toEqual([
-      ["autorun", ["SKILL.md", "agents"]],
       [
         "image-to-code",
         [
@@ -284,86 +273,6 @@ describe("featureCatalog", () => {
     );
 
     expect(runtimeFeatures).toEqual([
-      {
-        id: "context-guard",
-        platform: "any",
-        sourceEntrypoint: "hooks/contextGuard.ts",
-        registrations: [
-          {
-            event: "PreToolUse",
-            matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit|NotebookEdit" },
-            entrypoint: { _tag: "featureDefault" },
-            readsAgentId: false,
-          },
-          {
-            event: "PostToolUse",
-            matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit|NotebookEdit" },
-            entrypoint: { _tag: "featureDefault" },
-            readsAgentId: false,
-          },
-          {
-            event: "UserPromptSubmit",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "featureDefault" },
-            readsAgentId: false,
-          },
-          {
-            event: "SessionStart",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/startAutorunWatcher.ts" },
-            readsAgentId: false,
-          },
-          {
-            event: "SessionStart",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-          {
-            event: "UserPromptSubmit",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-          {
-            event: "Stop",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-          {
-            event: "PreCompact",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-          {
-            event: "PostCompact",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-          {
-            event: "SessionEnd",
-            matcher: { _tag: "none" },
-            entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-            readsAgentId: true,
-          },
-        ],
-      },
-      {
-        id: "duplicate-code-guard",
-        platform: "any",
-        sourceEntrypoint: "hooks/duplicateCodeGuard.ts",
-        registrations: [
-          {
-            event: "PreToolUse",
-            matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit" },
-            entrypoint: { _tag: "featureDefault" },
-            readsAgentId: false,
-          },
-        ],
-      },
       {
         id: "active-run-reminder",
         platform: "any",
@@ -490,10 +399,7 @@ describe("featureCatalog", () => {
     ]);
     expect(
       featureCatalog.filter((feature) => feature.platform !== "any").map((feature) => [feature.id, feature.platform]),
-    ).toEqual([
-      ["autorun", "macos+ghostty"],
-      ["make-promo-video", "macos"],
-    ]);
+    ).toEqual([["make-promo-video", "macos"]]);
   });
 
   it("finds features with Option", () => {
@@ -507,7 +413,6 @@ describe("featureCatalog", () => {
         .filter((feature) => feature.dependencies.length > 0)
         .map((feature) => [feature.id, feature.dependencies]),
     ).toEqual([
-      ["autorun", ["context-guard"]],
       ["question-my-plan", ["code-style"]],
       ["make-promo-video", ["plan-page"]],
       ["finish-and-push", ["organize-commits"]],
@@ -537,9 +442,7 @@ describe("featureCatalog", () => {
       ["clean-repo-by-feature", ["run-tasks-in-parallel", "finish-and-push", "organize-commits"]],
       ["finish-old-sessions", ["finish-and-push", "find-repeated-prompts"]],
     ]);
-    expect(Either.getOrThrowWith(addDependencies(["make-promo-video", "autorun", "context-guard"]), String)).toEqual([
-      "context-guard",
-      "autorun",
+    expect(Either.getOrThrowWith(addDependencies(["make-promo-video"]), String)).toEqual([
       "plan-page",
       "make-promo-video",
     ]);

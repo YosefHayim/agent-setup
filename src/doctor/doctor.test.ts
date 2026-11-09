@@ -11,7 +11,7 @@ const noEvidence = { homePaths: [], absolutePaths: [], commands: [] };
 const validRequest = {
   destination: { _tag: "project", root: "/workspace" },
   preparedPackage: { root: "/package/dist", version: "1.0.0" },
-  platform: { operatingSystem: "darwin", ghosttyAvailable: true },
+  platform: { operatingSystem: "darwin" },
   agentEvidence: noEvidence,
 };
 
@@ -65,7 +65,7 @@ layer(NodeContext.layer)("doctor", (it) => {
   it("strictly rejects an unknown host platform", () => {
     const decoded = Schema.decodeUnknownEither(healthRequestSchema, { onExcessProperty: "error" })({
       ...validRequest,
-      platform: { operatingSystem: "temple-os", ghosttyAvailable: false },
+      platform: { operatingSystem: "temple-os" },
     });
 
     expect(decoded._tag).toBe("Left");
@@ -82,7 +82,7 @@ layer(NodeContext.layer)("doctor", (it) => {
           receipt: {
             version: "0.9.0",
             scope: "global",
-            features: ["context-guard", "autorun", "make-code-readable"],
+            features: ["scratch-folder-guard", "make-code-readable", "make-promo-video"],
             ownedFiles: [
               {
                 owner: { _tag: "agent", agentIds: ["codex"] },
@@ -99,15 +99,18 @@ layer(NodeContext.layer)("doctor", (it) => {
             ],
           },
         });
-        const preparedContextGuardPath = path.join(workspace.preparedRoot, "hooks/contextGuard/hooks/contextGuard.js");
-        yield* fileSystem.makeDirectory(path.dirname(preparedContextGuardPath), { recursive: true });
-        yield* fileSystem.writeFileString(preparedContextGuardPath, "export {};\n");
+        const preparedScratchGuardPath = path.join(
+          workspace.preparedRoot,
+          "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(preparedScratchGuardPath), { recursive: true });
+        yield* fileSystem.writeFileString(preparedScratchGuardPath, "export {};\n");
         const configBefore = yield* fileSystem.readFile(workspace.configPath);
         const receiptBefore = yield* fileSystem.readFile(workspace.receiptPath);
 
         const report = yield* checkHealth(
           workspace.requestFor({
-            platform: { operatingSystem: "linux", ghosttyAvailable: false },
+            platform: { operatingSystem: "linux" },
             agentEvidence: { ...noEvidence, homePaths: [".cursor"] },
           }),
         );
@@ -115,29 +118,29 @@ layer(NodeContext.layer)("doctor", (it) => {
         expect(report.installation).toEqual({
           _tag: "present",
           version: "0.9.0",
-          features: ["context-guard", "autorun", "make-code-readable"],
+          features: ["scratch-folder-guard", "make-code-readable", "make-promo-video"],
         });
         expect(report.config).toEqual({ _tag: "present", config: defaultConfig });
         expect(report.features).toEqual([
           {
-            id: "context-guard",
-            title: "Context guard",
+            id: "scratch-folder-guard",
+            title: "Scratch folder guard",
             platform: "any",
             platformAvailable: true,
-            preparedRuntime: { _tag: "present", path: "hooks/contextGuard/hooks/contextGuard.js" },
-          },
-          {
-            id: "autorun",
-            title: "Autorun",
-            platform: "macos+ghostty",
-            platformAvailable: false,
-            preparedRuntime: { _tag: "notRequired" },
+            preparedRuntime: { _tag: "present", path: "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js" },
           },
           {
             id: "make-code-readable",
             title: "Make code readable",
             platform: "any",
             platformAvailable: true,
+            preparedRuntime: { _tag: "notRequired" },
+          },
+          {
+            id: "make-promo-video",
+            title: "Make promo video",
+            platform: "macos",
+            platformAvailable: false,
             preparedRuntime: { _tag: "notRequired" },
           },
         ]);
@@ -152,7 +155,8 @@ layer(NodeContext.layer)("doctor", (it) => {
         expect(report.discrepancies).toEqual([
           { _tag: "receiptScopeMismatch", requestedScope: "project", receiptScope: "global" },
           { _tag: "packageVersionMismatch", installedVersion: "0.9.0", preparedVersion: "1.0.0" },
-          { _tag: "unsupportedFeaturePlatform", featureId: "autorun", platform: "macos+ghostty" },
+          { _tag: "missingFeatureDependency", featureId: "plan-page" },
+          { _tag: "unsupportedFeaturePlatform", featureId: "make-promo-video", platform: "macos" },
           { _tag: "detectedAgentNotManaged", agentId: "cursor" },
           { _tag: "managedAgentNotDetected", agentId: "codex" },
         ]);
@@ -196,7 +200,6 @@ layer(NodeContext.layer)("doctor", (it) => {
 
       expect(report.config).toEqual({ _tag: "missing" });
       expect(report.discrepancies).toEqual([{ _tag: "missingManagedConfig" }]);
-      expect(report.watchers).toEqual([]);
       expect(yield* fileSystem.exists(workspace.configPath)).toBe(false);
     }),
   );
@@ -219,26 +222,6 @@ layer(NodeContext.layer)("doctor", (it) => {
 
       expect(report.discrepancies).toEqual([{ _tag: "missingFeatureDependency", featureId: "active-run-reminder" }]);
       expect([...(yield* fileSystem.readFile(workspace.receiptPath))]).toEqual([...receiptBefore]);
-    }),
-  );
-
-  it.scoped("lists live autorun watchers from the install root's state folder in either scope", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const workspace = yield* makeWorkspace({
-        config: true,
-        receipt: { version: "1.0.0", scope: "project", features: ["context-guard", "autorun"], ownedFiles: [] },
-      });
-      const autorunStateDir = path.join(workspace.root, ".claude/agent-setup/state/autorun");
-      yield* fileSystem.makeDirectory(autorunStateDir, { recursive: true });
-      // This process's pid passes the live check without spawning a fake watcher.
-      yield* fileSystem.writeFileString(path.join(autorunStateDir, "sess-doctor-watcher.pid"), `${process.pid}\n`);
-      yield* fileSystem.writeFileString(path.join(autorunStateDir, "sess-dead.pid"), "0\n");
-
-      const report = yield* checkHealth(workspace.requestFor());
-
-      expect(report.watchers).toEqual([{ sessionId: "sess-doctor-watcher", pid: process.pid }]);
     }),
   );
 

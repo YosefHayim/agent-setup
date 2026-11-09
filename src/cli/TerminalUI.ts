@@ -103,7 +103,7 @@ export const optionalText = (input: { message: string; fallback: string }) =>
 export const formatPlan = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string> =>
   steps.map((planStep, index) => `${String(index + 1)}. ${planStep.label}: ${planStep.detail}`);
 
-export const showPlan = (input: { readonly title: string; readonly steps: ReadonlyArray<PlanStep> }) =>
+const showPlan = (input: { readonly title: string; readonly steps: ReadonlyArray<PlanStep> }) =>
   note(formatPlan(input.steps).join("\n"), input.title);
 
 /** Show the numbered plan and ask before applying it; a non-TTY run answers `initialValue` (default no). */

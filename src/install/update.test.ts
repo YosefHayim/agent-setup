@@ -10,12 +10,13 @@ import { install } from "./install.js";
 import { update } from "./update.js";
 
 const packageFiles = {
-  "hooks/contextGuard/hooks/contextGuard.js": "export {};\n",
-  "hooks/contextGuard/hooks/startAutorunWatcher.js": "export {};\n",
-  "hooks/contextGuard/command/autorunControl.js": "export {};\n",
-  "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
-  "skills/autorun/SKILL.md": "---\nname: autorun\n---\nRun @@AUTORUN_CONTROL@@ when armed.\n",
-  "skills/autorun/agents/openai.yaml": "policy:\n  allow_implicit_invocation: false\n",
+  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
+  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
+  "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/references/examples.md": "# Examples\n",
+  "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
   "hooks/activeRunReminder/hooks/activeRunReminder.js": "export {};\n",
   "skills/organize-commits/SKILL.md": "---\nname: organize-commits\n---\nOrganize commits.\n",
   "skills/organize-commits/REFERENCE.md": "# Reference\n",
@@ -84,16 +85,17 @@ layer(NodeContext.layer)("update", (it) => {
         "AGENTS.md": "User instructions.\n",
         ".claude/settings.json": '{\n  "theme": "dark"\n}\n',
       });
-      yield* install({ ...request({ root, preparedRoot, features: ["autorun"] }), configuration: selectedDefaults });
+      yield* install({
+        ...request({ root, preparedRoot, features: ["make-code-readable"] }),
+        configuration: selectedDefaults,
+      });
 
-      const updateExecution = yield* update(request({ root, preparedRoot, features: ["context-guard"] }));
+      const updateExecution = yield* update(request({ root, preparedRoot, features: ["scratch-folder-guard"] }));
 
       expect(updateExecution._tag).toBe("updated");
       for (const removed of [
-        ".claude/skills/autorun/SKILL.md",
-        ".claude/skills/autorun/agents/openai.yaml",
-        ".agents/skills/autorun/agents/openai.yaml",
-        ".cursor/rules/autorun.mdc",
+        ".claude/skills/make-code-readable/SKILL.md",
+        ".cursor/rules/make-code-readable.mdc",
         ".aider.conf.yml",
         ".continue/config.json",
       ]) {
@@ -101,56 +103,68 @@ layer(NodeContext.layer)("update", (it) => {
       }
       expect(yield* readText("AGENTS.md")).toBe("User instructions.\n");
       expect(yield* readText(".claude/settings.json")).toContain('"theme": "dark"');
-      expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
+      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
 
       const receipt = JSON.parse(yield* readText(".claude/agent-setup/receipt.json"));
-      expect(receipt.features).toEqual(["context-guard"]);
-      // context-guard's own autorunControl.js stays; only the autorun skill's files must go.
-      const autorunSkillFile = /(?:^|\/)autorun(?:\/|\.)/;
-      expect(receipt.ownedFiles.some((file: { path: string }) => autorunSkillFile.test(file.path))).toBe(false);
+      expect(receipt.features).toEqual(["scratch-folder-guard"]);
+      // The make-code-readable skill files are removed with the feature, so none may remain in the receipt.
+      const makeCodeReadableSkillFile = /(?:^|\/)make-code-readable(?:\/|\.)/;
+      expect(receipt.ownedFiles.some((file: { path: string }) => makeCodeReadableSkillFile.test(file.path))).toBe(
+        false,
+      );
     }),
   );
 
   it.scoped("refreshes named installed features and keeps the rest of the receipt selection", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, readText, exists } = yield* workspace;
-      const baseRequest = request({ root, preparedRoot, features: ["autorun"] });
+      const baseRequest = request({ root, preparedRoot, features: ["make-code-readable", "scratch-folder-guard"] });
       yield* install({ ...baseRequest, configuration: selectedDefaults });
 
-      const updateSummary = yield* update({ ...baseRequest, features: { _tag: "refresh", ids: ["context-guard"] } });
+      const updateSummary = yield* update({
+        ...baseRequest,
+        features: { _tag: "refresh", ids: ["scratch-folder-guard"] },
+      });
 
-      expect(updateSummary.features).toEqual(["context-guard", "autorun"]);
+      expect(updateSummary.features).toEqual(["scratch-folder-guard", "make-code-readable"]);
       expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual([
-        "context-guard",
-        "autorun",
+        "scratch-folder-guard",
+        "make-code-readable",
       ]);
-      expect(yield* exists(".claude/skills/autorun/SKILL.md")).toBe(true);
+      expect(yield* exists(".claude/skills/make-code-readable/SKILL.md")).toBe(true);
     }),
   );
 
   it.scoped("refuses to refresh a feature that is not installed and changes nothing", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, readText, exists } = yield* workspace;
-      const baseRequest = request({ root, preparedRoot, features: ["context-guard"] });
+      const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* install({ ...baseRequest, configuration: selectedDefaults });
       const originalReceipt = yield* readText(".claude/agent-setup/receipt.json");
 
-      const error = yield* Effect.flip(update({ ...baseRequest, features: { _tag: "refresh", ids: ["autorun"] } }));
+      const error = yield* Effect.flip(
+        update({ ...baseRequest, features: { _tag: "refresh", ids: ["make-code-readable"] } }),
+      );
 
-      expect(error.message).toContain("Feature autorun is not installed in this scope; use install to add it.");
+      expect(error.message).toContain(
+        "Feature make-code-readable is not installed in this scope; use install to add it.",
+      );
       expect(yield* readText(".claude/agent-setup/receipt.json")).toBe(originalReceipt);
-      expect(yield* exists(".claude/skills/autorun/SKILL.md")).toBe(false);
+      expect(yield* exists(".claude/skills/make-code-readable/SKILL.md")).toBe(false);
     }),
   );
 
   it.scoped("refuses an update after bytes inside a receipted instruction block change", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      yield* install({ ...request({ root, preparedRoot, features: ["autorun"] }), configuration: selectedDefaults });
+      yield* install({
+        ...request({ root, preparedRoot, features: ["make-code-readable"] }),
+        configuration: selectedDefaults,
+      });
       const originalReceipt = yield* readText(".claude/agent-setup/receipt.json");
       yield* writeFiles(root, { "AGENTS.md": (yield* readText("AGENTS.md")).replace("Run", "Changed") });
 
-      const exit = yield* Effect.exit(update(request({ root, preparedRoot, features: ["context-guard"] })));
+      const exit = yield* Effect.exit(update(request({ root, preparedRoot, features: ["scratch-folder-guard"] })));
 
       expect(exit._tag).toBe("Failure");
       expect(yield* readText(".claude/agent-setup/receipt.json")).toBe(originalReceipt);
@@ -167,7 +181,7 @@ layer(NodeContext.layer)("update", (it) => {
   ])("%s", ([, originalSettings]) =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      const baseRequest = request({ root, preparedRoot, features: ["context-guard"] });
+      const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* writeFiles(root, { ".claude/settings.json": originalSettings });
       yield* install({ ...baseRequest, configuration: selectedDefaults });
 
@@ -181,12 +195,12 @@ layer(NodeContext.layer)("update", (it) => {
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
       const originalSettings = '{\r\n\t"env": { "keep":"yes" }\r\n}\r\n';
-      const baseRequest = request({ root, preparedRoot, features: ["context-guard"] });
+      const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* writeFiles(root, { ".claude/settings.json": originalSettings });
       yield* install({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["claude-code"] } });
-      expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
+      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       expect(yield* readText(".claude/settings.json")).toBe(originalSettings);
@@ -197,14 +211,14 @@ layer(NodeContext.layer)("update", (it) => {
     Effect.gen(function* () {
       const { fileSystem, path, root, preparedRoot, writeFiles, readText } = yield* workspace;
       const configPath = ".claude/agent-setup/config.json";
-      const baseRequest = request({ root, preparedRoot, features: ["context-guard"] });
+      const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* install({
         ...baseRequest,
-        configuration: { _tag: "selected", config: { ...defaultConfig, duplicateCodeSkipFolders: ["fixtures"] } },
+        configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["fixtures"] } },
       });
       // Neither decodable nor the receipted bytes: both guards that used to block a reset.
       yield* writeFiles(root, {
-        [configPath]: '{ "duplicateCodeSkipFolders": ["fixtures"], "unknownSetting": true,\n',
+        [configPath]: '{ "sessionRehomeRoots": ["fixtures"], "unknownSetting": true,\n',
       });
 
       const refused = yield* Effect.exit(update({ ...baseRequest, features: { _tag: "preserve" } }));

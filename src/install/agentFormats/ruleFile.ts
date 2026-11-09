@@ -10,7 +10,7 @@ import {
   wholeFileOwnershipSchema,
 } from "../ownership.js";
 import { writeOperationSchema } from "../plan.js";
-import { controlScriptSchema, fillControlScript, stripFrontmatter, withCompleteFrontmatter } from "./skillText.js";
+import { stripFrontmatter, withCompleteFrontmatter } from "./skillText.js";
 
 const textEncoder = new TextEncoder();
 
@@ -55,9 +55,6 @@ const previousRuleFileSchema = Schema.Struct({
 const ruleFileRequestFieldsSchema = Schema.Struct({
   agent: ruleFileAgentSchema.annotations({
     description: "Decoded agent whose target selects the native rule-file format.",
-  }),
-  controlScript: controlScriptSchema.annotations({
-    description: "Exact installed control-program path substituted for every @@AUTORUN_CONTROL@@ placeholder.",
   }),
   skills: Schema.Array(ruleFileSkillSchema).pipe(
     Schema.filter((skills) => skills.length === new Set(skills.map((skill) => skill.installedSkill.id)).size, {
@@ -132,7 +129,7 @@ const createRuleWrite = (
     return Either.left(new RuleFilePlanError({ issue: `Missing previous-file state for desired rule file ${path}.` }));
   }
 
-  const bytes = textEncoder.encode(fillControlScript(stripFrontmatter(skill.markdown), request.controlScript));
+  const bytes = textEncoder.encode(stripFrontmatter(skill.markdown));
 
   return Either.right({
     _tag: "write",

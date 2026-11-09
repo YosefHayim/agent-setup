@@ -1,4 +1,4 @@
-// Agent transcripts hold one JSON object per line; context-guard, scratch-folder-guard, and session-rehome decode
+// Agent transcripts hold one JSON object per line; scratch-folder-guard and session-rehome decode
 // them here.
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";

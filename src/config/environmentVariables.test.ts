@@ -9,7 +9,7 @@ import { environmentVariables } from "./environmentVariables.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const LIST_FILES = new Set(["src/config/environmentVariables.ts", "src/config/environmentVariables.test.ts"]);
-// e.g. "AGENT_SETUP_IDLE_COMPACT_AFTER" inside TypeScript, Python, shell, or their docs
+// e.g. "AGENT_SETUP_REHOME_STATE_DIR" inside TypeScript, Python, shell, or their docs
 const ENVIRONMENT_VARIABLE_NAME = /AGENT_SETUP_[A-Z_]+/g;
 
 const namesBySourceFile = (): ReadonlyMap<string, ReadonlySet<string>> =>

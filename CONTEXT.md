@@ -41,11 +41,9 @@ A feature is either payload or hook code, never both: `src/skills/` holds only w
 - Hooks must be **fail-open** — any internal error allows the tool through.
 - Ownership is receipt-based: install/update/uninstall change only files the receipt owns.
 - Managed config lives at `.claude/agent-setup/config.json` and is schema-owned. Installed hooks read that same file.
-- Hook state lives under `.claude/agent-setup/state/` (`autorun/`, `context-guard/`, `context-guard-off`, `idle-compact/`, `session-rehome/`, `disk-cleanup/`); the Claude Code status line caches under `state/statusline/`.
-- Hook background processes are **watchers** (the autorun watcher, the idle compact watcher, the rehome watcher) and live in a feature's `watchers/` folder.
-- Idle compact is off by default, requires macOS + Ghostty 1.3+, and targets a stable terminal ID claimed by the session itself.
-- An `AGENT_SETUP_IDLE_COMPACT_AFTER` value set when starting an agent wins over the persistent `idleCompactAfter` config for that session.
-- Every setting and environment variable is listed in the Settings section of `README.md`, generated from `src/config/configSchema.ts` and `src/config/environmentVariables.ts`. Environment variables are named `AGENT_SETUP_<AREA>_<SETTING>`, config keys start with their area word (`context`, `autorun`, `idleCompact`, `duplicateCode`, `sessionRehome`, `diskCleanup`, `debug`), and a test fails when an `AGENT_SETUP_*` name in `src/` is missing from the list.
+- Hook state lives under `.claude/agent-setup/state/` (`session-rehome/`, `disk-cleanup/`); the Claude Code status line caches under `state/statusline/`.
+- Hook background processes are **watchers** (the rehome watcher, the disk-cleanup watcher, the scratch watcher) and live in a feature's `watchers/` folder.
+- Every setting and environment variable is listed in the Settings section of `README.md`, generated from `src/config/configSchema.ts` and `src/config/environmentVariables.ts`. Environment variables are named `AGENT_SETUP_<AREA>_<SETTING>`, config keys start with their area word (`sessionRehome`, `diskCleanup`, `debug`), and a test fails when an `AGENT_SETUP_*` name in `src/` is missing from the list.
 - Authored skill directories use **camelCase**; public feature IDs and installed skill IDs remain **kebab-case** data.
 - One strict style bar across maintained TypeScript, enforced by the personal rules in `~/.claude/rules/`. Biome and knip gate through `pnpm check`, including `src/hooks/`; portable skill scripts additionally answer to their shipped harnesses.
 - Root `AGENTS.md` is the authoritative contract for coding agents and routes each subject to its delegated SSOT.

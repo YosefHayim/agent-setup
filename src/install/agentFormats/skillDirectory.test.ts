@@ -9,7 +9,6 @@ import type { PreviousFileValue } from "../ownership.js";
 import { planSkillDirectory, type SkillDirectoryPlan, SkillDirectoryPlanError } from "./skillDirectory.js";
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 const claudeAgent = Option.getOrThrow(findAgent("claude-code"));
 const writeReadmeFeature = Option.getOrThrow(findFeature("write-readme"));
 const missingPrevious: PreviousFileValue = { _tag: "missing" };
@@ -24,8 +23,8 @@ const plainBytes = Uint8Array.from([0xef, 0xbb, 0xbf, 0x6b, 0x65, 0x65, 0x70, 0x
 const hashBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 const sourceFiles = () => [
-  { path: "SKILL.md", bytes: textEncoder.encode("Run `@@AUTORUN_CONTROL@@ status`.\n") },
-  { path: "references/nested/guide.md", bytes: textEncoder.encode("Use @@AUTORUN_CONTROL@@ with care.\n") },
+  { path: "SKILL.md", bytes: textEncoder.encode("Run `status` now.\n") },
+  { path: "references/nested/guide.md", bytes: textEncoder.encode("Use the guide with care.\n") },
   { path: "references/logo.bin", bytes: Uint8Array.from([0xff, 0x40, 0x40, 0x43, 0x54, 0x4c, 0x40, 0x40]) },
   { path: "references/plain.txt", bytes: plainBytes },
   { path: "PRIVATE.md", bytes: textEncoder.encode("do not ship\n") },
@@ -41,7 +40,6 @@ const previousFiles = () => [
 
 const request = () => ({
   agent: claudeAgent,
-  controlScript: "agent-setup control",
   skills: [{ installedSkill: skillDefinition, sourceFiles: sourceFiles() }],
   previousFiles: previousFiles(),
 });
@@ -97,7 +95,6 @@ describe("planSkillDirectory", () => {
     );
     const catalogRequest = {
       agent: claudeAgent,
-      controlScript: "agent-setup control",
       skills,
       previousFiles: expectedPaths.map((path) => ({ path, previous: missingPrevious })),
     };
@@ -105,26 +102,6 @@ describe("planSkillDirectory", () => {
     const plan = unwrap(planSkillDirectory(catalogRequest));
 
     expect(plan.writes.map((write) => write.file.path)).toEqual(expectedPaths);
-  });
-
-  it("substitutes the control command in UTF-8 text and preserves other bytes exactly", () => {
-    const plan = unwrap(planSkillDirectory(request()));
-    const skillWrite = writeAt(plan, skillPath);
-    const guideWrite = writeAt(plan, guidePath);
-    const binaryWrite = writeAt(plan, binaryPath);
-    const plainWrite = writeAt(plan, plainPath);
-
-    expect(textDecoder.decode(skillWrite.bytes)).toBe("Run `agent-setup control status`.\n");
-    expect(textDecoder.decode(guideWrite.bytes)).toBe("Use agent-setup control with care.\n");
-    expect(binaryWrite.bytes).toEqual(Uint8Array.from([0xff, 0x40, 0x40, 0x43, 0x54, 0x4c, 0x40, 0x40]));
-    expect(plainWrite.bytes).toEqual(plainBytes);
-  });
-
-  it("preserves literal replacement tokens in the concrete control command", () => {
-    const plan = unwrap(planSkillDirectory({ ...request(), controlScript: "$&/control" }));
-    const skillWrite = writeAt(plan, skillPath);
-
-    expect(textDecoder.decode(skillWrite.bytes)).toBe("Run `$&/control status`.\n");
   });
 
   it("returns whole-file ownership with matching hashes and exact previous states", () => {
@@ -216,14 +193,6 @@ describe("planSkillDirectory", () => {
     ];
 
     expect(errorMessage(invalidRequest)).toContain("directory root");
-  });
-
-  it.each([
-    "   ",
-    "@@AUTORUN_CONTROL@@",
-    "node @@AUTORUN_CONTROL@@ status",
-  ])("rejects a non-concrete control command %j", (controlScript) => {
-    expect(Either.isLeft(planSkillDirectory({ ...request(), controlScript }))).toBe(true);
   });
 
   it("strictly rejects unknown request properties", () => {

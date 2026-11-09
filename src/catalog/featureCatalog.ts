@@ -1,12 +1,12 @@
 import { Either, Option, Schema } from "effect";
 
-// e.g. "context-guard", "image-to-code" — not "ContextGuard" or "png_to_code"
+// e.g. "scratch-folder-guard", "image-to-code" — not "ScratchFolderGuard" or "png_to_code"
 const FEATURE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-// e.g. "contextGuard", "imageToCode" — not "context-guard" or "Context_Guard"
+// e.g. "scratchFolderGuard", "imageToCode" — not "scratch-folder-guard" or "Image_To_Code"
 const SOURCE_DIRECTORY_PATTERN = /^[a-z][a-zA-Z0-9]*$/;
-// e.g. "SKILL.md", "watchers/autorunWatcher.ts" — not "/abs/path" or "a/../b"
+// e.g. "SKILL.md", "watchers/cleanupWatcher.ts" — not "/abs/path" or "a/../b"
 const FEATURE_RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+$/;
-// e.g. "hooks/duplicateCodeGuard.ts" — feature-relative hook entrypoint only
+// e.g. "hooks/scratchFolderGuard.ts" — feature-relative hook entrypoint only
 const HOOK_SOURCE_ENTRYPOINT_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+\.ts$/;
 
 export const featureIdSchema = Schema.NonEmptyTrimmedString.pipe(
@@ -39,7 +39,7 @@ const shippedPathsSchema = (request: { readonly duplicateMessage: string; readon
     Schema.annotations({ description: request.description }),
   );
 
-export const featurePlatformSchema = Schema.Literal("any", "macos", "macos+ghostty").annotations({
+export const featurePlatformSchema = Schema.Literal("any", "macos").annotations({
   description: "Host capability required by one selected feature.",
 });
 
@@ -263,89 +263,7 @@ const skillFeature = ({
   runtime: { _tag: "none" },
 });
 
-const idleCompactEvents = ["SessionStart", "UserPromptSubmit", "Stop", "PreCompact", "PostCompact", "SessionEnd"];
-
 export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { onExcessProperty: "error" })([
-  {
-    id: "context-guard",
-    sourceDirectory: "contextGuard",
-    installedSkill: { _tag: "none" },
-    title: "Context guard",
-    summary:
-      "Guard long sessions near their context cap and optionally compact idle Claude Code, Codex, or Grok sessions in their exact Ghostty terminal.",
-    selectedByDefault: false,
-    dependencies: [],
-    platform: "any",
-    runtime: {
-      _tag: "hook",
-      sourceEntrypoint: "hooks/contextGuard.ts",
-      registrations: [
-        {
-          event: "PreToolUse",
-          matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit|NotebookEdit" },
-          entrypoint: { _tag: "featureDefault" },
-          readsAgentId: false,
-        },
-        {
-          event: "PostToolUse",
-          matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit|NotebookEdit" },
-          entrypoint: { _tag: "featureDefault" },
-          readsAgentId: false,
-        },
-        {
-          event: "UserPromptSubmit",
-          matcher: { _tag: "none" },
-          entrypoint: { _tag: "featureDefault" },
-          readsAgentId: false,
-        },
-        {
-          event: "SessionStart",
-          matcher: { _tag: "none" },
-          entrypoint: { _tag: "path", value: "hooks/startAutorunWatcher.ts" },
-          readsAgentId: false,
-        },
-        ...idleCompactEvents.map((event) => ({
-          event,
-          matcher: { _tag: "none" },
-          entrypoint: { _tag: "path", value: "hooks/recordIdleCompactEvent.ts" },
-          readsAgentId: true,
-        })),
-      ],
-    },
-  },
-  skillFeature({
-    id: "autorun",
-    sourceDirectory: "autorun",
-    title: "Autorun",
-    summary:
-      "Let the agent keep working alone. When the context is almost full and a fresh handoff note exists, it runs /compact and continues the task. macOS + Ghostty only (it types into your terminal). The hook code lives in context-guard.",
-    shippedPaths: ["SKILL.md", "agents"],
-    dependencies: ["context-guard"],
-    platform: "macos+ghostty",
-  }),
-  {
-    id: "duplicate-code-guard",
-    sourceDirectory: "duplicateCodeGuard",
-    installedSkill: { _tag: "none" },
-    title: "Duplicate code guard",
-    summary:
-      "Block a Write/Edit that pastes a function body or interface/type shape already defined elsewhere in the repo — DRY enforced at the moment of the write. Uses the repo's own TypeScript; blocks by default (tune with `agent-setup config set duplicate-code-mode warn`). Agents without edit hooks can run `agent-setup duplicates` as a pre-commit or CI check.",
-    selectedByDefault: false,
-    dependencies: [],
-    platform: "any",
-    runtime: {
-      _tag: "hook",
-      sourceEntrypoint: "hooks/duplicateCodeGuard.ts",
-      registrations: [
-        {
-          event: "PreToolUse",
-          matcher: { _tag: "pattern", value: "Write|Edit|MultiEdit" },
-          entrypoint: { _tag: "featureDefault" },
-          readsAgentId: false,
-        },
-      ],
-    },
-  },
   {
     id: "active-run-reminder",
     sourceDirectory: "activeRunReminder",

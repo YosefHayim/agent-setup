@@ -198,7 +198,6 @@ const cwd = input.workspace?.current_dir || input.cwd || process.cwd();
 const fiveHour = input.rate_limits?.five_hour?.used_percentage;
 const weekly = input.rate_limits?.seven_day?.used_percentage;
 if (typeof fiveHour === "number" || typeof weekly === "number") {
-  // The autorun report reads the same limits from here.
   writeJson(path.join(STATE_DIR, "rate-limits.json"), { five_hour_pct: fiveHour, weekly_pct: weekly });
 }
 

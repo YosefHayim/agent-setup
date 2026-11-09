@@ -13,11 +13,11 @@ A file the installer manages, recorded in the receipt's `ownedFiles` list or mar
 _Avoid_: "managed" (without receipt context), "artifact".
 
 **feature**
-An installable unit such as `context-guard`, `duplicate-code-guard`, `autorun`, or `image-to-code` (public kebab-case IDs).
+An installable unit such as `scratch-folder-guard`, `make-code-readable`, or `image-to-code` (public kebab-case IDs).
 _Avoid_: "plugin", "extension".
 
 **sourceDirectory**
-Authored camelCase directory naming a feature under `src/skills/` (payload) or `src/hooks/` (hook code) — e.g. `contextGuard`, `duplicateCodeGuard`, `imageToCode`. Distinct from the public feature ID.
+Authored camelCase directory naming a feature under `src/skills/` (payload) or `src/hooks/` (hook code) — e.g. `scratchFolderGuard`, `makeCodeReadable`, `imageToCode`. Distinct from the public feature ID.
 _Avoid_: "skill folder name" when used as public ID.
 
 **skill**
@@ -41,11 +41,11 @@ Dependency-free code every hook feature shares under `src/hooks/lib/` (`hookConf
 _Avoid_: "payload", "bundle", "binary".
 
 **watcher**
-Background Node process a hook starts so it can act later: the autorun watcher, the idle compact watcher, the rehome watcher, and the scratch watcher. It lives in its feature's `watchers/` folder.
+Background Node process a hook starts so it can act later: the rehome watcher, the disk-cleanup watcher, and the scratch watcher. It lives in its feature's `watchers/` folder.
 _Avoid_: "service", "background job", "worker".
 
 **decision**
-Pure function that says what should happen next (`decideAutorunStep`, `decideIdleCompactAction`, `decideDuplicateEdit`, `decideScratchWrite`, `decideRehome`), kept apart from the code that acts on it. Its module is named `<area>Decision.ts`.
+Pure function that says what should happen next (`decideScratchWrite`, `decideRehome`), kept apart from the code that acts on it. Its module is named `<area>Decision.ts`.
 _Avoid_: "policy engine", "rule engine".
 
 **catalog**
@@ -89,28 +89,12 @@ One `config.json` key defined in `src/config/configSchema.ts`. The key starts wi
 _Avoid_: "option", "flag" (those are CLI arguments).
 
 **environment variable**
-A `AGENT_SETUP_<AREA>_<SETTING>` name listed in `src/config/environmentVariables.ts`, for example `AGENT_SETUP_IDLE_COMPACT_AFTER`.
+A `AGENT_SETUP_<AREA>_<SETTING>` name listed in `src/config/environmentVariables.ts`, for example `AGENT_SETUP_REHOME_STATE_DIR`.
 _Avoid_: "env key".
-
-**context-guard**
-Nudge `/handoff` at the warn percent and hard-deny new code edits at the block percent.
-_Avoid_: "context manager".
-
-**idle compact**
-Optional native-hook loop that submits one idle draft, waits for any resulting turn, compacts once, then parks.
-_Avoid_: "autorun" (different context-budget loop), "timer wrapper".
 
 **native hook adapter**
 Catalog evidence that an agent's lifecycle events, config path, and compact command were verified.
 _Avoid_: "supported" without evidence.
-
-**terminal claim**
-Session-start proof binding automation to one stable Ghostty terminal ID, including tabs and splits.
-_Avoid_: "focused pane", "front window".
-
-**duplicate-code-guard**
-Guard that blocks a copied function body or type shape at write time. `agent-setup duplicates` runs the same check from the CLI or CI.
-_Avoid_: "duplicate checker".
 
 **scratch-folder-guard**
 Guard that denies agent writes into system temporary folders, asks the agent at the end of a turn to delete the files its session left in its scratch folder, and deletes an ended Claude Code session's own scratch folder. Code names say "scratch" because `temp`/`tmp` are forbidden name tokens.
@@ -148,10 +132,6 @@ _Avoid_: "garbage collection", "sweep" (session-rehome's word).
 disk-cleanup's daily pass over build folders, old Codex versions, and tool caches: it deletes the ones nothing has used for two weeks and runs each tool's own prune.
 _Avoid_: "sweep", "purge".
 
-**autorun**
-Feature and skill that arms the context-guard autorun watcher for hands-free compact/resume (`stop`/`exit` verbs). Its hook code is owned by **context-guard**.
-_Avoid_: "auto-compact", "autopilot".
-
 **image-to-code**
 Image (PNG, screenshot, design) → measured pixel-perfect code skill (SVG/HTML/CSS) with screenshot-diff harness.
 
@@ -178,10 +158,6 @@ _Avoid_: "test/ dir".
 **vertical per feature**
 Each feature owns one folder named for its `sourceDirectory` — under `src/skills/` when it ships payload, under `src/hooks/` when it ships hook code.
 _Avoid_: "horizontal layers".
-
-**single command per tool surface**
-One `autorun` skill with verbs instead of multiple thin skills.
-_Avoid_: "one skill per verb".
 
 **agent root contract**
 Root `AGENTS.md`, authoritative for agent behavior and the routing map to delegated subject SSOTs.

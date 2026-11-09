@@ -18,7 +18,7 @@ import {
 import { managedConfigPath, readConfigFile } from "../config/configFile.js";
 import { configSchema } from "../config/configSchema.js";
 import { hostPlatformSchema } from "../config/hostScan.js";
-import { installationDestinationSchema, receiptPath, statePath } from "../install/installPaths.js";
+import { installationDestinationSchema, receiptPath } from "../install/installPaths.js";
 import { preparedPackageSchema } from "../install/installRequest.js";
 import { relativePathSchema } from "../install/ownership.js";
 import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } from "../install/receipt.js";
@@ -107,17 +107,6 @@ const agentHealthSchema = Schema.Struct({
   description: "Receipt ownership compared with non-authoritative detection evidence.",
 });
 
-const autorunWatcherSchema = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString.annotations({
-    description: "Claude session id whose detached autorun watcher was observed.",
-  }),
-  pid: Schema.Number.pipe(Schema.int(), Schema.positive()).annotations({
-    description: "Live process id recorded in the watcher pid lockfile.",
-  }),
-}).annotations({
-  description: "One live autorun watcher observed under the install root's state/autorun folder.",
-});
-
 const discrepancySchema = Schema.Union(
   Schema.TaggedStruct("receiptScopeMismatch", {
     requestedScope: scopeSchema,
@@ -163,9 +152,6 @@ const healthReportSchema = Schema.Struct({
   agents: Schema.Array(agentHealthSchema).annotations({
     description: "All catalog agents compared with receipt and detection evidence.",
   }),
-  watchers: Schema.Array(autorunWatcherSchema).annotations({
-    description: "Live autorun watchers observed under the destination's state/autorun folder.",
-  }),
   discrepancies: Schema.Array(discrepancySchema).annotations({
     description: "Deterministic diagnostic differences observed without authorizing mutation.",
   }),
@@ -201,7 +187,7 @@ const platformAvailable = (feature: FeatureDefinition, platform: HealthRequest["
     return false;
   }
 
-  return feature.platform === "macos" || platform.ghosttyAvailable;
+  return feature.platform === "macos";
 };
 
 const preparedRuntimeStatus = (request: { readonly feature: FeatureDefinition; readonly packageRoot: string }) =>
@@ -267,38 +253,6 @@ const toHealthCheckError = (error: unknown): HealthCheckError =>
     ? error
     : new HealthCheckError({ issue: error instanceof Error ? error.message : String(error) });
 
-const processAlive = (pid: number): boolean => {
-  if (pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const findAutorunWatchers = (request: HealthRequest) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const autorunStateDir = path.join(request.destination.root, statePath, "autorun");
-    if (!(yield* fileSystem.exists(autorunStateDir))) {
-      return [];
-    }
-
-    const pidFiles = (yield* fileSystem.readDirectory(autorunStateDir)).filter((name) => name.endsWith(".pid"));
-    const watchers = yield* Effect.forEach(pidFiles, (name) =>
-      fileSystem.readFileString(path.join(autorunStateDir, name)).pipe(
-        Effect.catchAll(() => Effect.succeed("")),
-        Effect.map((pidText) => ({
-          sessionId: name.slice(0, -".pid".length),
-          pid: Number.parseInt(pidText.trim(), 10),
-        })),
-      ),
-    );
-    return watchers.filter((watcher) => Number.isFinite(watcher.pid) && processAlive(watcher.pid));
-  });
-
 // Compares the strict receipt and config with catalog-derived host observations, without writing anything.
 export const checkHealth = (input: unknown) =>
   Effect.gen(function* () {
@@ -309,7 +263,6 @@ export const checkHealth = (input: unknown) =>
     const receipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     const featureDiagnostics = receipt === undefined ? [] : yield* checkFeatureHealth(request, receipt);
     const agentDiagnostics = checkAgentHealth(request.agentEvidence, receipt);
-    const autorunWatchers = yield* findAutorunWatchers(request);
 
     // Discrepancies are report data only; they never authorize a repair.
     const discrepancies: Array<Discrepancy> = [];
@@ -370,7 +323,6 @@ export const checkHealth = (input: unknown) =>
           : { _tag: "present", version: receipt.version, features: receipt.features },
       features: featureDiagnostics,
       agents: agentDiagnostics,
-      watchers: autorunWatchers,
       discrepancies,
     });
   }).pipe(Effect.mapError(toHealthCheckError));

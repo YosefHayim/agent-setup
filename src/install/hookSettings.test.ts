@@ -11,11 +11,9 @@ import { uninstall } from "./uninstall.js";
 import { update } from "./update.js";
 
 const packageFiles = {
-  "hooks/contextGuard/hooks/contextGuard.js": "export {};\n",
-  "hooks/contextGuard/hooks/startAutorunWatcher.js": "export {};\n",
-  "hooks/contextGuard/command/autorunControl.js": "export {};\n",
-  "hooks/contextGuard/hooks/recordIdleCompactEvent.js": "export {};\n",
-  "hooks/contextGuard/watchers/idleCompactWatcher.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
   "hooks/leftoverProcessCleanup/hooks/stopLeftoverProcesses.js": "export {};\n",
 };
 
@@ -65,7 +63,7 @@ const installRequest = (input: { root: string; preparedRoot: string; agentIds: R
   destination: { _tag: "project", root: input.root },
   host: { homeRoot: input.root },
   preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: ["context-guard"] },
+  features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: input.agentIds },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: defaultConfig },
@@ -142,12 +140,12 @@ layer(NodeContext.layer)("hook settings", (it) => {
 
       yield* install(request);
       yield* update({ ...request, features: { _tag: "preserve" } });
-      yield* update({ ...request, features: { _tag: "refresh", ids: ["context-guard"] } });
+      yield* update({ ...request, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } });
 
       for (const hookFile of [claudeSettingsPath, codexHooksPath]) {
         const settings = yield* readText(hookFile);
         expect(settings).toContain("agent-voice-stop");
-        expect(settings).toContain("recordIdleCompactEvent.js");
+        expect(settings).toContain("askScratchCleanup.js");
       }
 
       yield* uninstall(uninstallRequest(root));
@@ -163,8 +161,8 @@ layer(NodeContext.layer)("hook settings", (it) => {
       const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
       yield* install(request);
       const changedSettings = (yield* readText(claudeSettingsPath)).replace(
-        "recordIdleCompactEvent.js",
-        "recordIdleCompactEvent.js --changed",
+        "askScratchCleanup.js",
+        "askScratchCleanup.js --changed",
       );
       yield* writeFiles(root, { [claudeSettingsPath]: changedSettings });
 

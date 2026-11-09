@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
@@ -17,7 +17,7 @@ const compiledHooksRoot = path.join(packageRoot, "dist", "src", "hooks");
 // still covered without them.
 const packageIsBuilt = existsSync(compiledHooksRoot);
 
-// e.g. `from "../lib/hookConfig.js"` or `import("./duplicateIndex.js")` in a compiled runtime file
+// e.g. `from "../lib/hookConfig.js"` or `import("./hookOutput.js")` in a compiled runtime file
 const RELATIVE_IMPORT_PATTERN = /(?:from\s+|import\s*\(\s*)"(\.{1,2}\/[^"]+)"/g;
 
 const unresolvedRuntimeImports = (preparedRuntimeRoot: string): ReadonlyArray<string> =>
@@ -53,35 +53,23 @@ describe("preparePackage", () => {
         const preparedRuntimeRoot = path.join(prepared.root, "hooks");
         expect(unresolvedRuntimeImports(preparedRuntimeRoot)).toEqual([]);
 
-        const contextGuardRoot = path.join(preparedRuntimeRoot, "contextGuard");
-        const contextGuard = path.join(contextGuardRoot, "hooks/contextGuard.js");
-        expect(readFileSync(contextGuard, "utf8")).toContain("../lib/hookConfig.js");
-        expect(existsSync(path.join(contextGuardRoot, "lib/hookConfig.js"))).toBe(true);
-        expect(existsSync(path.join(contextGuardRoot, "lib/hookOutput.js"))).toBe(true);
-        expect(existsSync(path.join(contextGuardRoot, "watchers/autorunWatcher.js"))).toBe(true);
-        expect(existsSync(path.join(contextGuardRoot, "command/autorunControl.js"))).toBe(true);
+        const scratchFolderGuardRoot = path.join(preparedRuntimeRoot, "scratchFolderGuard");
+        const scratchFolderGuard = path.join(scratchFolderGuardRoot, "hooks/scratchFolderGuard.js");
+        expect(readFileSync(scratchFolderGuard, "utf8")).toContain("../lib/hookConfig.js");
+        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hookConfig.js"))).toBe(true);
+        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hookOutput.js"))).toBe(true);
+        expect(existsSync(path.join(scratchFolderGuardRoot, "watchers/scratchWatcher.js"))).toBe(true);
+        expect(existsSync(path.join(scratchFolderGuardRoot, "command/clearScratch.js"))).toBe(true);
 
-        // lib files that use the shared runtime import the copy beside them.
-        expect(readFileSync(path.join(contextGuardRoot, "lib/stateFiles.js"), "utf8")).toContain("./hookConfig.js");
-
-        const checkDuplicates = path.join(preparedRuntimeRoot, "duplicateCodeGuard/command/checkDuplicates.js");
-        expect(readFileSync(checkDuplicates, "utf8")).not.toContain("../../lib/");
-        const commandLoad = spawnSync(
-          process.execPath,
-          ["--input-type=module", "--eval", `await import(${JSON.stringify(pathToFileURL(checkDuplicates).href)});`],
-          { encoding: "utf8" },
-        );
-        expect(commandLoad.stderr).toBe("");
-        expect(commandLoad.status).toBe(0);
-
-        // context-guard reads transcripts through the shared hook lib, so preparing copies it beside the hook.
-        expect(existsSync(path.join(contextGuardRoot, "lib/transcriptReader.js"))).toBe(true);
+        // scratch-folder-guard reads transcripts through the shared hook lib, so preparing copies it beside the hook.
+        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/transcriptReader.js"))).toBe(true);
 
         // The hook reads its transcript under HOME, so give it a throwaway one.
         const hookHome = mkdtempSync(path.join(tmpdir(), "agent-setup-prepared-home-"));
         try {
-          const execution = spawnSync(process.execPath, [contextGuard], {
-            input: '{"hook_event_name":"UserPromptSubmit","session_id":"prepared-package-test"}',
+          const execution = spawnSync(process.execPath, [scratchFolderGuard], {
+            input:
+              '{"hook_event_name":"PreToolUse","session_id":"prepared-package-test","tool_name":"Bash","tool_input":{"command":"echo ok"}}',
             encoding: "utf8",
             env: { ...process.env, HOME: hookHome },
           });

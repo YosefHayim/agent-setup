@@ -32,7 +32,6 @@ const COMMUNITY_SKILLS: ReadonlyMap<string, CommunitySkill> = new Map([
 const PLATFORM_LABELS: Record<FeatureDefinition["platform"], string> = {
   any: "🟢 any OS",
   macos: "🟡 macOS",
-  "macos+ghostty": "🔴 macOS + Ghostty",
 };
 
 // Keep table cells on one line.
@@ -102,8 +101,6 @@ const settingsSection = (): string =>
       (setting) =>
         `| \`${setting.name}\` | \`${setting.key}\` | ${defaultText(defaultConfig[setting.key])} | ${tableCell(setting.description)} |`,
     ),
-    "",
-    "Lists (`duplicate-code-skip-folders`) take comma-separated values on the command line.",
     "",
     "### Environment variables",
     "",

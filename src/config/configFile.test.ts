@@ -34,7 +34,7 @@ const writeConfigContents = (contents: Uint8Array | string) =>
 
 const bytesWithInvalidUtf8 = () => {
   const marker = "replacement-marker";
-  const json = JSON.stringify({ ...defaultConfig, duplicateCodeSkipFolders: [marker] });
+  const json = JSON.stringify({ ...defaultConfig, sessionRehomeRoots: [marker] });
   const markerIndex = json.indexOf(marker);
   return new Uint8Array([
     ...textEncoder.encode(json.slice(0, markerIndex)),
@@ -67,9 +67,9 @@ layer(NodeContext.layer)("readConfigFile", (it) => {
 
   it.scoped("applies schema defaults to an incomplete config", () =>
     Effect.gen(function* () {
-      const snapshot = yield* readConfigFile(yield* writeConfigContents(JSON.stringify({ contextWarnPercent: 18 })));
+      const snapshot = yield* readConfigFile(yield* writeConfigContents(JSON.stringify({ debugLogs: true })));
 
-      expect(snapshot._tag === "present" && snapshot.config).toEqual(defaultConfig);
+      expect(snapshot._tag === "present" && snapshot.config).toEqual({ ...defaultConfig, debugLogs: true });
     }),
   );
 
@@ -82,16 +82,10 @@ layer(NodeContext.layer)("readConfigFile", (it) => {
       mentions: "unexpected",
     },
     {
-      name: "an out-of-bounds value",
-      contents: JSON.stringify({ ...defaultConfig, autorunMaxCycles: 1001 }),
+      name: "an empty root folder",
+      contents: JSON.stringify({ ...defaultConfig, sessionRehomeRoots: [""] }),
       error: ConfigFileSchemaError,
-      mentions: "autorunMaxCycles",
-    },
-    {
-      name: "a broken cross-field invariant",
-      contents: JSON.stringify({ ...defaultConfig, contextWarnPercent: 30, contextBlockPercent: 20 }),
-      error: ConfigFileSchemaError,
-      mentions: "contextWarnPercent",
+      mentions: "sessionRehomeRoots",
     },
     { name: "non-UTF-8 bytes", contents: bytesWithInvalidUtf8(), error: ConfigFileParseError, mentions: "UTF-8" },
     {
@@ -157,7 +151,7 @@ const expectManagedConfigWrite = (plan: ManagedConfigPlan) => {
   expect(plan.managedConfigWrite.file.path).toBe(managedConfigPath);
   expect(plan.managedConfigWrite.file.kind._tag).toBe("managedConfig");
   expect(wholeFileOwnership(plan).installedHash).toBe(hashBytes(plan.managedConfigWrite.bytes));
-  expect(new TextDecoder().decode(plan.managedConfigWrite.bytes)).toContain('"contextWarnPercent"');
+  expect(new TextDecoder().decode(plan.managedConfigWrite.bytes)).toContain('"debugLogs"');
 };
 
 const expectPlanFailure = (request: unknown, mentions: string) => {
@@ -172,7 +166,7 @@ const expectPlanFailure = (request: unknown, mentions: string) => {
 
 describe("planManagedConfig", () => {
   it("copies the global snapshot once for a first project install and otherwise uses defaults", () => {
-    const globalConfig = { ...defaultConfig, duplicateCodeSkipFolders: ["fixtures"], debugLogs: true };
+    const globalConfig = { ...defaultConfig, sessionRehomeRoots: ["fixtures"], debugLogs: true };
     const copied = unwrap(
       planManagedConfig({
         scope: "project",
@@ -195,10 +189,10 @@ describe("planManagedConfig", () => {
   });
 
   it("rejects a global snapshot whose decoded config does not match its source bytes", () => {
-    const sourceConfig = { ...defaultConfig, duplicateCodeSkipFolders: ["fixtures"] };
+    const sourceConfig = { ...defaultConfig, sessionRehomeRoots: ["fixtures"] };
     const globalConfig = {
       ...presentConfigSnapshot(sourceConfig),
-      config: { ...sourceConfig, duplicateCodeSkipFolders: ["vendor"] },
+      config: { ...sourceConfig, sessionRehomeRoots: ["vendor"] },
     };
 
     expectPlanFailure(
@@ -235,14 +229,14 @@ describe("planManagedConfig", () => {
 
   it("keeps later global and project selections independent", () => {
     const global = unwrap(
-      planManagedConfig(selectedRequest("global", { ...defaultConfig, duplicateCodeSkipFolders: ["vendor"] })),
+      planManagedConfig(selectedRequest("global", { ...defaultConfig, sessionRehomeRoots: ["vendor"] })),
     );
     const project = unwrap(
-      planManagedConfig(selectedRequest("project", { ...defaultConfig, duplicateCodeSkipFolders: ["generated"] })),
+      planManagedConfig(selectedRequest("project", { ...defaultConfig, sessionRehomeRoots: ["generated"] })),
     );
 
-    expect(global.config.duplicateCodeSkipFolders).toEqual(["vendor"]);
-    expect(project.config.duplicateCodeSkipFolders).toEqual(["generated"]);
+    expect(global.config.sessionRehomeRoots).toEqual(["vendor"]);
+    expect(project.config.sessionRehomeRoots).toEqual(["generated"]);
     expect(global.managedConfigWrite).not.toEqual(project.managedConfigWrite);
   });
 
@@ -272,7 +266,7 @@ describe("planManagedConfig", () => {
   it("rejects managed plan data whose config and write drift apart", () => {
     const plan = unwrap(planManagedConfig(selectedRequest("project", defaultConfig)));
     const bytes = textEncoder.encode(
-      `${JSON.stringify({ ...defaultConfig, duplicateCodeSkipFolders: ["different"] }, null, 2)}\n`,
+      `${JSON.stringify({ ...defaultConfig, sessionRehomeRoots: ["different"] }, null, 2)}\n`,
     );
 
     const decoded = Schema.validateEither(managedConfigPlanSchema, { onExcessProperty: "error" })({
