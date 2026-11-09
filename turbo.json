@@ -1,10 +1,39 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
+  "globalPassThroughEnv": ["CHROME_PATH", "CRUX_API_KEY", "PSI_API_KEY"],
   "tasks": {
     "lint": {},
     "typecheck": {},
-    "test": {},
-    "build": { "outputs": ["dist/**"] },
-    "generate-readme:check": { "dependsOn": ["build"] }
+    "test": {
+      "env": [
+        "AGENT_SETUP_AUTORUN_DRY_RUN",
+        "AGENT_SETUP_DISK_CLEANUP_STATE_DIR",
+        "AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS",
+        "AGENT_SETUP_LEFTOVER_PROCESS_CLEANUP_BROWSER_MINIMUM_AGE_SECONDS",
+        "AGENT_SETUP_REHOME_STATE_DIR",
+        "CLAUDE_CODE_TMPDIR",
+        "COLUMNS",
+        "TERM_PROGRAM",
+        "TMPDIR",
+        "USERPROFILE",
+        "XDG_STATE_HOME"
+      ],
+      "passThroughEnv": [
+        "AGENT_SETUP_AGENT_ID",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_PROJECT_DIR",
+        "CLAUDE_SESSION_ID",
+        "CODEX_HOME",
+        "GROK_SESSION_ID",
+        "HELD_FILE"
+      ]
+    },
+    "build": {
+      "outputs": ["dist/**"]
+    },
+    "generate-readme:check": {
+      "dependsOn": ["build"]
+    }
   }
 }
