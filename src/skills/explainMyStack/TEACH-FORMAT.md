@@ -66,7 +66,7 @@ Rules for glossary entries:
 
 | Term kind | Snippet style | Example |
 |---|---|---|
-| a tool you run | a terminal command | `$ npx agent-setup install` |
+| a tool you run | a terminal command | `$ pnpm tsx src/cli/main.ts install` |
 | a language feature | a tiny code line + result | `const n = "x"; // -> "x"` |
 | a data format | the shape itself | `{ "name": "setup" }` |
 | a mechanism / engine | an ASCII "how it works" flow | `"1+1" ─▶ V8 ─▶ machine code ─▶ 2` |
@@ -132,7 +132,7 @@ no Node host · Python → real data/ML (that's the `ib-bot` project).
 - **npm package** — a bundle of JS code published to npm that others can install.
   `{ "name": "agent-setup", "bin": { "agent-setup": "dist/cli.js" } }`
 - **npx** — "run a command from a local or remote npm package": fetch + run in one step.
-  [official: https://docs.npmjs.com/cli/v11/commands/npx/] `$ npx agent-setup install`
+  [official: https://docs.npmjs.com/cli/v11/commands/npx/] `$ npx prettier --check .`
 - **runtime** — the engine a program needs *present* to run (Node for JS, the interpreter for
   Python). "Runtime install" = install that engine first:
   `$ node app.js   # works    |    $ python app.py   # fails first without a Python runtime`
@@ -154,7 +154,7 @@ no Node host · Python → real data/ML (that's the `ib-bot` project).
   syntax or speed. `host=Node ─▶ TS ✓ (same ground)   host=Node ─▶ Go ✗ (adapter needed)`
 - **Node-hosted installer** — an install tool (like agent-setup) that itself runs on Node and ships
   through npm; a non-Node language is weaker for it because you'd bolt a second engine onto a
-  Node-shaped ecosystem. `$ npx agent-setup install   # runs on Node, no extra engine`
+  Node-shaped ecosystem. `$ pnpm tsx src/cli/main.ts install   # runs on Node, no extra engine`
 ```
 
 > **Dedup in action:** the *next* decision (say "why Biome not ESLint+Prettier") re-uses `Node`,
