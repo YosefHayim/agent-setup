@@ -372,7 +372,7 @@ describe("checkPlan", () => {
 
   it("rejects case-folded target collisions on common macOS and Windows filesystems", () => {
     const first = { ...runtimeFile, path: ".agent-setup/Hooks/scratchFolderGuard.js" };
-    const second = { ...managedConfigFile, path: ".agent-setup/hooks/CONTEXTGUARD.JS" };
+    const second = { ...managedConfigFile, path: ".agent-setup/hooks/SCRATCHFOLDERGUARD.JS" };
 
     expect(issues(checkPlan(removalPlan([remove(first), remove(second)])))).toContain(
       '["operations"][1]["file"]["path"]',

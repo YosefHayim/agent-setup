@@ -11,7 +11,7 @@ const packageFiles = {
   "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
   "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
   "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
-  "skills/makeCodeReadable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
 };
 
 const workspace = Effect.gen(function* () {

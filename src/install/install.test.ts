@@ -21,7 +21,7 @@ const scratchFolderRuntime = {
 };
 
 const makeCodeReadableSkill = {
-  "skills/makeCodeReadable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
 };
 
 const sessionRehomeRuntime = {
@@ -207,7 +207,8 @@ layer(NodeContext.layer)("install", (it) => {
 
       // Ship a newer skill, then let an external sync write that same rendered content first.
       yield* writeFiles(preparedRoot, {
-        "skills/makeCodeReadable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps after every handoff.\n",
+        "skills/make-code-readable/SKILL.md":
+          "---\nname: make-code-readable\n---\nRun the steps after every handoff.\n",
       });
       const synced = "---\nname: make-code-readable\n---\nRun the steps after every handoff.\n";
       yield* writeFiles(root, { [installedSkill]: synced });
@@ -282,7 +283,7 @@ layer(NodeContext.layer)("install", (it) => {
       yield* writeFiles(preparedRoot, {
         ...scratchFolderRuntime,
         ...makeCodeReadableSkill,
-        "skills/makeCodeReadable/EXTRA.md": "not catalog-shipped\n",
+        "skills/make-code-readable/EXTRA.md": "not catalog-shipped\n",
       });
 
       const exit = yield* Effect.exit(
