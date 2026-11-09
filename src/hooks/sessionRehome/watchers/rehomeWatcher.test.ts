@@ -14,6 +14,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -31,7 +32,7 @@ const workspaces: Array<string> = [];
 type Workspace = { readonly homeRoot: string; readonly codeRoot: string; readonly stateFolder: string };
 
 const createWorkspace = (): Workspace => {
-  const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-session-rehome-"));
+  const homeRoot = mkdtempSync(path.join(tmpdir(), "scratch-session-rehome-"));
   workspaces.push(homeRoot);
   const codeRoot = path.join(homeRoot, "Desktop", "Code");
   for (const repoName of ["vybekiit", "replybase"]) {

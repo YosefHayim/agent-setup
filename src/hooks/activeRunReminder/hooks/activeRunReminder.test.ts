@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 const hookPath = fileURLToPath(new URL("./activeRunReminder.ts", import.meta.url));
-const packageRoot = path.resolve(path.dirname(hookPath), "../../../..");
 const REPOSITORY_NAME = "agent-run-repo";
 const ACTIVE_RUN_TITLE = "Code-shape cleanup";
 const roots: Array<string> = [];
@@ -19,7 +19,7 @@ type Scenario = {
 };
 
 const createScenario = (): Scenario => {
-  const root = mkdtempSync(path.join(packageRoot, "tmp-active-run-reminder-"));
+  const root = mkdtempSync(path.join(tmpdir(), "tmp-active-run-reminder-"));
   roots.push(root);
 
   return {

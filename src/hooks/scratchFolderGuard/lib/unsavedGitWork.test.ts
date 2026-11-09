@@ -1,14 +1,13 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { unsavedWorkTrees } from "./unsavedGitWork.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const workspaces: Array<string> = [];
 const passwordRemotes: Array<ChildProcess> = [];
 
@@ -42,7 +41,7 @@ type Workspace = { readonly upstream: string; readonly scratchFolder: string; re
 
 // A scratch folder holding a clone whose every commit is on its remote.
 const createWorkspace = (): Workspace => {
-  const root = mkdtempSync(path.join(packageRoot, "scratch-git-work-"));
+  const root = mkdtempSync(path.join(tmpdir(), "scratch-git-work-"));
   workspaces.push(root);
   const upstream = path.join(root, "upstream");
   const scratchFolder = path.join(root, "scratchpad");

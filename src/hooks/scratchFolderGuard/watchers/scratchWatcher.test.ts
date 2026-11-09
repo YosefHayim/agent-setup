@@ -9,13 +9,13 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 const watcherPath = fileURLToPath(new URL("./scratchWatcher.ts", import.meta.url));
-const packageRoot = path.resolve(path.dirname(watcherPath), "../../../..");
 const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const otherSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const threadId = "01a0e4bf-1e83-7532-9119-d78525246a31";
@@ -23,7 +23,7 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const workspaces: Array<string> = [];
 
 const createHomeRoot = (): string => {
-  const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-watcher-"));
+  const homeRoot = mkdtempSync(path.join(tmpdir(), "scratch-watcher-"));
   workspaces.push(homeRoot);
   return homeRoot;
 };

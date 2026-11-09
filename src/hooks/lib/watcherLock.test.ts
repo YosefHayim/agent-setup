@@ -1,18 +1,17 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "./watcherLock.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEAD_PID = 2_147_483_646;
 const OTHER_LIVE_PID = String(process.ppid);
 const stateFolders: Array<string> = [];
 
 const newLockFile = (): string => {
-  const stateFolder = mkdtempSync(path.join(packageRoot, "scratch-watcher-lock-"));
+  const stateFolder = mkdtempSync(path.join(tmpdir(), "scratch-watcher-lock-"));
   stateFolders.push(stateFolder);
   return path.join(stateFolder, "watcher.lock");
 };
