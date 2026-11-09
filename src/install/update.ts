@@ -90,11 +90,11 @@ export const update = (input: unknown) =>
     }
 
     const featureIdsWithDependencies = dependencyCheck.featureIds;
-    const missingId =
-      request.features._tag === "refresh"
-        ? request.features.ids.find((id) => !featureIdsWithDependencies.includes(id))
-        : undefined;
-    if (missingId !== undefined) {
+    const isRefreshRequest = request.features._tag === "refresh";
+    const missingId = isRefreshRequest
+      ? (request.features.ids.find((id) => !featureIdsWithDependencies.includes(id)) ?? null)
+      : null;
+    if (missingId !== null) {
       return yield* new UpdateError({
         issue: `Feature ${missingId} is not installed in this scope; use install to add it.`,
       });
