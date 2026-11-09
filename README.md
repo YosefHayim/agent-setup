@@ -173,8 +173,6 @@ agent-setup keeps one `config.json` in its install root: `~/.claude/agent-setup/
 | `disk-cleanup-roots` | `diskCleanupRoots` | `["Desktop/Code","Code","Projects","dev","src","repos"]` | Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove, and for unpushed branches to push. Repos are found one and two levels deep. |
 | `debug-logs` | `debugLogs` | `false` | Print agent-setup hook errors to stderr. |
 
-Lists (`session-rehome-roots`, `disk-cleanup-roots`) take comma-separated values on the command line.
-
 ### Environment variables
 
 | Variable | Default | What it does |
