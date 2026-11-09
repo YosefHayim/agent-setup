@@ -16,16 +16,16 @@ Like `mcp-ui`, but for terminal skills. This skill is a **thin consumer of the o
 
 ## Sketch plans and wireframes (the default for plans)
 
-Show every plan as a sketch plan: hand-drawn pages, one picture per page, short notes tied to their part, and a last "Your call" page with options A, B and C.
+Show every plan as a sketch plan: hand-drawn pages, one picture per page, short notes tied to their part, and a last "Your call" page with options A, B and C. Serve it in **live mode** (the loop below) by default. Use `serve` only when the Monitor tool or a WebSocket is not available.
 
 ```bash
-npx planpage recipes                     # list the 80 recipes (flows, systems, data, screens, account, product...)
-npx planpage recipes login-screen        # print one recipe's scene as JSON to copy and change
-npx planpage parts                       # list the 192 hand-drawn UI parts (sk-button, sk-input, sk-phone...)
-npx planpage parts sk-table              # print one part's example HTML
-npx planpage render sketch-plan --data plan.json --out <scratchpad>/plan.html
-npx planpage serve <scratchpad>/plan.html <scratchpad>/decision.json --timeout 3600
-npx planpage render sketch-kit --sample --out <scratchpad>/kit.html   # see every part drawn
+npx -y planpage@latest recipes                     # list the 80 recipes (flows, systems, data, screens, account, product...)
+npx -y planpage@latest recipes login-screen        # print one recipe's scene as JSON to copy and change
+npx -y planpage@latest parts                       # list the 192 hand-drawn UI parts (sk-button, sk-input, sk-phone...)
+npx -y planpage@latest parts sk-table              # print one part's example HTML
+npx -y planpage@latest render sketch-plan --data plan.json --out <scratchpad>/plan.html
+npx -y planpage@latest serve <scratchpad>/plan.html <scratchpad>/decision.json --timeout 3600
+npx -y planpage@latest render sketch-kit --sample --out <scratchpad>/kit.html   # see every part drawn
 ```
 
 - **Start from a recipe.** Pick the closest one, copy its `scene`, change the words. Full app screens (log in, sign up, paywall, settings, dashboard, checkout, pricing, AI chat, search, landing...) are ready as the `account` and `product` recipes.
@@ -34,6 +34,19 @@ npx planpage render sketch-kit --sample --out <scratchpad>/kit.html   # see ever
 - **The decision** for a sketch plan is `{ approved, choice, notes }`, where `choice` is the letter picked.
 - The style guide, scene format and full recipe list: `skills/planpage/SKETCH-STYLE.md` in the package.
 
+## Live loop (default for sketch plans)
+
+Live mode lets the owner pin comments on parts while you edit the plan. Each comment reaches you as a Monitor event. Use `serve` (above) only when the Monitor tool or a WebSocket is not available.
+
+1. Write the sketch-plan JSON to `<scratchpad>/plan.json`.
+2. Start `npx -y planpage@latest live --data <scratchpad>/plan.json --decision <scratchpad>/decision.json --open` with Bash `run_in_background`. Read its one stdout JSON line from the task output file, which gives `pageUrl`, `agentSocketUrl`, `port` and `token`.
+3. `Monitor({ ws: { url: agentSocketUrl }, description: "plan page comments", timeout_ms: 1800000 })`. The Monitor cap is 30 minutes, so re-arm on each expiry while the live command still runs. Comments that arrive between monitors are sent again when the socket reconnects. Skip a `commentId` you already handled.
+4. On each `comment` event, run `npx -y planpage@latest live cursor --port <port> --token <token> --comment <commentId> --say "<what you are changing, a few words>"`, then edit plan.json. The server sees the file change, renders it again, and swaps the changed pages in the open tab. The comment then shows as done.
+5. On a `plan-error` event, plan.json no longer renders, so fix it.
+6. On a `decision` event, or when the live command exits 0, read decision.json and act on it. Exit 3 means the idle timeout was hit with no decision.
+
+Keep the token out of anything shown to the user.
+
 ## Quick start (how a skill uses it)
 
 1. **Assemble** the page from the package's components (or a whole template):
@@ -41,11 +54,11 @@ npx planpage render sketch-kit --sample --out <scratchpad>/kit.html   # see ever
    import { render, PlanBrief } from "planpage";
    const html = render(<PlanBrief title="…" steps={/* … */} risks={/* … */} />);
    ```
-   or straight from the CLI: `npx planpage render plan-brief --data plan.json`.
-2. **Write** it to the OS temp dir (`$TMPDIR/<name>-<timestamp>.html`) — nothing lands in the repo.
+   or straight from the CLI: `npx -y planpage@latest render plan-brief --data plan.json`.
+2. **Write** it to the session scratchpad (`<scratchpad>/<name>-<timestamp>.html`) — nothing lands in the repo or the system temp folder.
 3. **Serve + collect** the decision on a safe ephemeral port:
    ```bash
-   npx planpage serve <html-path> <decision-out.json> --timeout 600
+   npx -y planpage@latest serve <html-path> <decision-out.json> --timeout 600
    ```
    It prints the local URL, opens the browser, and blocks until the user clicks **Approve** / **Adjust** (or the idle timeout fires), then writes the decision JSON and exits `0`.
 4. **Read** `<decision-out.json>` and act on it.
