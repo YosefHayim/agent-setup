@@ -1,10 +1,6 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalPassThroughEnv": [
-    "CHROME_PATH",
-    "CRUX_API_KEY",
-    "PSI_API_KEY"
-  ],
+  "globalPassThroughEnv": ["CHROME_PATH", "CRUX_API_KEY", "PSI_API_KEY"],
   "tasks": {
     "lint": {},
     "typecheck": {},
@@ -34,14 +30,10 @@
       ]
     },
     "build": {
-      "outputs": [
-        "dist/**"
-      ]
+      "outputs": ["dist/**"]
     },
     "generate-readme:check": {
-      "dependsOn": [
-        "build"
-      ]
+      "dependsOn": ["build"]
     }
   }
 }
