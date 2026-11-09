@@ -1,27 +1,11 @@
-import { Schema } from "effect";
-
-// e.g. "AGENT_SETUP_REHOME_STATE_DIR" — AGENT_SETUP_<AREA>_<SETTING>
-const ENVIRONMENT_VARIABLE_PATTERN = /^AGENT_SETUP_[A-Z]+(?:_[A-Z]+)+$/;
-
-const environmentVariableSchema = Schema.Struct({
-  name: Schema.String.pipe(
-    Schema.pattern(ENVIRONMENT_VARIABLE_PATTERN, {
-      message: () => "Environment variables are named AGENT_SETUP_<AREA>_<SETTING>.",
-    }),
-    Schema.annotations({ description: "Exact environment variable name." }),
-  ),
-  defaultValue: Schema.NonEmptyTrimmedString.annotations({
-    description: "What applies when the variable is unset.",
-  }),
-  purpose: Schema.NonEmptyTrimmedString.annotations({
-    description: "What the variable changes, in one or two plain sentences.",
-  }),
-});
+export interface EnvironmentVariable {
+  readonly name: string;
+  readonly defaultValue: string;
+  readonly purpose: string;
+}
 
 // Every AGENT_SETUP_* variable any agent-setup code reads; environment-variables.test.ts fails when src/ drifts from it.
-export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(environmentVariableSchema), {
-  onExcessProperty: "error",
-})([
+export const environmentVariables: ReadonlyArray<EnvironmentVariable> = [
   {
     name: "AGENT_SETUP_AGENT_ID",
     defaultValue: "set by agent-setup in hook commands",
@@ -54,4 +38,4 @@ export const environmentVariables = Schema.decodeUnknownSync(Schema.Array(enviro
     purpose:
       "How long an orphaned test browser (Lighthouse, Playwright, Puppeteer temporary profile) must have been running before leftover-process-cleanup stops it. Tests set it to a few seconds.",
   },
-]);
+];

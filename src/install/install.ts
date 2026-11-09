@@ -54,10 +54,16 @@ const decodeStrictly =
       Effect.mapError((error) => new InstallError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) })),
     );
 
-const resolveFeatures = (request: InstallRequest) => {
+const resolveFeatures = (request: InstallRequest): Either.Either<ReadonlyArray<FeatureId>, InstallError> => {
   const ids = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
 
-  return Either.mapLeft(addDependencies(ids), (error) => new InstallError({ issue: error.message }));
+  const resolved = addDependencies(ids);
+  const isFeatureUnknown = resolved.status === "unknown";
+  if (isFeatureUnknown) {
+    return Either.left(new InstallError({ issue: `Unknown feature ${resolved.featureId}.` }));
+  }
+
+  return Either.right(resolved.featureIds);
 };
 
 const resolveSelectedAgents = (
@@ -133,10 +139,13 @@ const inspectManagedConfig = (request: InstallRequest) =>
           selection: { _tag: "selected", config: defaultConfig },
         } satisfies ManagedConfigInspection;
       case "automatic": {
-        const target = yield* readConfigFile(configPath);
+        const target = yield* Effect.tryPromise({ try: () => readConfigFile(configPath), catch: (error) => error });
         const global =
           request.destination._tag === "project" && target._tag === "missing"
-            ? yield* readConfigFile(path.join(request.host.homeRoot, managedConfigPath))
+            ? yield* Effect.tryPromise({
+                try: () => readConfigFile(path.join(request.host.homeRoot, managedConfigPath)),
+                catch: (error) => error,
+              })
             : undefined;
         return {
           file: configSnapshotFile(target),
@@ -181,14 +190,15 @@ const createManagedConfigPlan = (input: {
     return Either.left(previous.left);
   }
 
-  return Either.mapLeft(
-    planManagedConfig({
-      scope: input.request.destination._tag,
-      selection: input.inspection.selection,
-      previousConfigFile: previous.right,
-    }),
-    toInstallError,
-  );
+  return Either.try({
+    try: () =>
+      planManagedConfig({
+        scope: input.request.destination._tag,
+        selection: input.inspection.selection,
+        previousConfigFile: previous.right,
+      }),
+    catch: toInstallError,
+  });
 };
 
 const installSummary = (input: {

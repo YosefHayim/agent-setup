@@ -1,5 +1,5 @@
 import { Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
 import { addDependencies } from "../catalog/feature-catalog.js";
 import { syncInstall } from "./install.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";
@@ -83,8 +83,13 @@ export const update = (input: unknown) =>
 
     const installedIds = receiptSnapshot.receipt.features;
     // A dependency the receipt does not list yet is added by this update, so it counts as installed here.
-    const resolvedResult = addDependencies(installedIds);
-    const resolvedIds = Either.getOrThrow(resolvedResult);
+    const dependencyResolution = addDependencies(installedIds);
+    const isInstalledFeatureUnknown = dependencyResolution.status === "unknown";
+    if (isInstalledFeatureUnknown) {
+      throw new Error(`Unknown feature ${dependencyResolution.featureId}.`);
+    }
+
+    const resolvedIds = dependencyResolution.featureIds;
     const missingId =
       request.features._tag === "refresh" ? request.features.ids.find((id) => !resolvedIds.includes(id)) : undefined;
     if (missingId !== undefined) {

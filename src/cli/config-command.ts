@@ -77,8 +77,14 @@ const setCommand = Command.make(
     Effect.gen(function* () {
       const { setting } = args;
       const current = yield* readConfig(args.scope);
-      const value = yield* settingValueFromText({ setting, text: args.value });
-      const nextConfig = yield* withSettingValue({ config: current.config, key: setting.key, value });
+      const value = yield* Effect.try({
+        try: () => settingValueFromText({ setting, text: args.value }),
+        catch: (error) => error,
+      });
+      const nextConfig = yield* Effect.try({
+        try: () => withSettingValue({ config: current.config, key: setting.key, value }),
+        catch: (error) => error,
+      });
       const owner = yield* saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } });
       if (args.format === "text") {
         yield* TerminalUI.success(`${setting.label} → ${formatSettingValue({ config: nextConfig, setting })}`);
@@ -122,10 +128,10 @@ const resetCommand = Command.make(
 
       const setting = args.setting.value;
       const current = yield* readConfig(args.scope);
-      const nextConfig = yield* withSettingValue({
-        config: current.config,
-        key: setting.key,
-        value: defaultSettingValue(setting.key),
+      const nextConfig = yield* Effect.try({
+        try: () =>
+          withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
+        catch: (error) => error,
       });
       const owner = yield* saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } });
       if (args.format === "json") {

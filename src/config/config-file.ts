@@ -1,11 +1,13 @@
-import { FileSystem } from "@effect/platform";
-import { Effect, Either, Option, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { readFile } from "node:fs/promises";
 
-import { bytesEqual, hashBytes, isNotFound } from "../install/file-bytes.js";
+import { z } from "zod";
+
+import { bytesEqual, hashBytes } from "../install/file-bytes.js";
 import { findDuplicateJsonKey } from "../install/find-duplicate-json-key.js";
-import { type PreviousFileValue, previousFileValueSchema } from "../install/ownership.js";
-import { type WriteOperation, writeOperationSchema } from "../install/plan.js";
-import { scopeSchema } from "../install/receipt.js";
+import type { PreviousFileValue } from "../install/ownership.js";
+import type { WriteOperation } from "../install/plan.js";
+import type { Scope } from "../install/receipt.js";
+import { formatZodIssues } from "../zod-issues.js";
 import { type Config, configSchema, defaultConfig } from "./config-schema.js";
 
 export const managedConfigPath = ".claude/agent-setup/config.json";
@@ -13,240 +15,185 @@ export const managedConfigPath = ".claude/agent-setup/config.json";
 const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const textEncoder = new TextEncoder();
 
-const formatIssue = SchemaParseIssue.TreeFormatter.formatErrorSync;
+export type ConfigFileSnapshot =
+  | { readonly _tag: "missing" }
+  | { readonly _tag: "present"; readonly bytes: Uint8Array; readonly config: Config };
 
-export class ConfigFileParseError extends Schema.TaggedError<ConfigFileParseError>()("ConfigFileParseError", {
-  configPath: Schema.NonEmptyString.annotations({
-    description: "Managed configuration file that could not be parsed as JSON.",
-  }),
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable JSON parsing issue reported by Effect Schema.",
-  }),
-}) {
-  get message(): string {
-    return `Managed config at ${this.configPath} is not valid JSON: ${this.issue}. Fix or remove it, then retry.`;
-  }
+export interface ManagedConfigPlan {
+  readonly config: Config;
+  readonly managedConfigWrite: WriteOperation;
 }
 
-export class ConfigFileSchemaError extends Schema.TaggedError<ConfigFileSchemaError>()("ConfigFileSchemaError", {
-  configPath: Schema.NonEmptyString.annotations({
-    description: "Managed configuration file whose decoded value violated the schema.",
-  }),
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable managed configuration issue reported by Effect Schema.",
-  }),
-}) {
-  get message(): string {
-    return `Managed config at ${this.configPath} is invalid: ${this.issue}. Fix or remove it, then retry.`;
-  }
+export type ManagedConfigSelection =
+  | { readonly _tag: "selected"; readonly config: Config }
+  | { readonly _tag: "firstProjectInstall"; readonly globalConfig: ConfigFileSnapshot };
+
+export interface ManagedConfigRequest {
+  readonly scope: Scope;
+  readonly selection: ManagedConfigSelection;
+  readonly previousConfigFile: PreviousFileValue;
 }
 
-const decodeJson = Schema.decodeUnknownEither(Schema.parseJson(), { onExcessProperty: "error" });
+const parseFailure = (input: { readonly configPath: string; readonly issue: string; readonly cause?: unknown }) =>
+  new Error(`Managed config at ${input.configPath} is not valid JSON: ${input.issue}. Fix or remove it, then retry.`, {
+    cause: input.cause,
+  });
 
-const decodeConfigValue = Schema.decodeUnknownEither(configSchema, { onExcessProperty: "error" });
+const decodeUtf8Text = (bytes: Uint8Array, configPath: string): string => {
+  try {
+    return textDecoder.decode(bytes);
+  } catch (error) {
+    throw parseFailure({
+      configPath,
+      issue: `file bytes are not valid UTF-8: ${error instanceof Error ? error.message : String(error)}`,
+      cause: error,
+    });
+  }
+};
+
+const parseJsonText = (text: string, configPath: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw parseFailure({ configPath, issue: error instanceof Error ? error.message : String(error), cause: error });
+  }
+};
 
 // Lossless at every trust boundary: no replacement characters, no BOM normalization, no collapsed duplicate keys.
-const decodeConfigFileBytes = (input: {
-  readonly bytes: Uint8Array;
-  readonly configPath: string;
-}): Either.Either<Config, ConfigFileParseError | ConfigFileSchemaError> => {
-  const parseError = (issue: string) => new ConfigFileParseError({ configPath: input.configPath, issue });
-  const text = Either.try({
-    try: () => textDecoder.decode(input.bytes),
-    catch: (error) =>
-      parseError(`file bytes are not valid UTF-8: ${error instanceof Error ? error.message : String(error)}`),
-  });
-  if (Either.isLeft(text)) {
-    return Either.left(text.left);
+const decodeConfigFileBytes = (input: { readonly bytes: Uint8Array; readonly configPath: string }): Config => {
+  const text = decodeUtf8Text(input.bytes, input.configPath);
+
+  const isByteOrderMarkPresent = text.startsWith("﻿");
+  if (isByteOrderMarkPresent) {
+    throw parseFailure({
+      configPath: input.configPath,
+      issue: "file must not start with a UTF-8 byte-order mark",
+    });
   }
 
-  if (text.right.startsWith("\uFEFF")) {
-    return Either.left(parseError("file must not start with a UTF-8 byte-order mark"));
-  }
+  const json = parseJsonText(text, input.configPath);
 
-  const json = Either.mapLeft(decodeJson(text.right), (error) => parseError(formatIssue(error)));
-  if (Either.isLeft(json)) {
-    return Either.left(json.left);
-  }
-
-  const duplicateKey = findDuplicateJsonKey(text.right);
+  const duplicateKey = findDuplicateJsonKey(text);
   if (duplicateKey !== undefined) {
-    return Either.left(parseError(`duplicate JSON property ${JSON.stringify(duplicateKey)}`));
+    throw parseFailure({
+      configPath: input.configPath,
+      issue: `duplicate JSON property ${JSON.stringify(duplicateKey)}`,
+    });
   }
 
-  return Either.mapLeft(
-    decodeConfigValue(json.right),
-    (error) => new ConfigFileSchemaError({ configPath: input.configPath, issue: formatIssue(error) }),
-  );
+  const configCheck = configSchema.safeParse(json);
+  const isConfigValid = configCheck.success;
+  if (!isConfigValid) {
+    throw new Error(
+      `Managed config at ${input.configPath} is invalid: ${formatZodIssues(configCheck.error)}. Fix or remove it, then retry.`,
+      { cause: configCheck.error },
+    );
+  }
+
+  return configCheck.data;
 };
 
-const managedConfigsEqual = Schema.equivalence(configSchema);
+const isMissingFile = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ENOENT";
 
-const missingConfigFileSnapshotSchema = Schema.TaggedStruct("missing", {}).annotations({
-  description: "Managed configuration file is absent.",
-});
-
-const presentConfigFileSnapshotSchema = Schema.TaggedStruct("present", {
-  bytes: Schema.Uint8ArrayFromSelf.annotations({
-    description: "Exact managed configuration bytes read once from disk.",
-  }),
-  config: configSchema.annotations({
-    description: "Complete strict configuration decoded from the same bytes.",
-  }),
-})
-  .pipe(
-    Schema.filter((snapshot) => {
-      const decoded = decodeConfigFileBytes({ bytes: snapshot.bytes, configPath: "managed configuration snapshot" });
-
-      return Either.isRight(decoded) && managedConfigsEqual(decoded.right, snapshot.config)
-        ? undefined
-        : { path: ["config"], message: "Decoded managed configuration must exactly match its source bytes." };
-    }),
-  )
-  .annotations({
-    description: "Exact managed configuration bytes and their decoded value.",
-  });
-
-const configFileSnapshotSchema = Schema.Union(
-  missingConfigFileSnapshotSchema,
-  presentConfigFileSnapshotSchema,
-).annotations({
-  description: "Missing or present managed configuration captured by one filesystem read.",
-});
-
-export type ConfigFileSnapshot = Schema.Schema.Type<typeof configFileSnapshotSchema>;
-
-export const readConfigFile = (configPath: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const contents = yield* fileSystem.readFile(configPath).pipe(
-      Effect.map(Option.some),
-      Effect.catchIf(isNotFound, () => Effect.succeed(Option.none())),
-    );
-    if (Option.isNone(contents)) {
-      return missingConfigFileSnapshotSchema.make();
+const readConfigBytes = async (configPath: string): Promise<Uint8Array | null> => {
+  try {
+    return await readFile(configPath);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return null;
     }
 
-    const decoded = decodeConfigFileBytes({ bytes: contents.value, configPath });
-    if (Either.isLeft(decoded)) {
-      return yield* decoded.left;
-    }
-
-    return presentConfigFileSnapshotSchema.make({ _tag: "present", bytes: contents.value, config: decoded.right });
-  });
-
-const managedConfigJsonSchema = Schema.parseJson(configSchema, { space: 2 });
-
-export class ManagedConfigPlanError extends Schema.TaggedError<ManagedConfigPlanError>()("ManagedConfigPlanError", {
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable request or generated-plan validation issue.",
-  }),
-}) {
-  get message(): string {
-    return `Cannot plan managed configuration: ${this.issue}`;
+    throw error;
   }
-}
+};
+
+export const readConfigFile = async (configPath: string): Promise<ConfigFileSnapshot> => {
+  const bytes = await readConfigBytes(configPath);
+
+  const isThereNoConfigFile = bytes === null;
+  if (isThereNoConfigFile) {
+    return { _tag: "missing" };
+  }
+
+  const config = decodeConfigFileBytes({ bytes, configPath });
+  return { _tag: "present", bytes, config };
+};
 
 const renderManagedConfigBytes = (config: Config): Uint8Array =>
-  textEncoder.encode(`${Schema.encodeSync(managedConfigJsonSchema)(config)}\n`);
+  textEncoder.encode(`${JSON.stringify(config, null, 2)}\n`);
 
-const configSelectionSchema = Schema.Union(
-  Schema.TaggedStruct("selected", {
-    config: configSchema.annotations({
-      description: "Complete validated configuration selected for this scope.",
-    }),
-  }),
-  Schema.TaggedStruct("firstProjectInstall", {
-    globalConfig: configFileSnapshotSchema.annotations({
-      description:
-        "Exact validated global snapshot copied once, or a missing snapshot when schema defaults should be used.",
-    }),
-  }),
-).annotations({
-  description: "Tagged source of the complete managed configuration without behavior flags.",
-});
-
-const managedConfigRequestFieldsSchema = Schema.Struct({
-  scope: scopeSchema.annotations({
-    description: "Installation scope receiving the managed configuration.",
-  }),
-  selection: configSelectionSchema,
-  previousConfigFile: Schema.typeSchema(previousFileValueSchema).annotations({
-    description: "Exact original managed-config state retained for whole-file restoration.",
-  }),
-});
-
-const firstProjectInstallIssues = (request: Schema.Schema.Type<typeof managedConfigRequestFieldsSchema>) => {
-  if (request.selection._tag !== "firstProjectInstall") {
-    return [];
+// A present snapshot must decode from its own bytes to exactly the config it carries.
+const addSnapshotMatchIssues = (snapshot: ConfigFileSnapshot, context: z.RefinementCtx) => {
+  const isPresentSnapshot = snapshot._tag === "present";
+  if (!isPresentSnapshot) {
+    return;
   }
 
-  return [
-    request.scope === "project"
-      ? undefined
-      : { path: ["selection", "_tag"], message: "A first project install requires project scope." },
-    request.previousConfigFile._tag === "missing"
-      ? undefined
-      : { path: ["previousConfigFile"], message: "A first project install requires a missing target managed config." },
-  ];
+  const decodedConfig = decodeConfigFileBytes({ bytes: snapshot.bytes, configPath: "managed configuration snapshot" });
+  const isDecodedConfigMatching = JSON.stringify(decodedConfig) === JSON.stringify(snapshot.config);
+  if (!isDecodedConfigMatching) {
+    context.addIssue({
+      code: "custom",
+      path: ["config"],
+      message: "Decoded managed configuration must exactly match its source bytes.",
+    });
+  }
 };
 
-export const managedConfigRequestSchema = managedConfigRequestFieldsSchema.pipe(
-  Schema.filter(firstProjectInstallIssues),
-);
+const configFileSnapshotSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("missing") }),
+    z.strictObject({ _tag: z.literal("present"), bytes: z.instanceof(Uint8Array), config: configSchema }),
+  ])
+  .superRefine(addSnapshotMatchIssues);
 
-export type ManagedConfigRequest = Schema.Schema.Type<typeof managedConfigRequestSchema>;
+const previousConfigFileSchema = z.discriminatedUnion("_tag", [
+  z.strictObject({ _tag: z.literal("missing") }),
+  z.strictObject({ _tag: z.literal("priorFile"), bytes: z.instanceof(Uint8Array) }),
+]);
 
-const managedConfigWriteSchema = writeOperationSchema.pipe(
-  Schema.filter((operation) => [
-    operation.file.path === managedConfigPath
-      ? undefined
-      : { path: ["file", "path"], message: `Managed configuration writes must target ${managedConfigPath}.` },
-    operation.file.kind._tag === "managedConfig"
-      ? undefined
-      : { path: ["file", "kind"], message: "Managed configuration writes require the managedConfig file kind." },
-    operation.file.ownership._tag === "wholeFile" &&
-    operation.file.ownership.installedHash !== hashBytes(operation.bytes)
-      ? {
-          path: ["file", "ownership", "installedHash"],
-          message: "Managed-config ownership hash must match its exact desired bytes.",
-        }
-      : undefined,
-  ]),
-);
+const addFirstProjectInstallIssues = (
+  request: {
+    readonly scope: Scope;
+    readonly selection: { readonly _tag: string };
+    readonly previousConfigFile: { readonly _tag: string };
+  },
+  context: z.RefinementCtx,
+) => {
+  const isFirstProjectInstall = request.selection._tag === "firstProjectInstall";
+  if (!isFirstProjectInstall) {
+    return;
+  }
 
-const managedConfigPlanFieldsSchema = Schema.Struct({
-  config: configSchema.annotations({
-    description: "Complete configuration built by this plan.",
-  }),
-  managedConfigWrite: managedConfigWriteSchema.annotations({
-    description: "Exact managed-config write published by the complete plan.",
-  }),
-});
+  const isProjectScope = request.scope === "project";
+  if (!isProjectScope) {
+    context.addIssue({
+      code: "custom",
+      path: ["selection", "_tag"],
+      message: "A first project install requires project scope.",
+    });
+  }
 
-export const managedConfigPlanSchema = managedConfigPlanFieldsSchema.pipe(
-  Schema.filter((plan) =>
-    bytesEqual(plan.managedConfigWrite.bytes, renderManagedConfigBytes(plan.config))
-      ? undefined
-      : {
-          path: ["managedConfigWrite", "bytes"],
-          message: "Managed-config bytes must encode the returned complete configuration.",
-        },
-  ),
-);
+  const isTargetMissing = request.previousConfigFile._tag === "missing";
+  if (!isTargetMissing) {
+    context.addIssue({
+      code: "custom",
+      path: ["previousConfigFile"],
+      message: "A first project install requires a missing target managed config.",
+    });
+  }
+};
 
-export type ManagedConfigPlan = Schema.Schema.Type<typeof managedConfigPlanSchema>;
-
-const toPlanError = (error: SchemaParseIssue.ParseError) => new ManagedConfigPlanError({ issue: formatIssue(error) });
-
-const decodeManagedConfigRequest = (input: unknown) =>
-  Either.mapLeft(
-    Schema.decodeUnknownEither(managedConfigRequestSchema, { onExcessProperty: "error" })(input),
-    toPlanError,
-  );
-
-const validateManagedConfigPlan = (input: unknown) =>
-  Either.mapLeft(Schema.validateEither(managedConfigPlanSchema, { onExcessProperty: "error" })(input), toPlanError);
+const managedConfigRequestSchema = z
+  .strictObject({
+    scope: z.enum(["global", "project"]),
+    selection: z.discriminatedUnion("_tag", [
+      z.strictObject({ _tag: z.literal("selected"), config: configSchema }),
+      z.strictObject({ _tag: z.literal("firstProjectInstall"), globalConfig: configFileSnapshotSchema }),
+    ]),
+    previousConfigFile: previousConfigFileSchema,
+  })
+  .superRefine(addFirstProjectInstallIssues);
 
 const createManagedConfigWrite = (config: Config, previous: PreviousFileValue): WriteOperation => {
   const bytes = renderManagedConfigBytes(config);
@@ -267,22 +214,56 @@ const resolveSelectedConfig = (request: ManagedConfigRequest): Config => {
   switch (request.selection._tag) {
     case "selected":
       return request.selection.config;
-    case "firstProjectInstall":
-      return request.selection.globalConfig._tag === "present" ? request.selection.globalConfig.config : defaultConfig;
+    case "firstProjectInstall": {
+      const globalSnapshot = request.selection.globalConfig;
+      const isGlobalConfigPresent = globalSnapshot._tag === "present";
+      if (!isGlobalConfigPresent) {
+        return defaultConfig;
+      }
+
+      return globalSnapshot.config;
+    }
   }
 };
 
-// Plans one managed config without I/O: decode fully, resolve one source, then validate the correlated write.
-export const planManagedConfig = (input: unknown): Either.Either<ManagedConfigPlan, ManagedConfigPlanError> => {
-  const request = decodeManagedConfigRequest(input);
-  if (Either.isLeft(request)) {
-    return Either.left(request.left);
+// Throws when a plan's bytes do not encode its config or its ownership hash does not match those bytes.
+export const assertManagedConfigPlan = (plan: ManagedConfigPlan): void => {
+  const bytes = renderManagedConfigBytes(plan.config);
+  const write = plan.managedConfigWrite;
+  const isBytesEncodingConfig = bytesEqual(write.bytes, bytes);
+  if (!isBytesEncodingConfig) {
+    throw new Error(
+      "Cannot plan managed configuration: Managed-config bytes must encode the returned complete configuration.",
+    );
   }
 
-  const config = resolveSelectedConfig(request.right);
+  const ownership = write.file.ownership;
+  const isWholeFile = ownership._tag === "wholeFile";
+  const isOwnershipHashMatching = !isWholeFile || ownership.installedHash === hashBytes(write.bytes);
+  if (!isOwnershipHashMatching) {
+    throw new Error(
+      "Cannot plan managed configuration: Managed-config ownership hash must match its exact desired bytes.",
+    );
+  }
+};
 
-  return validateManagedConfigPlan({
+// Plans one managed config without I/O: validate the request, resolve one source, then check the planned write.
+export const planManagedConfig = (input: unknown): ManagedConfigPlan => {
+  const requestCheck = managedConfigRequestSchema.safeParse(input);
+  const isRequestValid = requestCheck.success;
+  if (!isRequestValid) {
+    throw new Error(`Cannot plan managed configuration: ${formatZodIssues(requestCheck.error)}`, {
+      cause: requestCheck.error,
+    });
+  }
+
+  const request = requestCheck.data;
+  const config = resolveSelectedConfig(request);
+  const plan = {
     config,
-    managedConfigWrite: createManagedConfigWrite(config, request.right.previousConfigFile),
-  });
+    managedConfigWrite: createManagedConfigWrite(config, request.previousConfigFile),
+  };
+  assertManagedConfigPlan(plan);
+
+  return plan;
 };

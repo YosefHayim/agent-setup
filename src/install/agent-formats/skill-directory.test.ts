@@ -9,8 +9,8 @@ import type { PreviousFileValue } from "../ownership.js";
 import { planSkillDirectory, type SkillDirectoryPlan, SkillDirectoryPlanError } from "./skill-directory.js";
 
 const textEncoder = new TextEncoder();
-const claudeAgent = Option.getOrThrow(findAgent("claude-code"));
-const writeReadmeFeature = Option.getOrThrow(findFeature("write-readme"));
+const claudeAgent = findAgent("claude-code")!;
+const writeReadmeFeature = findFeature("write-readme")!;
 const missingPrevious: PreviousFileValue = { _tag: "missing" };
 const priorSkillBytes = textEncoder.encode("previous skill\n");
 const skillDefinition = writeReadmeFeature.installedSkill;

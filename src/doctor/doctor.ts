@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
 
 import {
   type AgentEvidence,
@@ -16,8 +16,8 @@ import {
   featureIdSchema,
 } from "../catalog/feature-catalog.js";
 import { managedConfigPath, readConfigFile } from "../config/config-file.js";
-import { configSchema } from "../config/config-schema.js";
-import { hostPlatformSchema } from "../config/host-scan.js";
+import { type Config, isConfig } from "../config/config-schema.js";
+import { hostOperatingSystems } from "../config/host-scan.js";
 import { installationDestinationSchema, receiptPath } from "../install/install-paths.js";
 import { preparedPackageSchema } from "../install/install-request.js";
 import { relativePathSchema } from "../install/ownership.js";
@@ -26,7 +26,7 @@ import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } 
 export const healthRequestSchema = Schema.Struct({
   destination: installationDestinationSchema,
   preparedPackage: preparedPackageSchema,
-  platform: hostPlatformSchema,
+  platform: Schema.Struct({ operatingSystem: Schema.Literal(...hostOperatingSystems) }),
   agentEvidence: agentEvidenceSchema,
 }).annotations({
   description: "Complete read-only doctor request decoded before filesystem inspection.",
@@ -37,7 +37,7 @@ type HealthRequest = Schema.Schema.Type<typeof healthRequestSchema>;
 const configHealthSchema = Schema.Union(
   Schema.TaggedStruct("missing", {}),
   Schema.TaggedStruct("present", {
-    config: configSchema.annotations({
+    config: Schema.declare<Config>(isConfig).annotations({
       description: "Strict complete managed configuration decoded from disk.",
     }),
   }),
@@ -226,7 +226,12 @@ const checkFeatureHealth = (request: HealthRequest, receipt: Receipt) => {
 const findMissingDependencies = (receipt: Receipt): Array<Discrepancy> => {
   const recordedIds = new Set<string>(receipt.features);
   const requiredResult = addDependencies(receipt.features);
-  const requiredIds = Either.getOrThrow(requiredResult);
+  const isRequiredFeatureUnknown = requiredResult.status === "unknown";
+  if (isRequiredFeatureUnknown) {
+    throw new Error(`Unknown feature ${requiredResult.featureId}.`);
+  }
+
+  const requiredIds = requiredResult.featureIds;
 
   return requiredIds
     .filter((featureId) => !recordedIds.has(featureId))
@@ -258,7 +263,10 @@ export const checkHealth = (input: unknown) =>
   Effect.gen(function* () {
     const request = yield* decodeHealthRequest(input);
     const path = yield* Path.Path;
-    const configSnapshot = yield* readConfigFile(path.join(request.destination.root, managedConfigPath));
+    const configSnapshot = yield* Effect.tryPromise({
+      try: () => readConfigFile(path.join(request.destination.root, managedConfigPath)),
+      catch: (error) => error,
+    });
     const receiptSnapshot = yield* readReceipt(path.join(request.destination.root, receiptPath));
     const receipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     const featureDiagnostics = receipt === undefined ? [] : yield* checkFeatureHealth(request, receipt);

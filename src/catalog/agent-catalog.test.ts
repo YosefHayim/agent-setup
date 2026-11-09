@@ -1,4 +1,3 @@
-import { Either, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -130,37 +129,32 @@ const validAgentFixture = {
   nativeHooks: { _tag: "unsupported" },
 };
 
-const decodeStrict =
-  <Value, Encoded>(schema: Schema.Schema<Value, Encoded>) =>
-  (input: unknown) =>
-    Schema.decodeUnknownEither(schema, { onExcessProperty: "error" })(input);
+const decodeDefinition = (input: unknown) => agentDefinitionSchema.safeParse(input);
 
-const decodeDefinition = decodeStrict(agentDefinitionSchema);
-
-const decodeTarget = decodeStrict(agentTargetSchema);
+const decodeTarget = (input: unknown) => agentTargetSchema.safeParse(input);
 
 describe("agentCatalog", () => {
   it("decodes the exact approved agents in stable display order", () => {
     expect(agentCatalog).toEqual(expectedAgents);
   });
 
-  it("finds agents with Option and represents absence", () => {
-    expect(Option.map(findAgent("kimi-code"), (agent) => agent.displayName)).toEqual(Option.some("Kimi Code CLI"));
-    expect(findAgent("missing-agent")).toEqual(Option.none());
+  it("finds agents and represents absence with null", () => {
+    expect(findAgent("kimi-code")?.displayName).toBe("Kimi Code CLI");
+    expect(findAgent("missing-agent")).toBeNull();
   });
 });
 
 describe("agentCatalogSchema", () => {
   it("accepts a complete definition and rejects duplicate IDs", () => {
-    expect(Either.isRight(decodeDefinition(validAgentFixture))).toBe(true);
+    expect(decodeDefinition(validAgentFixture).success).toBe(true);
 
-    const agentCatalogCheck = decodeStrict(agentCatalogSchema)([
+    const agentCatalogCheck = agentCatalogSchema.safeParse([
       validAgentFixture,
       { ...validAgentFixture, displayName: "Duplicate Agent" },
     ]);
 
-    expect(Either.isLeft(agentCatalogCheck)).toBe(true);
-    expect(String(Option.getOrThrow(Either.getLeft(agentCatalogCheck)))).toContain("Agent IDs must be unique");
+    expect(agentCatalogCheck.success).toBe(false);
+    expect(String(agentCatalogCheck.error)).toContain("Agent IDs must be unique");
   });
 
   it.each([
@@ -203,8 +197,8 @@ describe("agentCatalogSchema", () => {
   ])("rejects excess properties in $name", ({ input, decode }) => {
     const agentCatalogCheck = decode(input);
 
-    expect(Either.isLeft(agentCatalogCheck)).toBe(true);
-    expect(String(Option.getOrThrow(Either.getLeft(agentCatalogCheck)))).toContain("is unexpected");
+    expect(agentCatalogCheck.success).toBe(false);
+    expect(String(agentCatalogCheck.error)).toContain("Unrecognized key");
   });
 
   it.each([
@@ -212,7 +206,7 @@ describe("agentCatalogSchema", () => {
     { homePaths: [], commands: [] },
     { absolutePaths: [], commands: [] },
   ])("requires all three explicit detection arrays (%o)", (evidence) => {
-    expect(Either.isLeft(decodeStrict(agentEvidenceSchema)(evidence))).toBe(true);
+    expect(agentEvidenceSchema.safeParse(evidence).success).toBe(false);
   });
 });
 

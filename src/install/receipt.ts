@@ -46,12 +46,13 @@ const listRecordedFeatures = (features: ReadonlyArray<string>, resolvedIds: Read
 
 const receiptFeatureIssues = (features: ReadonlyArray<string>) => {
   const resolved = addDependencies(features);
-  if (Either.isLeft(resolved)) {
-    const featureId = resolved.left.featureId;
+  const isFeatureUnknown = resolved.status === "unknown";
+  if (isFeatureUnknown) {
+    const featureId = resolved.featureId;
     return [{ path: [features.indexOf(featureId)], message: `Receipt feature ${featureId} is unknown.` }];
   }
 
-  const catalogOrderFeatures = listRecordedFeatures(features, resolved.right);
+  const catalogOrderFeatures = listRecordedFeatures(features, resolved.featureIds);
   const mismatchIndex = features.findIndex((feature, index) => feature !== catalogOrderFeatures[index]);
   const isOrderWrong = mismatchIndex >= 0 || features.length !== catalogOrderFeatures.length;
   if (isOrderWrong) {
@@ -71,9 +72,10 @@ const withCurrentFeatureIds = (features: ReadonlyArray<string>) => {
   if (!features.some((feature) => retiredFeatureIds.has(feature))) return features;
   const renamed = features.map((feature) => retiredFeatureIds.get(feature) || feature);
   const resolved = addDependencies(renamed);
-  if (Either.isLeft(resolved)) return renamed;
+  const isFeatureUnknown = resolved.status === "unknown";
+  if (isFeatureUnknown) return renamed;
 
-  return listRecordedFeatures(renamed, resolved.right);
+  return listRecordedFeatures(renamed, resolved.featureIds);
 };
 
 const featureListSchema = Schema.transform(

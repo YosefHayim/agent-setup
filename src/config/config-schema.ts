@@ -1,80 +1,46 @@
-import { Effect, Option, Schema, SchemaAST, type ParseResult as SchemaParseIssue, Struct } from "effect";
+import { z } from "zod";
 
-const withDefault = <Value, Encoded>(schema: Schema.Schema<Value, Encoded>, fallback: Value) =>
-  Schema.optionalWith(schema, { default: () => fallback, exact: true });
+import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
 
 const CODE_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
 
-// Every setting carries its CLI label (title) and meaning (description) on its property signature,
-// so the CLI, the menu, and the README settings table all read one declaration.
-export const configSchema = Schema.Struct({
-  sessionRehomeRoots: withDefault(Schema.Array(Schema.NonEmptyTrimmedString), CODE_ROOT_FOLDERS).annotations({
-    title: "session rehome roots",
-    description:
-      "Folders (home-relative or absolute) whose git repos session-rehome may move Claude Code and Codex sessions into. Repos are found one and two levels deep.",
-  }),
-  diskCleanupRoots: withDefault(Schema.Array(Schema.NonEmptyTrimmedString), CODE_ROOT_FOLDERS).annotations({
-    title: "disk cleanup roots",
-    description:
-      "Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove, and for unpushed branches to push. Repos are found one and two levels deep.",
-  }),
-  debugLogs: withDefault(Schema.Boolean, false).annotations({
-    title: "debug logs",
-    description: "Print agent-setup hook errors to stderr.",
-  }),
+const rootFolderListSchema = z.array(nonEmptyTrimmedTextSchema).default(CODE_ROOT_FOLDERS);
+
+const configObjectSchema = z.strictObject({
+  sessionRehomeRoots: rootFolderListSchema,
+  diskCleanupRoots: rootFolderListSchema,
+  debugLogs: z.boolean().default(false),
 });
 
-export type Config = Schema.Schema.Type<typeof configSchema>;
+export type Config = z.infer<typeof configObjectSchema>;
 
 type ConfigKey = keyof Config;
 
-export const configJsonSchema = Schema.parseJson(configSchema);
+// A key set to undefined is rejected here, before defaults fill it in; JSON files can never carry one.
+const rejectUndefinedProperties = (input: unknown, context: z.RefinementCtx) => {
+  if (typeof input !== "object" || input === null) {
+    return;
+  }
 
-export const defaultConfig = Schema.decodeUnknownSync(configSchema, { onExcessProperty: "error" })({});
-
-const decodeConfig = Schema.decodeUnknown(configSchema, { onExcessProperty: "error" });
-
-type ConfigProperty = Schema.PropertySignature.All;
-
-// The value side (before the default) carries the kind; the property signature carries title and description.
-const propertyParts = (property: ConfigProperty): { valueAst: SchemaAST.AST; annotations: SchemaAST.Annotated } => {
-  switch (property.ast._tag) {
-    case "PropertySignatureDeclaration":
-      return { valueAst: property.ast.type, annotations: property.ast };
-    case "PropertySignatureTransformation":
-      return { valueAst: property.ast.from.type, annotations: property.ast.to };
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) {
+      context.addIssue({ code: "custom", message: "Properties must not be undefined.", path: [key] });
+    }
   }
 };
 
-type SettingKind = "number" | "boolean" | "list" | "text";
+export const configSchema = z.unknown().superRefine(rejectUndefinedProperties).pipe(configObjectSchema);
 
-const settingKind = (valueAst: SchemaAST.AST): SettingKind => {
-  switch (SchemaAST.encodedAST(valueAst)._tag) {
-    case "NumberKeyword":
-      return "number";
-    case "BooleanKeyword":
-      return "boolean";
-    case "TupleType":
-      return "list";
-    default:
-      return "text";
-  }
-};
+// Temporary bridge for the Effect schemas that still validate configs; removed with those schemas.
+export const isConfig = (input: unknown): input is Config => configSchema.safeParse(input).success;
 
-const literalChoices = (valueAst: SchemaAST.AST): ReadonlyArray<string> => {
-  const typeAst = SchemaAST.typeAST(valueAst);
-  if (SchemaAST.isBooleanKeyword(typeAst)) {
-    return ["true", "false"];
-  }
+export const encodeConfigJson = (config: Config): string => JSON.stringify(config);
 
-  const members = SchemaAST.isUnion(typeAst) ? typeAst.types : [typeAst];
-  return members.flatMap((member) => (SchemaAST.isLiteral(member) ? [String(member.literal)] : []));
-};
+export const defaultConfig: Config = configObjectSchema.parse({});
 
-// e.g. "debugLogs" → "debug-logs"
-const settingNameFor = (key: ConfigKey): string => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+export type SettingKind = "number" | "boolean" | "list" | "text";
 
-type ConfigSetting = {
+export interface ConfigSetting {
   readonly key: ConfigKey;
   readonly name: string;
   readonly label: string;
@@ -82,68 +48,101 @@ type ConfigSetting = {
   readonly kind: SettingKind;
   readonly choices: ReadonlyArray<string>;
   readonly optional: boolean;
-};
+}
 
-const configFields = configSchema.fields;
+interface ConfigSettingDefinition {
+  readonly key: ConfigKey;
+  readonly label: string;
+  readonly description: string;
+  readonly kind: SettingKind;
+}
 
-export const configSettings: ReadonlyArray<ConfigSetting> = Struct.keys(configFields).map((key) => {
-  const property: ConfigProperty = configFields[key];
-  const { valueAst, annotations } = propertyParts(property);
-  return {
-    key,
-    name: settingNameFor(key),
-    label: Option.getOrElse(SchemaAST.getTitleAnnotation(annotations), () => key),
-    description: Option.getOrElse(SchemaAST.getDescriptionAnnotation(annotations), () => ""),
-    kind: settingKind(valueAst),
-    choices: literalChoices(valueAst),
-    optional: property.ast._tag === "PropertySignatureDeclaration" && property.ast.isOptional,
-  };
-});
+// The CLI label and meaning of every setting; the CLI, the menu and the README settings table all read this one list.
+const configSettingDefinitions = [
+  {
+    key: "sessionRehomeRoots",
+    label: "session rehome roots",
+    description:
+      "Folders (home-relative or absolute) whose git repos session-rehome may move Claude Code and Codex sessions into. Repos are found one and two levels deep.",
+    kind: "list",
+  },
+  {
+    key: "diskCleanupRoots",
+    label: "disk cleanup roots",
+    description:
+      "Folders (home-relative or absolute) whose git repos disk-cleanup checks for finished worktrees to push and remove, and for unpushed branches to push. Repos are found one and two levels deep.",
+    kind: "list",
+  },
+  {
+    key: "debugLogs",
+    label: "debug logs",
+    description: "Print agent-setup hook errors to stderr.",
+    kind: "boolean",
+  },
+] as const satisfies ReadonlyArray<ConfigSettingDefinition>;
 
-const decodeNumberText = Schema.decodeUnknown(Schema.NumberFromString);
+// e.g. "debugLogs" → "debug-logs"
+const settingNameFor = (key: ConfigKey): string => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
-const decodeBooleanText = Schema.decodeUnknown(Schema.BooleanFromString);
+const choicesFor = (kind: SettingKind): ReadonlyArray<string> => (kind === "boolean" ? ["true", "false"] : []);
 
-// Turn CLI text into the value a setting stores; empty text clears an optional setting.
-export const settingValueFromText = (request: {
-  readonly setting: ConfigSetting;
-  readonly text: string;
-}): Effect.Effect<Option.Option<unknown>, SchemaParseIssue.ParseError> => {
-  if (request.setting.optional && request.text.trim() === "") {
-    return Effect.succeed(Option.none());
+export const configSettings: ReadonlyArray<ConfigSetting> = configSettingDefinitions.map((definition) => ({
+  key: definition.key,
+  name: settingNameFor(definition.key),
+  label: definition.label,
+  description: definition.description,
+  kind: definition.kind,
+  choices: choicesFor(definition.kind),
+  optional: false,
+}));
+
+const booleanTextSchema = z.enum(["true", "false"]).transform((text) => text === "true");
+
+const numberTextSchema = z
+  .string()
+  .refine((text) => text !== "" && Number.isFinite(Number(text)), { message: "Expected a number." })
+  .transform((text) => Number(text));
+
+const listTextSchema = z
+  .string()
+  .transform((text) => text.split(",").map((entry) => entry.trim()))
+  .transform((entries) => entries.filter((entry) => entry !== ""));
+
+// Turns CLI text into the value a setting stores; empty text clears an optional setting (null).
+// A text the setting cannot hold throws a ZodError.
+export const settingValueFromText = (request: { readonly setting: ConfigSetting; readonly text: string }): unknown => {
+  const trimmedText = request.text.trim();
+  const isClearingOptionalSetting = request.setting.optional && trimmedText === "";
+  if (isClearingOptionalSetting) {
+    return null;
   }
 
   switch (request.setting.kind) {
     case "number":
-      return decodeNumberText(request.text.trim()).pipe(Effect.map(Option.some));
+      return numberTextSchema.parse(trimmedText);
     case "boolean":
-      return decodeBooleanText(request.text.trim()).pipe(Effect.map(Option.some));
+      return booleanTextSchema.parse(trimmedText);
     case "list":
-      return Effect.succeed(
-        Option.some(
-          request.text
-            .split(",")
-            .map((entry) => entry.trim())
-            .filter((entry) => entry !== ""),
-        ),
-      );
+      return listTextSchema.parse(request.text);
     case "text":
-      return Effect.succeed(Option.some(request.text));
+      return request.text;
   }
 };
 
-export const defaultSettingValue = (key: ConfigKey): Option.Option<unknown> =>
-  key in defaultConfig ? Option.some(defaultConfig[key]) : Option.none();
+export const defaultSettingValue = (key: ConfigKey): unknown => defaultConfig[key];
 
-// A cleared optional setting leaves config.json without the key instead of storing an empty value.
+// Returns a new complete config with one setting replaced; a null value removes an optional setting's key.
+// An invalid value throws a ZodError.
 export const withSettingValue = (request: {
   readonly config: Config;
   readonly key: ConfigKey;
-  readonly value: Option.Option<unknown>;
-}) =>
-  decodeConfig(
-    Option.match(request.value, {
-      onNone: () => Struct.omit(request.config, request.key),
-      onSome: (value) => ({ ...request.config, [request.key]: value }),
-    }),
-  );
+  readonly value: unknown;
+}) => {
+  const isClearingSetting = request.value === null;
+  if (isClearingSetting) {
+    const remainingEntries = Object.entries(request.config).filter(([name]) => name !== request.key);
+    return configSchema.parse(Object.fromEntries(remainingEntries));
+  }
+
+  return configSchema.parse({ ...request.config, [request.key]: request.value });
+};

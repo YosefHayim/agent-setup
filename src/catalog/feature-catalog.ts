@@ -1,4 +1,6 @@
-import { Either, Option, Schema } from "effect";
+import { z } from "zod";
+
+import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
 
 // e.g. "scratch-folder-guard", "image-to-code" — not "ScratchFolderGuard" or "png_to_code"
 const FEATURE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -7,176 +9,147 @@ const FEATURE_RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+$/
 // e.g. "hooks/scratch-folder-guard.ts" — feature-relative hook entrypoint only
 const HOOK_SOURCE_ENTRYPOINT_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+\.ts$/;
 
-export const featureIdSchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(FEATURE_ID_PATTERN, {
-    message: () => "Feature IDs must use lowercase kebab-case.",
-  }),
-  Schema.brand("FeatureId"),
-  Schema.annotations({
-    description: "Stable public feature ID.",
-  }),
+export const featureIdSchema = nonEmptyTrimmedTextSchema
+  .regex(FEATURE_ID_PATTERN, "Feature IDs must use lowercase kebab-case.")
+  .brand<"FeatureId">()
+  .describe("Stable public feature ID.");
+
+export type FeatureId = z.infer<typeof featureIdSchema>;
+
+const sourceDirectorySchema = nonEmptyTrimmedTextSchema.regex(
+  FEATURE_ID_PATTERN,
+  "Source directories must use kebab-case.",
 );
 
-export type FeatureId = Schema.Schema.Type<typeof featureIdSchema>;
-
-const sourceDirectorySchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(FEATURE_ID_PATTERN, {
-    message: () => "Source directories must use kebab-case.",
-  }),
-);
-
-const shippedPathSchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(FEATURE_RELATIVE_PATH_PATTERN, {
-    message: () => "Shipped paths must stay inside the authored skill directory.",
-  }),
+const shippedPathSchema = nonEmptyTrimmedTextSchema.regex(
+  FEATURE_RELATIVE_PATH_PATTERN,
+  "Shipped paths must stay inside the authored skill directory.",
 );
 
 const shippedPathsSchema = (request: { readonly duplicateMessage: string; readonly description: string }) =>
-  Schema.Array(shippedPathSchema).pipe(
-    Schema.filter((paths) => paths.length === new Set(paths).size, { message: () => request.duplicateMessage }),
-    Schema.annotations({ description: request.description }),
-  );
+  z
+    .array(shippedPathSchema)
+    .refine((paths) => paths.length === new Set(paths).size, { message: request.duplicateMessage })
+    .describe(request.description);
 
-export const featurePlatformSchema = Schema.Literal("any", "macos").annotations({
-  description: "Host capability required by one selected feature.",
-});
+export const featurePlatformSchema = z
+  .enum(["any", "macos"])
+  .describe("Host capability required by one selected feature.");
 
-export const installedSkillSchema = Schema.TaggedStruct("skill", {
-  id: Schema.NonEmptyTrimmedString.pipe(
-    Schema.pattern(FEATURE_ID_PATTERN, {
-      message: () => "Installed skill IDs must use lowercase kebab-case.",
+export const installedSkillSchema = z
+  .strictObject({
+    _tag: z.literal("skill"),
+    id: nonEmptyTrimmedTextSchema
+      .regex(FEATURE_ID_PATTERN, "Installed skill IDs must use lowercase kebab-case.")
+      .describe("Public directory name installed for this skill."),
+    shippedPaths: shippedPathsSchema({
+      duplicateMessage: "Shipped paths must be unique within one skill.",
+      description: "Exact feature-relative allowlist copied into dist/skills.",
     }),
-    Schema.annotations({
-      description: "Public directory name installed for this skill.",
+  })
+  .describe("Installed skill output.");
+
+const installedSkillDefinitionSchema = z.discriminatedUnion("_tag", [
+  z.strictObject({ _tag: z.literal("none") }),
+  installedSkillSchema,
+]);
+
+const hookMatcherSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("none") }),
+    z.strictObject({
+      _tag: z.literal("pattern"),
+      value: nonEmptyTrimmedTextSchema.describe("Tool matcher pattern supplied to the agent hook registration."),
     }),
-  ),
-  shippedPaths: shippedPathsSchema({
-    duplicateMessage: "Shipped paths must be unique within one skill.",
-    description: "Exact feature-relative allowlist copied into dist/skills.",
-  }),
-});
+  ])
+  .describe("Optional tool matcher represented without an optional property.");
 
-const installedSkillDefinitionSchema = Schema.Union(Schema.TaggedStruct("none", {}), installedSkillSchema);
-
-const hookMatcherSchema = Schema.Union(
-  Schema.TaggedStruct("none", {}),
-  Schema.TaggedStruct("pattern", {
-    value: Schema.NonEmptyTrimmedString.annotations({
-      description: "Tool matcher pattern supplied to the agent hook registration.",
+const registrationEntrypointSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("featureDefault") }).describe("Use the feature-level hook sourceEntrypoint."),
+    z.strictObject({
+      _tag: z.literal("path"),
+      value: nonEmptyTrimmedTextSchema
+        .regex(HOOK_SOURCE_ENTRYPOINT_PATTERN, "Registration entrypoints must end in .ts and stay feature-relative.")
+        .describe("Feature-relative TypeScript entrypoint for this registration only."),
     }),
-  }),
-).annotations({
-  description: "Optional tool matcher represented without an optional property.",
-});
+  ])
+  .describe("Per-registration entrypoint without an optional property.");
 
-const registrationEntrypointSchema = Schema.Union(
-  Schema.TaggedStruct("featureDefault", {}).annotations({
-    description: "Use the feature-level hook sourceEntrypoint.",
-  }),
-  Schema.TaggedStruct("path", {
-    value: Schema.NonEmptyTrimmedString.pipe(
-      Schema.pattern(HOOK_SOURCE_ENTRYPOINT_PATTERN, {
-        message: () => "Registration entrypoints must end in .ts and stay feature-relative.",
-      }),
-      Schema.annotations({
-        description: "Feature-relative TypeScript entrypoint for this registration only.",
-      }),
-    ),
-  }),
-).annotations({
-  description: "Per-registration entrypoint without an optional property.",
-});
-
-const hookRegistrationSchema = Schema.Struct({
-  event: Schema.Literal(
-    "PreToolUse",
-    "PostToolUse",
-    "UserPromptSubmit",
-    "SessionStart",
-    "SubagentStart",
-    "Stop",
-    "SubagentStop",
-    "PreCompact",
-    "PostCompact",
-    "SessionEnd",
-  ).annotations({
-    description: "Agent lifecycle event that invokes this entrypoint.",
-  }),
+const hookRegistrationSchema = z.strictObject({
+  event: z
+    .enum([
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "SessionStart",
+      "SubagentStart",
+      "Stop",
+      "SubagentStop",
+      "PreCompact",
+      "PostCompact",
+      "SessionEnd",
+    ])
+    .describe("Agent lifecycle event that invokes this entrypoint."),
   matcher: hookMatcherSchema,
   entrypoint: registrationEntrypointSchema,
-  readsAgentId: Schema.Boolean.annotations({
-    description:
-      "Whether the hook reads AGENT_SETUP_AGENT_ID, so its command starts with AGENT_SETUP_AGENT_ID=<agent>.",
-  }),
-  runsInBackground: Schema.optional(
-    Schema.Boolean.annotations({
-      description:
-        "Whether Claude Code runs the hook without waiting for it (async true). Only for hooks that print nothing the agent needs.",
-    }),
-  ),
+  readsAgentId: z
+    .boolean()
+    .describe("Whether the hook reads AGENT_SETUP_AGENT_ID, so its command starts with AGENT_SETUP_AGENT_ID=<agent>."),
+  runsInBackground: z
+    .boolean()
+    .describe(
+      "Whether Claude Code runs the hook without waiting for it (async true). Only for hooks that print nothing the agent needs.",
+    )
+    .optional(),
 });
 
-const featureRuntimeSchema = Schema.Union(
-  Schema.TaggedStruct("none", {}),
-  Schema.TaggedStruct("hook", {
-    sourceEntrypoint: Schema.NonEmptyTrimmedString.pipe(
-      Schema.pattern(HOOK_SOURCE_ENTRYPOINT_PATTERN, {
-        message: () => "Hook source entrypoints must end in .ts and stay feature-relative.",
-      }),
-      Schema.annotations({
-        description: "Feature-relative TypeScript entrypoint compiled into dist/src/hooks.",
-      }),
-    ),
-    registrations: Schema.Array(hookRegistrationSchema).annotations({
-      description: "Hook registrations derived into supported agent settings.",
-    }),
+const featureRuntimeSchema = z.discriminatedUnion("_tag", [
+  z.strictObject({ _tag: z.literal("none") }),
+  z.strictObject({
+    _tag: z.literal("hook"),
+    sourceEntrypoint: nonEmptyTrimmedTextSchema
+      .regex(HOOK_SOURCE_ENTRYPOINT_PATTERN, "Hook source entrypoints must end in .ts and stay feature-relative.")
+      .describe("Feature-relative TypeScript entrypoint compiled into dist/src/hooks."),
+    registrations: z
+      .array(hookRegistrationSchema)
+      .describe("Hook registrations derived into supported agent settings."),
   }),
-);
+]);
 
-export const featureDefinitionSchema = Schema.Struct({
-  id: featureIdSchema.annotations({
-    description: "Stable public feature ID.",
-  }),
-  sourceDirectory: sourceDirectorySchema.annotations({
-    description: "Authored directory under src/skills.",
-  }),
-  installedSkill: installedSkillDefinitionSchema.annotations({
-    description: "Installed output, separate from feature identity.",
-  }),
-  title: Schema.NonEmptyTrimmedString.annotations({
-    description: "Short human-readable CLI label.",
-  }),
-  summary: Schema.NonEmptyTrimmedString.annotations({
-    description: "One-line user-facing feature description.",
-  }),
-  selectedByDefault: Schema.Boolean.annotations({
-    description: "Whether a fresh interactive install preselects the feature.",
-  }),
-  dependencies: Schema.Array(featureIdSchema).annotations({
-    description: "Feature IDs resolved before this feature.",
-  }),
-  platform: featurePlatformSchema.annotations({
-    description: "Host requirement surfaced by install and doctor.",
-  }),
-  runtime: featureRuntimeSchema.annotations({
-    description: "Optional dependency-free hook runtime.",
-  }),
+export const featureDefinitionSchema = z.strictObject({
+  id: featureIdSchema.describe("Stable public feature ID."),
+  sourceDirectory: sourceDirectorySchema.describe("Authored directory under src/skills."),
+  installedSkill: installedSkillDefinitionSchema.describe("Installed output, separate from feature identity."),
+  title: nonEmptyTrimmedTextSchema.describe("Short human-readable CLI label."),
+  summary: nonEmptyTrimmedTextSchema.describe("One-line user-facing feature description."),
+  selectedByDefault: z.boolean().describe("Whether a fresh interactive install preselects the feature."),
+  dependencies: z.array(featureIdSchema).describe("Feature IDs resolved before this feature."),
+  platform: featurePlatformSchema.describe("Host requirement surfaced by install and doctor."),
+  runtime: featureRuntimeSchema.describe("Optional dependency-free hook runtime."),
 });
 
-export type FeatureDefinition = Schema.Schema.Type<typeof featureDefinitionSchema>;
+export type FeatureDefinition = z.infer<typeof featureDefinitionSchema>;
+
+export type FeaturePlatform = z.infer<typeof featurePlatformSchema>;
+
+interface CatalogIssue {
+  readonly path: ReadonlyArray<PropertyKey>;
+  readonly message: string;
+}
 
 const duplicateIssues = (request: {
   readonly values: ReadonlyArray<string | undefined>;
   readonly field: ReadonlyArray<string>;
   readonly message: string;
-}) =>
+}): ReadonlyArray<CatalogIssue> =>
   request.values.flatMap((value, index) =>
     value === undefined || request.values.indexOf(value) === index
       ? []
       : [{ path: [index, ...request.field], message: request.message }],
   );
 
-const missingDependencyIssues = (features: ReadonlyArray<FeatureDefinition>) => {
+const missingDependencyIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
   const featureIds = new Set(features.map((feature) => feature.id));
 
   return features.flatMap((feature, index) =>
@@ -193,7 +166,7 @@ const missingDependencyIssues = (features: ReadonlyArray<FeatureDefinition>) => 
   );
 };
 
-const dependencyCycleIssues = (features: ReadonlyArray<FeatureDefinition>) => {
+const dependencyCycleIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
   const createsCycle = (id: FeatureId, path: ReadonlyArray<FeatureId>): boolean => {
     if (path.includes(id)) {
       return true;
@@ -214,7 +187,7 @@ const dependencyCycleIssues = (features: ReadonlyArray<FeatureDefinition>) => {
   );
 };
 
-const validateFeatureCatalog = (features: ReadonlyArray<FeatureDefinition>) => [
+const validateFeatureCatalog = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => [
   ...duplicateIssues({
     values: features.map((feature) => feature.id),
     field: ["id"],
@@ -236,7 +209,11 @@ const validateFeatureCatalog = (features: ReadonlyArray<FeatureDefinition>) => [
   ...dependencyCycleIssues(features),
 ];
 
-export const featureCatalogSchema = Schema.Array(featureDefinitionSchema).pipe(Schema.filter(validateFeatureCatalog));
+export const featureCatalogSchema = z.array(featureDefinitionSchema).superRefine((features, context) => {
+  for (const issue of validateFeatureCatalog(features)) {
+    context.addIssue({ code: "custom", message: issue.message, path: [...issue.path] });
+  }
+});
 
 // A copied skill: installed under its feature ID, never preselected, and without hook code.
 const skillFeature = ({
@@ -251,7 +228,7 @@ const skillFeature = ({
   readonly summary: string;
   readonly shippedPaths: ReadonlyArray<string>;
   readonly dependencies?: ReadonlyArray<string>;
-  readonly platform?: Schema.Schema.Type<typeof featurePlatformSchema>;
+  readonly platform?: FeaturePlatform;
 }) => ({
   ...skill,
   installedSkill: { _tag: "skill", id: skill.id, shippedPaths },
@@ -261,7 +238,7 @@ const skillFeature = ({
   runtime: { _tag: "none" },
 });
 
-export const featureCatalog = Schema.decodeUnknownSync(featureCatalogSchema, { onExcessProperty: "error" })([
+export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSchema.parse([
   {
     id: "active-run-reminder",
     sourceDirectory: "active-run-reminder",
@@ -870,29 +847,23 @@ export const retiredFeatureIds = new Map([
   ["question-plan-with-docs", "question-my-plan"],
 ]);
 
-export class UnknownFeatureError extends Schema.TaggedError<UnknownFeatureError>()("UnknownFeatureError", {
-  featureId: Schema.String.annotations({
-    description: "Unknown feature ID supplied by the caller.",
-  }),
-}) {
-  get message(): string {
-    return `Unknown feature: ${this.featureId}`;
-  }
-}
-
-export const findFeature = (id: string): Option.Option<FeatureDefinition> =>
-  Option.fromNullable(featureCatalog.find((feature) => feature.id === id));
+export const findFeature = (id: string): FeatureDefinition | null =>
+  featureCatalog.find((feature) => feature.id === id) ?? null;
 
 export const defaultFeatureIds = featureCatalog
   .filter((feature) => feature.selectedByDefault)
   .map((feature) => feature.id);
 
-export const addDependencies = (
-  requestedIds: ReadonlyArray<string>,
-): Either.Either<ReadonlyArray<FeatureId>, UnknownFeatureError> => {
-  const unknownId = requestedIds.find((id) => Option.isNone(findFeature(id)));
-  if (unknownId !== undefined) {
-    return Either.left(new UnknownFeatureError({ featureId: unknownId }));
+export type AddDependenciesResult =
+  | { readonly status: "ready"; readonly featureIds: ReadonlyArray<FeatureId> }
+  | { readonly status: "unknown"; readonly featureId: string };
+
+// Adds every dependency of the requested features. An unknown requested ID is a status, not a throw.
+export const addDependencies = (requestedIds: ReadonlyArray<string>): AddDependenciesResult => {
+  const unknownId = requestedIds.find((id) => findFeature(id) === null);
+  const isThereUnknownId = unknownId !== undefined;
+  if (isThereUnknownId) {
+    return { status: "unknown", featureId: unknownId };
   }
 
   const resolvedIds = new Set<string>();
@@ -907,7 +878,8 @@ export const addDependencies = (
   };
   featureCatalog.filter((feature) => requestedIds.includes(feature.id)).forEach(visitFeature);
 
-  return Either.right(featureCatalog.filter((feature) => resolvedIds.has(feature.id)).map((feature) => feature.id));
+  const featureIds = featureCatalog.filter((feature) => resolvedIds.has(feature.id)).map((feature) => feature.id);
+  return { status: "ready", featureIds };
 };
 
 export const skillsForFeatures = (featureIds: ReadonlyArray<FeatureId>) =>
