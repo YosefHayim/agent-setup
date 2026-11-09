@@ -108,8 +108,16 @@ const completeReceiptInput = {
       path: ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
       ownership: { ...wholeFileOwnership, previous: { _tag: "priorFile", bytes: "AQID" } },
     }),
-    ownedFile("skill", { owner: agentOwner, path: ".claude/skills/make-code-readable/SKILL.md", ownership: wholeFileOwnership }),
-    ownedFile("rule", { owner: agentOwner, path: ".cursor/rules/make-code-readable.mdc", ownership: wholeFileOwnership }),
+    ownedFile("skill", {
+      owner: agentOwner,
+      path: ".claude/skills/make-code-readable/SKILL.md",
+      ownership: wholeFileOwnership,
+    }),
+    ownedFile("rule", {
+      owner: agentOwner,
+      path: ".cursor/rules/make-code-readable.mdc",
+      ownership: wholeFileOwnership,
+    }),
     ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
     ownedFile("instructionLink", { owner: agentOwner, path: ".continue/config.json", ownership: jsonValuesOwnership }),
     ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),

@@ -17,7 +17,7 @@ import {
   readFileSnapshot,
 } from "./hostFiles.js";
 import { InstallError, type InstallRequest, toInstallError } from "./installRequest.js";
-import { type PreparedSkill } from "./packageFiles.js";
+import type { PreparedSkill } from "./packageFiles.js";
 import type { Receipt } from "./receipt.js";
 
 type AgentWritesRequest = {

@@ -399,9 +399,7 @@ describe("featureCatalog", () => {
     ]);
     expect(
       featureCatalog.filter((feature) => feature.platform !== "any").map((feature) => [feature.id, feature.platform]),
-    ).toEqual([
-      ["make-promo-video", "macos"],
-    ]);
+    ).toEqual([["make-promo-video", "macos"]]);
   });
 
   it("finds features with Option", () => {

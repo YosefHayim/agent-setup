@@ -193,4 +193,4 @@ describe("planRuleFiles", () => {
     expect(Either.isLeft(ruleMerge)).toBe(true);
     expect(String(Option.getOrThrow(Either.getLeft(ruleMerge)))).toContain("unexpected");
   });
-
+});

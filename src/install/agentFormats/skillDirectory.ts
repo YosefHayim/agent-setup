@@ -11,9 +11,6 @@ import {
 } from "../ownership.js";
 import { writeOperationSchema } from "../plan.js";
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
 export class SkillDirectoryPlanError extends Schema.TaggedError<SkillDirectoryPlanError>()("SkillDirectoryPlanError", {
   issue: Schema.NonEmptyString.annotations({
     description: "Actionable skill-directory request issue.",

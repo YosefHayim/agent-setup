@@ -81,7 +81,10 @@ layer(NodeContext.layer)("update", (it) => {
         "AGENTS.md": "User instructions.\n",
         ".claude/settings.json": '{\n  "theme": "dark"\n}\n',
       });
-      yield* install({ ...request({ root, preparedRoot, features: ["make-code-readable"] }), configuration: selectedDefaults });
+      yield* install({
+        ...request({ root, preparedRoot, features: ["make-code-readable"] }),
+        configuration: selectedDefaults,
+      });
 
       const updateExecution = yield* update(request({ root, preparedRoot, features: ["scratch-folder-guard"] }));
 
@@ -102,7 +105,9 @@ layer(NodeContext.layer)("update", (it) => {
       expect(receipt.features).toEqual(["scratch-folder-guard"]);
       // The make-code-readable skill files are removed with the feature, so none may remain in the receipt.
       const makeCodeReadableSkillFile = /(?:^|\/)make-code-readable(?:\/|\.)/;
-      expect(receipt.ownedFiles.some((file: { path: string }) => makeCodeReadableSkillFile.test(file.path))).toBe(false);
+      expect(receipt.ownedFiles.some((file: { path: string }) => makeCodeReadableSkillFile.test(file.path))).toBe(
+        false,
+      );
     }),
   );
 
@@ -112,7 +117,10 @@ layer(NodeContext.layer)("update", (it) => {
       const baseRequest = request({ root, preparedRoot, features: ["make-code-readable"] });
       yield* install({ ...baseRequest, configuration: selectedDefaults });
 
-      const updateSummary = yield* update({ ...baseRequest, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } });
+      const updateSummary = yield* update({
+        ...baseRequest,
+        features: { _tag: "refresh", ids: ["scratch-folder-guard"] },
+      });
 
       expect(updateSummary.features).toEqual(["scratch-folder-guard", "make-code-readable"]);
       expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual([
@@ -130,9 +138,13 @@ layer(NodeContext.layer)("update", (it) => {
       yield* install({ ...baseRequest, configuration: selectedDefaults });
       const originalReceipt = yield* readText(".claude/agent-setup/receipt.json");
 
-      const error = yield* Effect.flip(update({ ...baseRequest, features: { _tag: "refresh", ids: ["make-code-readable"] } }));
+      const error = yield* Effect.flip(
+        update({ ...baseRequest, features: { _tag: "refresh", ids: ["make-code-readable"] } }),
+      );
 
-      expect(error.message).toContain("Feature make-code-readable is not installed in this scope; use install to add it.");
+      expect(error.message).toContain(
+        "Feature make-code-readable is not installed in this scope; use install to add it.",
+      );
       expect(yield* readText(".claude/agent-setup/receipt.json")).toBe(originalReceipt);
       expect(yield* exists(".claude/skills/make-code-readable/SKILL.md")).toBe(false);
     }),
@@ -141,7 +153,10 @@ layer(NodeContext.layer)("update", (it) => {
   it.scoped("refuses an update after bytes inside a receipted instruction block change", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      yield* install({ ...request({ root, preparedRoot, features: ["make-code-readable"] }), configuration: selectedDefaults });
+      yield* install({
+        ...request({ root, preparedRoot, features: ["make-code-readable"] }),
+        configuration: selectedDefaults,
+      });
       const originalReceipt = yield* readText(".claude/agent-setup/receipt.json");
       yield* writeFiles(root, { "AGENTS.md": (yield* readText("AGENTS.md")).replace("Run", "Changed") });
 

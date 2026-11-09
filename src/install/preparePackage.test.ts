@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
@@ -61,7 +61,6 @@ describe("preparePackage", () => {
         expect(existsSync(path.join(scratchFolderGuardRoot, "watchers/scratchWatcher.js"))).toBe(true);
         expect(existsSync(path.join(scratchFolderGuardRoot, "command/clearScratch.js"))).toBe(true);
 
-
         // scratch-folder-guard reads transcripts through the shared hook lib, so preparing copies it beside the hook.
         expect(existsSync(path.join(scratchFolderGuardRoot, "lib/transcriptReader.js"))).toBe(true);
 
@@ -69,7 +68,8 @@ describe("preparePackage", () => {
         const hookHome = mkdtempSync(path.join(tmpdir(), "agent-setup-prepared-home-"));
         try {
           const execution = spawnSync(process.execPath, [scratchFolderGuard], {
-            input: '{"hook_event_name":"PreToolUse","session_id":"prepared-package-test","tool_name":"Bash","tool_input":{"command":"echo ok"}}',
+            input:
+              '{"hook_event_name":"PreToolUse","session_id":"prepared-package-test","tool_name":"Bash","tool_input":{"command":"echo ok"}}',
             encoding: "utf8",
             env: { ...process.env, HOME: hookHome },
           });

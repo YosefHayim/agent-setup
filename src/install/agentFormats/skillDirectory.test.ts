@@ -9,7 +9,6 @@ import type { PreviousFileValue } from "../ownership.js";
 import { planSkillDirectory, type SkillDirectoryPlan, SkillDirectoryPlanError } from "./skillDirectory.js";
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 const claudeAgent = Option.getOrThrow(findAgent("claude-code"));
 const writeReadmeFeature = Option.getOrThrow(findFeature("write-readme"));
 const missingPrevious: PreviousFileValue = { _tag: "missing" };

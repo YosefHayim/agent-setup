@@ -89,7 +89,9 @@ layer(NodeContext.layer)("install", (it) => {
         agents: ["claude-code"],
       });
       expect(installation.platformRequirements).toEqual([{ featureId: "scratch-folder-guard", platform: "any" }]);
-      expect(yield* readText(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe("export {};\n");
+      expect(yield* readText(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe(
+        "export {};\n",
+      );
       expect(JSON.parse(yield* readText(".claude/agent-setup/config.json"))).toEqual(defaultConfig);
 
       const settings = yield* readText(".claude/settings.json");
@@ -284,7 +286,10 @@ layer(NodeContext.layer)("install", (it) => {
       });
 
       const exit = yield* Effect.exit(
-        install({ ...installRequest({ root, preparedRoot }), features: { _tag: "selected", ids: ["make-code-readable"] } }),
+        install({
+          ...installRequest({ root, preparedRoot }),
+          features: { _tag: "selected", ids: ["make-code-readable"] },
+        }),
       );
 
       expect(exit._tag).toBe("Failure");

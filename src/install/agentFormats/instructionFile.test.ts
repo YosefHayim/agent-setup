@@ -86,8 +86,7 @@ describe("planInstructionFile", () => {
         { installedSkill: simplifyCodeSkill, markdown: "---\r\nname: simplify-code\r\n---\r\nV2 body.\r\n" },
       ],
     });
-    const expectedContent =
-      "\n## make-code-readable\n\nReadable body.\n\n---\n\n## simplify-code\n\nV2 body.\n";
+    const expectedContent = "\n## make-code-readable\n\nReadable body.\n\n---\n\n## simplify-code\n\nV2 body.\n";
     const exactInstructionKind: "instruction" = operation.file.kind._tag;
 
     expectTypeOf(exactInstructionKind).toEqualTypeOf<"instruction">();
