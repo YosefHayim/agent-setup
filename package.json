@@ -27,8 +27,8 @@
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/agent-setup.tsbuildinfo",
     "lint": "biome check . && knip",
     "lint:fix": "biome check --write .",
-    "readme:generate": "tsx src/scripts/generateReadme.ts",
-    "readme:check": "tsx src/scripts/generateReadme.ts --check",
+    "readme:generate": "tsx src/scripts/generate-readme.ts",
+    "readme:check": "tsx src/scripts/generate-readme.ts --check",
     "check": "turbo run lint typecheck test build readme:check --output-logs=errors-only"
   },
   "keywords": [

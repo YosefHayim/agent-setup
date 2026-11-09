@@ -3,9 +3,9 @@
 import { FileSystem } from "@effect/platform";
 import { Effect, Either, Option, Schema, ParseResult as SchemaParseIssue } from "effect";
 
-import { addDependencies, featureIdSchema, retiredFeatureIds } from "../catalog/featureCatalog.js";
-import { decodeStrictText, isNotFound } from "./fileBytes.js";
-import { findDuplicateJsonKey } from "./findDuplicateJsonKey.js";
+import { addDependencies, featureIdSchema, retiredFeatureIds } from "../catalog/feature-catalog.js";
+import { decodeStrictText, isNotFound } from "./file-bytes.js";
+import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { type OwnedFile, ownedFileSchema, pathsConflict } from "./ownership.js";
 
 export const scopeSchema = Schema.Literal("global", "project").annotations({

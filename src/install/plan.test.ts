@@ -2,7 +2,7 @@ import { Either, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { checkPlan } from "./plan.js";
-import { planInstall, planUninstall } from "./planChanges.js";
+import { planInstall, planUninstall } from "./plan-changes.js";
 
 const oldHash = "1111111111111111111111111111111111111111111111111111111111111111";
 const newHash = "2222222222222222222222222222222222222222222222222222222222222222";
@@ -19,7 +19,7 @@ const expectedMissing = { _tag: "missing" };
 const expectedPresent = { _tag: "file", sha256: oldHash };
 
 const runtimeFile = {
-  path: ".claude/agent-setup/hooks/scratchFolderGuard.js",
+  path: ".claude/agent-setup/hooks/scratch-folder-guard.js",
   kind: { _tag: "runtime" },
   owner: applicationOwner,
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: missingPrevious },
@@ -352,7 +352,7 @@ describe("checkPlan", () => {
       name: "parent and child targets",
       operations: [
         write({ ...managedConfigFile, path: ".claude/agent-setup" }),
-        write({ ...runtimeFile, path: ".claude/agent-setup/hooks/scratchFolderGuard.js" }),
+        write({ ...runtimeFile, path: ".claude/agent-setup/hooks/scratch-folder-guard.js" }),
       ],
       message: "conflicts with",
     },
@@ -364,7 +364,7 @@ describe("checkPlan", () => {
   });
 
   it("rejects case-folded target collisions on common macOS and Windows filesystems", () => {
-    const first = { ...runtimeFile, path: ".agent-setup/Hooks/scratchFolderGuard.js" };
+    const first = { ...runtimeFile, path: ".agent-setup/Hooks/scratch-folder-guard.js" };
     const second = { ...managedConfigFile, path: ".agent-setup/hooks/SCRATCHFOLDERGUARD.JS" };
 
     expect(issues(checkPlan(removalPlan([remove(first), remove(second)])))).toContain(

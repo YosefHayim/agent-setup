@@ -3,13 +3,14 @@
 import { Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
-import { agentCatalog } from "../catalog/agentCatalog.js";
-import { planInstructionFile } from "./agentFormats/instructionFile.js";
-import { planInstructionLink } from "./agentFormats/instructionLink.js";
-import { hashBytes } from "./fileBytes.js";
-import { restoreSettings } from "./hookSettings.js";
-import { checkFileChange, expectedCurrent, type FileSnapshot, readFileSnapshot } from "./hostFiles.js";
-import { InstallError, toInstallError } from "./installRequest.js";
+import { agentCatalog } from "../catalog/agent-catalog.js";
+import { planInstructionFile } from "./agent-formats/instruction-file.js";
+import { planInstructionLink } from "./agent-formats/instruction-link.js";
+import { hashBytes } from "./file-bytes.js";
+import { restoreSettings } from "./hook-settings.js";
+import { checkFileChange, expectedCurrent, type FileSnapshot, readFileSnapshot } from "./host-files.js";
+import { hooksPath } from "./install-paths.js";
+import { InstallError, toInstallError } from "./install-request.js";
 import { type OwnedFile, ownedFileSchema } from "./ownership.js";
 import { absoluteRootSchema, type FileChange } from "./plan.js";
 import type { Receipt } from "./receipt.js";
@@ -122,7 +123,7 @@ export const planRestorations = (input: unknown) =>
           case "instructionLink":
             return yield* restoreInstructionLink(target);
           case "settings":
-            return yield* restoreSettings(target);
+            return yield* restoreSettings({ ...target, installedHooksFolder: path.join(request.root, hooksPath) });
           default:
             return yield* restoreWholeFile(target);
         }

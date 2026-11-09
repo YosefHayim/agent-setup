@@ -1,10 +1,10 @@
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
-import { applyPlan } from "./applyPlan.js";
-import { hashBytes } from "./fileBytes.js";
-import { installationLocationSchema, receiptPath } from "./installPaths.js";
-import { errorMessage, InstallError, interactionSchema } from "./installRequest.js";
-import { planUninstall } from "./planChanges.js";
+import { applyPlan } from "./apply-plan.js";
+import { hashBytes } from "./file-bytes.js";
+import { installationLocationSchema, receiptPath } from "./install-paths.js";
+import { errorMessage, InstallError, interactionSchema } from "./install-request.js";
+import { planUninstall } from "./plan-changes.js";
 import { readReceipt, scopeSchema } from "./receipt.js";
 import { planRestorations } from "./restore.js";
 

@@ -2,7 +2,7 @@
 
 import { Either, Encoding, Predicate, Schema } from "effect";
 
-import { agentCatalog, agentIdSchema } from "../catalog/agentCatalog.js";
+import { agentCatalog, agentIdSchema } from "../catalog/agent-catalog.js";
 
 // e.g. "skills/make-code-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
 const RELATIVE_PATH_PATTERN = /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/;

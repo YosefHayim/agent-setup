@@ -2,7 +2,7 @@
 
 import { Schema } from "effect";
 
-import { bytesEqual } from "./fileBytes.js";
+import { bytesEqual } from "./file-bytes.js";
 import {
   type Ownership,
   ownedFileSchema,

@@ -3,16 +3,16 @@ import { NodeContext } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
-import { defaultConfig } from "../config/configSchema.js";
+import { defaultConfig } from "../config/config-schema.js";
 import { install } from "./install.js";
 import { uninstall, uninstallRequestSchema } from "./uninstall.js";
 
 const packageFiles = {
-  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
-  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
-  "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/clear-session-scratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/command/clear-scratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/watchers/scratch-watcher.js": "export {};\n",
   "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
   "skills/make-code-readable/references/examples.md": "# Examples\n",
   "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
@@ -142,7 +142,7 @@ layer(NodeContext.layer)("uninstall", (it) => {
   it.scoped("still removes installer-created files when their bytes drifted after install", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, exists } = yield* workspace;
-      const hookFile = ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js";
+      const hookFile = ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js";
       yield* install(installRequest({ root, preparedRoot }));
       yield* writeFiles(root, { [hookFile]: "user changed this\n" });
 

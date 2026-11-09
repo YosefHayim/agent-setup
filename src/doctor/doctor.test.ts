@@ -3,7 +3,7 @@ import { NodeContext } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
-import { defaultConfig } from "../config/configSchema.js";
+import { defaultConfig } from "../config/config-schema.js";
 import { checkHealth, HealthCheckError, healthRequestSchema } from "./doctor.js";
 
 const noEvidence = { homePaths: [], absolutePaths: [], commands: [] };
@@ -101,7 +101,7 @@ layer(NodeContext.layer)("doctor", (it) => {
         });
         const preparedScratchGuardPath = path.join(
           workspace.preparedRoot,
-          "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
+          "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js",
         );
         yield* fileSystem.makeDirectory(path.dirname(preparedScratchGuardPath), { recursive: true });
         yield* fileSystem.writeFileString(preparedScratchGuardPath, "export {};\n");
@@ -127,7 +127,7 @@ layer(NodeContext.layer)("doctor", (it) => {
             title: "Scratch folder guard",
             platform: "any",
             platformAvailable: true,
-            preparedRuntime: { _tag: "present", path: "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js" },
+            preparedRuntime: { _tag: "present", path: "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js" },
           },
           {
             id: "make-code-readable",

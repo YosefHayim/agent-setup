@@ -5,9 +5,9 @@ import { NodeContext } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
-import { defaultConfig } from "../config/configSchema.js";
+import { defaultConfig } from "../config/config-schema.js";
 import { install } from "./install.js";
-import { installRequestSchema } from "./installRequest.js";
+import { installRequestSchema } from "./install-request.js";
 import { planRestorations } from "./restore.js";
 
 const textEncoder = new TextEncoder();
@@ -15,11 +15,11 @@ const textEncoder = new TextEncoder();
 const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
 const scratchFolderRuntime = {
-  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
-  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
-  "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/clear-session-scratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/command/clear-scratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/watchers/scratch-watcher.js": "export {};\n",
 };
 
 const makeCodeReadableSkill = {
@@ -29,8 +29,8 @@ const makeCodeReadableSkill = {
 };
 
 const sessionRehomeRuntime = {
-  "hooks/sessionRehome/hooks/rehomeEndedSession.js": "export {};\n",
-  "hooks/sessionRehome/hooks/announceMovedSession.js": "export {};\n",
+  "hooks/session-rehome/hooks/rehome-ended-session.js": "export {};\n",
+  "hooks/session-rehome/hooks/announce-moved-session.js": "export {};\n",
 };
 
 const workspace = Effect.gen(function* () {
@@ -93,7 +93,7 @@ layer(NodeContext.layer)("install", (it) => {
         agents: ["claude-code"],
       });
       expect(installation.platformRequirements).toEqual([{ featureId: "scratch-folder-guard", platform: "any" }]);
-      expect(yield* readText(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe(
+      expect(yield* readText(".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js")).toBe(
         "export {};\n",
       );
       expect(JSON.parse(yield* readText(".claude/agent-setup/config.json"))).toEqual(defaultConfig);
@@ -101,16 +101,16 @@ layer(NodeContext.layer)("install", (it) => {
       const settings = yield* readText(".claude/settings.json");
       expect(settings).toContain('"theme": "dark"');
       expect(settings).toContain("user-command");
-      expect(settings).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
+      expect(settings).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
 
       const receipt = yield* readReceipt;
       expect(receipt.features).toEqual(["scratch-folder-guard"]);
       expect(receipt.ownedFiles.map((file: { path: string }) => file.path)).toEqual([
-        ".claude/agent-setup/hooks/scratchFolderGuard/command/clearScratch.js",
-        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js",
-        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/clearSessionScratch.js",
-        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
-        ".claude/agent-setup/hooks/scratchFolderGuard/watchers/scratchWatcher.js",
+        ".claude/agent-setup/hooks/scratch-folder-guard/command/clear-scratch.js",
+        ".claude/agent-setup/hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js",
+        ".claude/agent-setup/hooks/scratch-folder-guard/hooks/clear-session-scratch.js",
+        ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js",
+        ".claude/agent-setup/hooks/scratch-folder-guard/watchers/scratch-watcher.js",
         ".claude/agent-setup/config.json",
         ".claude/settings.json",
       ]);
@@ -130,10 +130,12 @@ layer(NodeContext.layer)("install", (it) => {
 
       expect(installation.features).toEqual(["scratch-folder-guard", "session-rehome"]);
       expect((yield* readReceipt).features).toEqual(["scratch-folder-guard", "session-rehome"]);
-      expect(yield* exists(".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js")).toBe(true);
+      expect(yield* exists(".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js")).toBe(true);
       const commands = hookCommands(yield* readText(".claude/settings.json"));
-      expect(commands.some((command) => command.includes("scratchFolderGuard/hooks/scratchFolderGuard.js"))).toBe(true);
-      expect(commands.some((command) => command.includes("sessionRehome/hooks/rehomeEndedSession.js"))).toBe(true);
+      expect(commands.some((command) => command.includes("scratch-folder-guard/hooks/scratch-folder-guard.js"))).toBe(
+        true,
+      );
+      expect(commands.some((command) => command.includes("session-rehome/hooks/rehome-ended-session.js"))).toBe(true);
     }),
   );
 
@@ -159,7 +161,7 @@ layer(NodeContext.layer)("install", (it) => {
 
       const grok = yield* readText(".grok/hooks/agent-setup.json");
       expect(grok).toContain("AGENT_SETUP_AGENT_ID=grok");
-      expect(grok).toContain("rehomeEndedSession.js");
+      expect(grok).toContain("rehome-ended-session.js");
       expect(yield* exists(".claude/settings.json")).toBe(false);
     }),
   );
@@ -168,8 +170,8 @@ layer(NodeContext.layer)("install", (it) => {
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
       yield* writeFiles(preparedRoot, {
-        "hooks/sessionRehome/hooks/rehomeEndedSession.js": "export {};\n",
-        "hooks/sessionRehome/hooks/announceMovedSession.js": "export {};\n",
+        "hooks/session-rehome/hooks/rehome-ended-session.js": "export {};\n",
+        "hooks/session-rehome/hooks/announce-moved-session.js": "export {};\n",
       });
 
       yield* install({
@@ -350,8 +352,8 @@ layer(NodeContext.layer)("install", (it) => {
   it.scoped("removes installer-created whole files even when they drifted or vanished", () =>
     Effect.gen(function* () {
       const { root, writeFiles } = yield* workspace;
-      const driftedPath = ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js";
-      const exactPath = ".claude/agent-setup/hooks/scratchFolderGuard/lib/hookConfig.js";
+      const driftedPath = ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js";
+      const exactPath = ".claude/agent-setup/hooks/scratch-folder-guard/lib/hook-config.js";
       yield* writeFiles(root, { [driftedPath]: "drifted after install\n", [exactPath]: "exact\n" });
       const wholeFile = (filePath: string, hash: string) => ({
         owner: { _tag: "application" as const },
@@ -364,7 +366,7 @@ layer(NodeContext.layer)("install", (it) => {
         root,
         files: [
           wholeFile(driftedPath, sha256("old\n")),
-          wholeFile(".claude/agent-setup/hooks/scratchFolderGuard/lib/scratchState.js", sha256("old\n")),
+          wholeFile(".claude/agent-setup/hooks/scratch-folder-guard/lib/scratchState.js", sha256("old\n")),
           wholeFile(exactPath, sha256("exact\n")),
         ],
       });

@@ -8,8 +8,8 @@ import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Either, Schema } from "effect";
 
-import { defaultConfig } from "../config/configSchema.js";
-import { installRequestSchema } from "../install/installRequest.js";
+import { defaultConfig } from "../config/config-schema.js";
+import { installRequestSchema } from "../install/install-request.js";
 import { isBareArgv } from "./main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

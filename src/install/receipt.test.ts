@@ -105,7 +105,7 @@ const completeReceiptInput = {
   ownedFiles: [
     ownedFile("runtime", {
       owner: applicationOwner,
-      path: ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
+      path: ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js",
       ownership: { ...wholeFileOwnership, previous: { _tag: "priorFile", bytes: "AQID" } },
     }),
     ownedFile("skill", {
@@ -541,7 +541,7 @@ describe("readReceipt", () => {
 
   it.effect("rejects malformed UTF-8 instead of accepting replacement characters", () =>
     Effect.gen(function* () {
-      const markerIndex = completeReceiptJson.indexOf("scratchFolderGuard.js");
+      const markerIndex = completeReceiptJson.indexOf("scratch-folder-guard.js");
       const bytes = new Uint8Array([
         ...textEncoder.encode(completeReceiptJson.slice(0, markerIndex)),
         0xff,

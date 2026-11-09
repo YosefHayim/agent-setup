@@ -1,8 +1,8 @@
 import { Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
-import { addDependencies } from "../catalog/featureCatalog.js";
+import { addDependencies } from "../catalog/feature-catalog.js";
 import { syncInstall } from "./install.js";
-import { installationLocationSchema, receiptPath } from "./installPaths.js";
+import { installationLocationSchema, receiptPath } from "./install-paths.js";
 import {
   agentChoiceSchema,
   configurationChoiceSchema,
@@ -12,7 +12,7 @@ import {
   platformRequirementSchema,
   preparedPackageSchema,
   selectedFeatureChoiceSchema,
-} from "./installRequest.js";
+} from "./install-request.js";
 import { readReceipt } from "./receipt.js";
 
 const updateFeatureChoiceSchema = Schema.Union(

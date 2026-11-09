@@ -5,19 +5,19 @@ import { NodeContext } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { defaultConfig } from "../config/configSchema.js";
+import { defaultConfig } from "../config/config-schema.js";
 import { install } from "./install.js";
 import { update } from "./update.js";
 
 const packageFiles = {
-  "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
-  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
-  "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
+  "hooks/scratch-folder-guard/hooks/clear-session-scratch.js": "export {};\n",
+  "hooks/scratch-folder-guard/command/clear-scratch.js": "export {};\n",
   "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
   "skills/make-code-readable/references/examples.md": "# Examples\n",
   "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
-  "hooks/activeRunReminder/hooks/activeRunReminder.js": "export {};\n",
+  "hooks/active-run-reminder/hooks/active-run-reminder.js": "export {};\n",
   "skills/organize-commits/SKILL.md": "---\nname: organize-commits\n---\nOrganize commits.\n",
   "skills/organize-commits/REFERENCE.md": "# Reference\n",
   "skills/finish-and-push/SKILL.md": "---\nname: finish-and-push\n---\nFinish and push.\n",
@@ -103,7 +103,7 @@ layer(NodeContext.layer)("update", (it) => {
       }
       expect(yield* readText("AGENTS.md")).toBe("User instructions.\n");
       expect(yield* readText(".claude/settings.json")).toContain('"theme": "dark"');
-      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
+      expect(yield* readText(".claude/settings.json")).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
 
       const receipt = JSON.parse(yield* readText(".claude/agent-setup/receipt.json"));
       expect(receipt.features).toEqual(["scratch-folder-guard"]);
@@ -200,7 +200,7 @@ layer(NodeContext.layer)("update", (it) => {
       yield* install({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["claude-code"] } });
-      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
+      expect(yield* readText(".claude/settings.json")).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       expect(yield* readText(".claude/settings.json")).toBe(originalSettings);
@@ -246,7 +246,7 @@ layer(NodeContext.layer)("update", (it) => {
       });
 
       expect(installSummary.features).toEqual(REMINDER_RECEIPT_FEATURES);
-      expect(yield* exists(".claude/agent-setup/hooks/activeRunReminder/hooks/activeRunReminder.js")).toBe(true);
+      expect(yield* exists(".claude/agent-setup/hooks/active-run-reminder/hooks/active-run-reminder.js")).toBe(true);
       expect(yield* readText(".claude/settings.json")).toContain("SubagentStart");
       expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual(
         REMINDER_RECEIPT_FEATURES,
@@ -266,7 +266,7 @@ layer(NodeContext.layer)("update", (it) => {
       });
 
       expect(updateSummary.features).toEqual(REMINDER_RECEIPT_FEATURES);
-      expect(yield* exists(".claude/agent-setup/hooks/activeRunReminder/hooks/activeRunReminder.js")).toBe(true);
+      expect(yield* exists(".claude/agent-setup/hooks/active-run-reminder/hooks/active-run-reminder.js")).toBe(true);
       expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
       expect(JSON.parse(yield* readText(".claude/agent-setup/receipt.json")).features).toEqual(
         REMINDER_RECEIPT_FEATURES,
