@@ -1,4 +1,4 @@
-name: Report failure
+name: Report main CI result
 'on':
   workflow_call: null
 permissions:
@@ -6,11 +6,11 @@ permissions:
   issues: write
   actions: read
 jobs:
-  report-failure:
-    name: File or update a ci-failure issue
+  report-result:
+    name: Open or close the ci-failure issue
     runs-on: ubuntu-slim
     steps:
-      - name: File or update a ci-failure issue with the captured error
+      - name: Open a ci-failure issue when main is red, close open ones when it is green
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
@@ -23,34 +23,52 @@ jobs:
             const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
               owner, repo, run_id: context.runId, per_page: 100,
             });
-            const failed = jobs.filter((j) => j.conclusion && !['success', 'skipped'].includes(j.conclusion));
+            const failedJobs = jobs.filter((job) => job.conclusion && !['success', 'skipped'].includes(job.conclusion));
+            const openFailureIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: label, per_page: 100,
+            });
+
+            // A green main run closes every open failure report.
+            const isMainGreen = failedJobs.length === 0;
+            if (isMainGreen) {
+              for (const issue of openFailureIssues) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `Main is green again at \`${shortSha}\`: ${runUrl}`,
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed',
+                });
+              }
+              return;
+            }
 
             // Pull the tail of each failed job's log so the exact error is readable
-            // straight from the issue — no Actions-log streaming. The
-            // matrix legs share one root cause, so a few truncated tails are enough.
+            // straight from the issue. The matrix legs share one root cause, so a few
+            // truncated tails are enough.
             const MAX_JOBS = 3, TAIL_LINES = 60, MAX_CHARS = 3000;
             const tailOf = async (job) => {
               try {
-                const res = await github.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {
+                const logReply = await github.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {
                   owner, repo, job_id: job.id,
                 });
-                const text = typeof res.data === 'string' ? res.data : Buffer.from(res.data).toString('utf8');
+                const logText = typeof logReply.data === 'string' ? logReply.data : Buffer.from(logReply.data).toString('utf8');
                 // Drop each line's leading ISO timestamp for readability, then keep the tail.
-                const lines = text.split('\n').map((l) => l.replace(/^\S+\s/, '')).filter((l) => l.trim());
+                const lines = logText.split('\n').map((line) => line.replace(/^\S+\s/, '')).filter((line) => line.trim());
                 let tail = lines.slice(-TAIL_LINES).join('\n');
                 if (tail.length > MAX_CHARS) tail = `...(truncated)...\n${tail.slice(-MAX_CHARS)}`;
                 return tail || '(no log output captured)';
-              } catch (e) {
-                return `(could not fetch job log: ${e.message})`;
+              } catch (error) {
+                return `(could not fetch job log: ${error.message})`;
               }
             };
 
             const sections = [];
-            for (const job of failed.slice(0, MAX_JOBS)) {
+            for (const job of failedJobs.slice(0, MAX_JOBS)) {
               sections.push(`### \`${job.name}\` -> **${job.conclusion}**\n\n\`\`\`text\n${await tailOf(job)}\n\`\`\``);
             }
-            const overflow = failed.length > MAX_JOBS
-              ? `\n_+${failed.length - MAX_JOBS} more failed leg(s): ${failed.slice(MAX_JOBS).map((j) => `\`${j.name}\``).join(', ')}._`
+            const overflow = failedJobs.length > MAX_JOBS
+              ? `\n_+${failedJobs.length - MAX_JOBS} more failed leg(s): ${failedJobs.slice(MAX_JOBS).map((job) => `\`${job.name}\``).join(', ')}._`
               : '';
 
             // Ensure the label exists (idempotent across runs).
@@ -65,27 +83,24 @@ jobs:
 
             const title = `CI failed on main @ ${shortSha}`;
             const body = [
-              '**Main CI failed** after a push to `main`. The captured error output is below —',
-              'fix straight from here; the run link has exit codes + full context if needed.',
+              '**Main CI failed** after a push to `main`. The captured error output is below.',
+              'Fix straight from here; the run link has exit codes + full context if needed.',
               '',
               `- Commit: \`${context.sha}\``,
               `- Run: ${runUrl}`,
               '',
-              failed.length ? sections.join('\n\n') : '_Could not enumerate jobs — open the run above._',
+              sections.join('\n\n'),
               overflow,
               '',
-              'Close this issue once `main` is green again.',
+              'This issue closes by itself when a later main run passes.',
             ].join('\n');
 
             // Dedupe: comment on an existing open issue for the same commit instead of spamming.
-            const open = await github.paginate(github.rest.issues.listForRepo, {
-              owner, repo, state: 'open', labels: label, per_page: 100,
-            });
-            const existing = open.find((i) => i.title === title);
-            if (existing) {
+            const existingIssue = openFailureIssues.find((issue) => issue.title === title);
+            if (existingIssue) {
               await github.rest.issues.createComment({
-                owner, repo, issue_number: existing.number,
-                body: `Still failing — re-run: ${runUrl}\n\n${sections.join('\n\n')}`,
+                owner, repo, issue_number: existingIssue.number,
+                body: `Still failing: ${runUrl}\n\n${sections.join('\n\n')}`,
               });
             } else {
               await github.rest.issues.create({ owner, repo, title, body, labels: [label] });
