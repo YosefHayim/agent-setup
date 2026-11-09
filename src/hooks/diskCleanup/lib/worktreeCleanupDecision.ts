@@ -15,7 +15,7 @@ export type WorktreeFacts = {
   readonly remote: string;
 };
 
-export type KeepReason =
+type KeepReason =
   | "in-use"
   | "recently-created"
   | "locked"

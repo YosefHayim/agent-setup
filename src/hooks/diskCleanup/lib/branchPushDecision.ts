@@ -12,7 +12,7 @@ export type BranchFacts = {
   readonly remote: string;
 };
 
-export type BranchKeepReason =
+type BranchKeepReason =
   | "in-use"
   | "default-branch-work"
   | "no-remote"

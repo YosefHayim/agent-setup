@@ -32,9 +32,9 @@ const CONFIG_VERBS = new Set(["get", "set", "unset"]);
 const GIT_CONFIG_KEY_VARIABLE = /^GIT_CONFIG_KEY_\d+$/u;
 const SHORT_OPTIONS = /^-[^-]/u;
 
-export const SKIPPED_HOOKS_REASON =
+const SKIPPED_HOOKS_REASON =
   "git-hook-guard: This repo's git hooks run lint and typecheck before every push. Fix what they report instead of skipping them.";
-export const MOVED_HOOKS_REASON =
+const MOVED_HOOKS_REASON =
   "git-hook-guard: Do not point git at another hooks folder or turn the hooks off. The repo's git hooks run lint and typecheck before every push. Fix what they report instead.";
 
 const isNoVerify = (option: string): boolean =>

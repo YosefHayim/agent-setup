@@ -5,7 +5,7 @@ import { reportLine } from "./reportLine.js";
 
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 // Two weeks without a touch: long enough to cover a holiday, short enough that caches never pile up.
-export const STALE_AFTER_DAYS = 14;
+const STALE_AFTER_DAYS = 14;
 
 export const childEntries = (folder: string): ReadonlyArray<string> => {
   try {
@@ -15,7 +15,7 @@ export const childEntries = (folder: string): ReadonlyArray<string> => {
   }
 };
 
-export const isUntouchedForDays = (request: { readonly entry: string; readonly days: number }): boolean => {
+const isUntouchedForDays = (request: { readonly entry: string; readonly days: number }): boolean => {
   try {
     return Date.now() - statSync(request.entry).mtimeMs > request.days * DAY_MILLISECONDS;
   } catch {
