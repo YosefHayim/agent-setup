@@ -9,9 +9,13 @@ import { uninstall, uninstallRequestSchema } from "./uninstall.js";
 
 const packageFiles = {
   "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
   "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
   "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
   "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/references/examples.md": "# Examples\n",
+  "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
 };
 
 const workspace = Effect.gen(function* () {

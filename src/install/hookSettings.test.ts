@@ -12,6 +12,8 @@ import { update } from "./update.js";
 
 const packageFiles = {
   "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
   "hooks/leftoverProcessCleanup/hooks/stopLeftoverProcesses.js": "export {};\n",
 };
 

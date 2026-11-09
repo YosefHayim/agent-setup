@@ -16,12 +16,16 @@ const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").upda
 
 const scratchFolderRuntime = {
   "hooks/scratchFolderGuard/hooks/scratchFolderGuard.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/askScratchCleanup.js": "export {};\n",
+  "hooks/scratchFolderGuard/hooks/clearSessionScratch.js": "export {};\n",
   "hooks/scratchFolderGuard/command/clearScratch.js": "export {};\n",
   "hooks/scratchFolderGuard/watchers/scratchWatcher.js": "export {};\n",
 };
 
 const makeCodeReadableSkill = {
   "skills/make-code-readable/SKILL.md": "---\nname: make-code-readable\n---\nRun the steps.\n",
+  "skills/make-code-readable/references/examples.md": "# Examples\n",
+  "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
 };
 
 const sessionRehomeRuntime = {
@@ -103,6 +107,8 @@ layer(NodeContext.layer)("install", (it) => {
       expect(receipt.features).toEqual(["scratch-folder-guard"]);
       expect(receipt.ownedFiles.map((file: { path: string }) => file.path)).toEqual([
         ".claude/agent-setup/hooks/scratchFolderGuard/command/clearScratch.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js",
+        ".claude/agent-setup/hooks/scratchFolderGuard/hooks/clearSessionScratch.js",
         ".claude/agent-setup/hooks/scratchFolderGuard/hooks/scratchFolderGuard.js",
         ".claude/agent-setup/hooks/scratchFolderGuard/watchers/scratchWatcher.js",
         ".claude/agent-setup/config.json",
