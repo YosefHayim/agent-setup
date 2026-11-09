@@ -1,19 +1,18 @@
-import { describe, expect, it } from "@effect/vitest";
-import { Effect, Option, Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import {
-  configJsonSchema,
   configSchema,
   configSettings,
   defaultConfig,
   defaultSettingValue,
+  encodeConfigJson,
   settingValueFromText,
   withSettingValue,
 } from "./config-schema.js";
 
 const DEFAULT_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
 
-const decodeConfig = Schema.decodeUnknownSync(configSchema, { onExcessProperty: "error" });
+const decodeConfig = (input: unknown) => configSchema.parse(input);
 
 const settingNamed = (name: string) => {
   const setting = configSettings.find((candidate) => candidate.name === name);
@@ -72,36 +71,33 @@ describe("configSchema", () => {
 
 describe("setting values from CLI text", () => {
   const applyText = (name: string, text: string) =>
-    settingValueFromText({ setting: settingNamed(name), text }).pipe(
-      Effect.flatMap((value) => withSettingValue({ config: defaultConfig, key: settingNamed(name).key, value })),
-    );
+    withSettingValue({
+      config: defaultConfig,
+      key: settingNamed(name).key,
+      value: settingValueFromText({ setting: settingNamed(name), text }),
+    });
 
-  it.effect("parses booleans and comma lists by the setting's kind", () =>
-    Effect.gen(function* () {
-      expect((yield* applyText("debug-logs", "true")).debugLogs).toBe(true);
-      expect((yield* applyText("session-rehome-roots", "vendor, generated ,, tmp")).sessionRehomeRoots).toEqual([
-        "vendor",
-        "generated",
-        "tmp",
-      ]);
-    }),
-  );
-
-  it("reads a setting's schema default", () => {
-    expect(defaultSettingValue("debugLogs")).toEqual(Option.some(false));
+  it("parses booleans and comma lists by the setting's kind", () => {
+    expect(applyText("debug-logs", "true").debugLogs).toBe(true);
+    expect(applyText("session-rehome-roots", "vendor, generated ,, tmp").sessionRehomeRoots).toEqual([
+      "vendor",
+      "generated",
+      "tmp",
+    ]);
   });
 
-  it.effect("rejects text the setting cannot hold", () =>
-    Effect.gen(function* () {
-      expect(yield* Effect.flip(applyText("debug-logs", "sometimes"))).toBeDefined();
-    }),
-  );
+  it("reads a setting's schema default", () => {
+    expect(defaultSettingValue("debugLogs")).toBe(false);
+  });
+
+  it("rejects text the setting cannot hold", () => {
+    expect(() => applyText("debug-logs", "sometimes")).toThrow();
+  });
 });
 
-describe("configJsonSchema", () => {
+describe("encodeConfigJson", () => {
   it("encodes every owned property into JSON", () => {
-    const json = Schema.encodeSync(configJsonSchema)(defaultConfig);
-
+    const json = encodeConfigJson(defaultConfig);
     expect(JSON.parse(json)).toEqual(defaultConfig);
     expect(Object.keys(JSON.parse(json))).toHaveLength(3);
   });

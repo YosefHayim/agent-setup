@@ -47,7 +47,7 @@ const pickFeatures = (initial: ReadonlyArray<string>) =>
 const pickDestination = (verb: string) =>
   Effect.gen(function* () {
     const scope = yield* pickScope(verb);
-    const host = yield* scanHost;
+    const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
     const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
     return { scope, host, destination };
   });
@@ -161,7 +161,10 @@ const runWorkflow = Effect.gen(function* () {
       { label: "Templates", detail: templateDirectory },
     ],
     confirmMessage: "Apply this workflow scaffold plan?",
-    apply: copyWorkflows({ targetRoot, templateDirectory, force: overwrite }).pipe(Effect.flatMap(showCopiedWorkflows)),
+    apply: Effect.tryPromise({
+      try: () => copyWorkflows({ targetRoot, templateDirectory, force: overwrite }),
+      catch: (error) => error,
+    }).pipe(Effect.flatMap(showCopiedWorkflows)),
   });
 });
 

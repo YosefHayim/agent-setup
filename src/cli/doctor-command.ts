@@ -25,7 +25,7 @@ const agentsLine = (agents: HealthReport["agents"]): string =>
   }`;
 
 export const checkBothScopes = Effect.gen(function* () {
-  const host = yield* scanHost;
+  const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
   const preparedPackage = yield* preparePackage;
   return yield* Effect.forEach(["global", "project"] as const, (scope) =>
     checkHealth({

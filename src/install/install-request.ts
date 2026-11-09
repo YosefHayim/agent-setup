@@ -4,7 +4,7 @@ import { Schema } from "effect";
 
 import { agentEvidenceSchema, agentIdSchema } from "../catalog/agent-catalog.js";
 import { featureIdSchema, featurePlatformSchema } from "../catalog/feature-catalog.js";
-import { configSchema } from "../config/config-schema.js";
+import { type Config, isConfig } from "../config/config-schema.js";
 import { installationLocationSchema } from "./install-paths.js";
 import { absoluteRootSchema } from "./plan.js";
 import { versionSchema } from "./receipt.js";
@@ -53,7 +53,7 @@ export const configurationChoiceSchema = Schema.Union(
     description: "Reuse this scope's config, inherit once for a project, or use schema defaults.",
   }),
   Schema.TaggedStruct("selected", {
-    config: configSchema.annotations({
+    config: Schema.declare<Config>(isConfig).annotations({
       description: "Complete validated configuration explicitly selected by the caller.",
     }),
   }),

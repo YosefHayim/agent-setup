@@ -87,10 +87,13 @@ const runConfigSet = Effect.gen(function* () {
   const current = yield* readConfig(scope);
   const currentValue = formatSettingValue({ config: current.config, setting });
   const text = yield* promptSettingValue({ setting, current: currentValue });
-  const nextConfig = yield* settingValueFromText({ setting, text }).pipe(
-    Effect.flatMap((value) => withSettingValue({ config: current.config, key: setting.key, value })),
-    Effect.mapError((error) => new CliUsageError({ issue: String(error) })),
-  );
+  const nextConfig = yield* Effect.try({
+    try: () => {
+      const value = settingValueFromText({ setting, text });
+      return withSettingValue({ config: current.config, key: setting.key, value });
+    },
+    catch: (error) => new CliUsageError({ issue: String(error) }),
+  });
   const nextValue = formatSettingValue({ config: nextConfig, setting });
   yield* applyIfApproved({
     title: "Config set plan",
@@ -133,11 +136,10 @@ const runConfigReset = Effect.gen(function* () {
 
   const current = yield* readConfig(scope);
   const setting = yield* pickSetting("Setting to reset");
-  const nextConfig = yield* withSettingValue({
-    config: current.config,
-    key: setting.key,
-    value: defaultSettingValue(setting.key),
-  }).pipe(Effect.mapError((error) => new CliUsageError({ issue: String(error) })));
+  const nextConfig = yield* Effect.try({
+    try: () => withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
+    catch: (error) => new CliUsageError({ issue: String(error) }),
+  });
   const nextValue = formatSettingValue({ config: nextConfig, setting });
   yield* applyIfApproved({
     title: "Config reset plan",

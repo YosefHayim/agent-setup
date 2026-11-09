@@ -1,7 +1,7 @@
 // The one config.json reader and writer behind the `config` command.
 
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, type Schema } from "effect";
+import { Effect, type Schema } from "effect";
 
 import { isNotFound } from "../install/file-bytes.js";
 import { type installationDestinationSchema, receiptPath } from "../install/install-paths.js";
@@ -24,7 +24,7 @@ type ConfigWrite = { readonly _tag: "selected"; readonly config: Config } | { re
 // Locates a scope's config.json without reading it, so a full reset still works when the file is unreadable.
 export const resolveConfigTarget = (scope: Scope) =>
   Effect.gen(function* () {
-    const host = yield* scanHost;
+    const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
     const path = yield* Path.Path;
     const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
     return {
@@ -39,7 +39,10 @@ export const resolveConfigTarget = (scope: Scope) =>
 export const readConfigAt = (request: { readonly root: string; readonly homeRoot: string }) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
-    const ownConfig = yield* readConfigFile(path.join(request.root, managedConfigPath));
+    const ownConfig = yield* Effect.tryPromise({
+      try: () => readConfigFile(path.join(request.root, managedConfigPath)),
+      catch: (error) => error,
+    });
     if (ownConfig._tag === "present") {
       return ownConfig.config;
     }
@@ -48,7 +51,10 @@ export const readConfigAt = (request: { readonly root: string; readonly homeRoot
       return defaultConfig;
     }
 
-    const globalConfig = yield* readConfigFile(path.join(request.homeRoot, managedConfigPath));
+    const globalConfig = yield* Effect.tryPromise({
+      try: () => readConfigFile(path.join(request.homeRoot, managedConfigPath)),
+      catch: (error) => error,
+    });
     return globalConfig._tag === "present" ? globalConfig.config : defaultConfig;
   });
 
@@ -97,16 +103,21 @@ export const saveConfig = (request: { readonly target: ConfigTarget; readonly co
     }
 
     // The plan keeps the old bytes only as its restoration value and never decodes them, so a broken file is replaceable.
-    const plan = planManagedConfig({
-      scope: target.scope,
-      selection: { _tag: "selected", config: configuration._tag === "reset" ? defaultConfig : configuration.config },
-      previousConfigFile: yield* readPreviousConfigFile(target.configPath),
+    const previousConfigFile = yield* readPreviousConfigFile(target.configPath);
+    const plan = yield* Effect.try({
+      try: () =>
+        planManagedConfig({
+          scope: target.scope,
+          selection: {
+            _tag: "selected",
+            config: configuration._tag === "reset" ? defaultConfig : configuration.config,
+          },
+          previousConfigFile,
+        }),
+      catch: (error) => error,
     });
-    if (Either.isLeft(plan)) {
-      return yield* plan.left;
-    }
 
     yield* fileSystem.makeDirectory(path.dirname(target.configPath), { recursive: true });
-    yield* fileSystem.writeFile(target.configPath, plan.right.managedConfigWrite.bytes);
+    yield* fileSystem.writeFile(target.configPath, plan.managedConfigWrite.bytes);
     return "file" as const;
   });

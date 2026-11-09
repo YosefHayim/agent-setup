@@ -1,10 +1,9 @@
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FileSystem } from "@effect/platform";
-import { NodeContext } from "@effect/platform-node";
-import { describe, expect, it, layer } from "@effect/vitest";
-import { Effect } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { copyWorkflows, fillPublishTemplate, planWorkflowFiles } from "./copy-workflows.js";
 
@@ -12,16 +11,24 @@ const templateDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 
 const inputs = { owner: "Acme", repo: "widget", packageName: "widget-cli" };
 
-// A temporary repository whose package.json names "test-pkg".
-const makeRepository = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const targetRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-workflows-" });
-  yield* fileSystem.writeFileString(path.join(targetRoot, "package.json"), JSON.stringify({ name: "test-pkg" }));
-  return targetRoot;
+const temporaryRoots: Array<string> = [];
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
+// A temporary repository whose package.json names "test-pkg".
+const makeRepository = (): string => {
+  const targetRoot = mkdtempSync(path.join(tmpdir(), "agent-setup-workflows-"));
+  temporaryRoots.push(targetRoot);
+  writeFileSync(path.join(targetRoot, "package.json"), JSON.stringify({ name: "test-pkg" }));
+  return targetRoot;
+};
+
 describe("fillPublishTemplate", () => {
-  it("substitutes every placeholder", () => {
+  it("substitutes every OWNER, REPO and PACKAGE placeholder", () => {
     const filled = fillPublishTemplate({ template: "{{OWNER}}/{{REPO}} ships {{PACKAGE}} — {{OWNER}} again", inputs });
 
     expect(filled).toBe("Acme/widget ships widget-cli — Acme again");
@@ -46,41 +53,35 @@ describe("planWorkflowFiles", () => {
   });
 });
 
-layer(NodeContext.layer)("copyWorkflows", (it) => {
-  it.scoped("copies the lean workflow set, templating only publish.yml", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const targetRoot = yield* makeRepository;
-      const workflows = path.join(targetRoot, ".github", "workflows");
+describe("copyWorkflows", () => {
+  it("copies the lean workflow set, templating only publish.yml", async () => {
+    const targetRoot = makeRepository();
+    const workflows = path.join(targetRoot, ".github", "workflows");
 
-      const copied = yield* copyWorkflows({ targetRoot, templateDirectory, force: false });
-      const ciYml = yield* fileSystem.readFileString(path.join(workflows, "ci.yml"));
-      const publishYml = yield* fileSystem.readFileString(path.join(workflows, "publish.yml"));
+    const copied = await copyWorkflows({ targetRoot, templateDirectory, force: false });
+    const ciYml = readFileSync(path.join(workflows, "ci.yml"), "utf8");
+    const publishYml = readFileSync(path.join(workflows, "publish.yml"), "utf8");
 
-      expect(copied.written).toEqual(["ci.yml", "publish.yml", "report-failure.yml"]);
-      expect((yield* fileSystem.readDirectory(workflows)).sort()).toEqual(copied.written);
-      expect(ciYml).toContain("run: pnpm check");
-      expect(ciYml).not.toContain("YosefHayim/agent-setup");
-      expect(ciYml).not.toContain("setup-uv");
-      expect(publishYml).toContain("test-pkg");
-      expect(publishYml).not.toMatch(/\{\{\s*(OWNER|REPO|PACKAGE)\s*\}\}/);
-      expect(publishYml).not.toContain("setup-uv");
-    }),
-  );
+    expect(copied.written).toEqual(["ci.yml", "publish.yml", "report-failure.yml"]);
+    expect(readdirSync(workflows).sort()).toEqual(copied.written);
+    expect(ciYml).toContain("run: pnpm check");
+    expect(ciYml).not.toContain("YosefHayim/agent-setup");
+    expect(ciYml).not.toContain("setup-uv");
+    expect(publishYml).toContain("test-pkg");
+    expect(publishYml).not.toMatch(/\{\{\s*(OWNER|REPO|PACKAGE)\s*\}\}/);
+    expect(publishYml).not.toContain("setup-uv");
+  });
 
-  it.scoped("keeps existing workflow files unless force is true", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const targetRoot = yield* makeRepository;
-      const ciPath = path.join(targetRoot, ".github", "workflows", "ci.yml");
-      yield* copyWorkflows({ targetRoot, templateDirectory, force: false });
-      yield* fileSystem.writeFileString(ciPath, "name: CUSTOMIZED\n");
+  it("keeps existing workflow files unless force is true", async () => {
+    const targetRoot = makeRepository();
+    const ciPath = path.join(targetRoot, ".github", "workflows", "ci.yml");
+    await copyWorkflows({ targetRoot, templateDirectory, force: false });
+    writeFileSync(ciPath, "name: CUSTOMIZED\n");
 
-      yield* copyWorkflows({ targetRoot, templateDirectory, force: false });
-      expect(yield* fileSystem.readFileString(ciPath)).toBe("name: CUSTOMIZED\n");
+    await copyWorkflows({ targetRoot, templateDirectory, force: false });
+    expect(readFileSync(ciPath, "utf8")).toBe("name: CUSTOMIZED\n");
 
-      yield* copyWorkflows({ targetRoot, templateDirectory, force: true });
-      expect(yield* fileSystem.readFileString(ciPath)).not.toBe("name: CUSTOMIZED\n");
-    }),
-  );
+    await copyWorkflows({ targetRoot, templateDirectory, force: true });
+    expect(readFileSync(ciPath, "utf8")).not.toBe("name: CUSTOMIZED\n");
+  });
 });

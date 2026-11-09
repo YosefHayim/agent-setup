@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { Either, Option } from "effect";
+import { Either } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { findAgent } from "../../catalog/agent-catalog.js";
@@ -9,8 +9,8 @@ import { type InstructionLinkPlan, planInstructionLink } from "./instruction-lin
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const aider = Option.getOrThrow(findAgent("aider"));
-const continueAgent = Option.getOrThrow(findAgent("continue"));
+const aider = findAgent("aider")!;
+const continueAgent = findAgent("continue")!;
 
 const encode = (text: string): Uint8Array => textEncoder.encode(text);
 
@@ -226,7 +226,7 @@ describe("planInstructionLink", () => {
   });
 
   it("rejects an agent without a native instruction-link target", () => {
-    expect(rejects({ ...request(), agent: Option.getOrThrow(findAgent("cursor")) })).toBe(true);
+    expect(rejects({ ...request(), agent: findAgent("cursor")! })).toBe(true);
   });
 
   it("rejects prior ownership that does not match the exact native target", () => {

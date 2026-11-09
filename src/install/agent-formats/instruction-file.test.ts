@@ -12,8 +12,8 @@ const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const makeCodeReadable = Option.getOrThrow(findFeature("make-code-readable"));
-const simplifyCode = Option.getOrThrow(findFeature("simplify-code"));
+const makeCodeReadable = findFeature("make-code-readable")!;
+const simplifyCode = findFeature("simplify-code")!;
 const makeCodeReadableSkill = Option.getOrThrow(
   Option.liftPredicate(makeCodeReadable.installedSkill, (skill) => skill._tag === "skill"),
 );

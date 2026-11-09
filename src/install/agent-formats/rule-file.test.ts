@@ -9,13 +9,13 @@ import { planRuleFiles, ruleFileRequestSchema } from "./rule-file.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const cursor = Option.getOrThrow(findAgent("cursor"));
+const cursor = findAgent("cursor")!;
 const missingPrevious = { _tag: "missing" };
 const priorBytes = textEncoder.encode("user-authored rule\n");
 const priorFile = { _tag: "priorFile", bytes: priorBytes };
 
 const installedSkillFor = (featureId: string) => {
-  const feature = Option.getOrThrow(findFeature(featureId));
+  const feature = findFeature(featureId)!;
   if (feature.installedSkill._tag !== "skill") {
     throw new Error(`Feature ${featureId} does not install a skill.`);
   }

@@ -28,7 +28,7 @@ export const updateCommand = Command.make(
   (args) =>
     Effect.gen(function* () {
       if (args.format === "text") yield* TerminalUI.intro("update");
-      const host = yield* scanHost;
+      const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
       const updateSummary = yield* update({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
         host: { homeRoot: host.homeRoot },

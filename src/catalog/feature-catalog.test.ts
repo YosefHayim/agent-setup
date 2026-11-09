@@ -1,4 +1,3 @@
-import { Either, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +7,6 @@ import {
   featureCatalogSchema,
   findFeature,
   skillsForFeatures,
-  UnknownFeatureError,
 } from "./feature-catalog.js";
 
 const expectedFeatureIds = [
@@ -173,7 +171,7 @@ const validFixture = [
   },
 ];
 
-const decodeFixture = Schema.decodeUnknownEither(featureCatalogSchema, { onExcessProperty: "error" });
+const decodeFixture = (input: unknown) => featureCatalogSchema.safeParse(input);
 
 describe("featureCatalog", () => {
   it("decodes all approved features in display order", () => {
@@ -402,9 +400,9 @@ describe("featureCatalog", () => {
     ).toEqual([["make-promo-video", "macos"]]);
   });
 
-  it("finds features with Option", () => {
-    expect(Option.map(findFeature("plan-page"), (feature) => feature.title)).toEqual(Option.some("Plan page"));
-    expect(findFeature("missing-feature")).toEqual(Option.none());
+  it("finds features and represents absence with null", () => {
+    expect(findFeature("plan-page")?.title).toBe("Plan page");
+    expect(findFeature("missing-feature")).toBeNull();
   });
 
   it("expands dependencies once and returns stable catalog order", () => {
@@ -442,24 +440,22 @@ describe("featureCatalog", () => {
       ["clean-repo-by-feature", ["run-tasks-in-parallel", "finish-and-push", "organize-commits"]],
       ["finish-old-sessions", ["finish-and-push", "find-repeated-prompts"]],
     ]);
-    expect(Either.getOrThrowWith(addDependencies(["make-promo-video"]), String)).toEqual([
-      "plan-page",
-      "make-promo-video",
-    ]);
+    expect(addDependencies(["make-promo-video"])).toEqual({
+      status: "ready",
+      featureIds: ["plan-page", "make-promo-video"],
+    });
   });
 
-  it("returns a tagged unknown-feature error", () => {
-    const featureCatalogCheck = addDependencies(["not-installed"]);
+  it("returns an unknown-feature status with the unknown ID", () => {
+    const dependencyReply = addDependencies(["not-installed"]);
 
-    expect(Either.isLeft(featureCatalogCheck)).toBe(true);
-    expect(Option.getOrThrow(Either.getLeft(featureCatalogCheck))).toBeInstanceOf(UnknownFeatureError);
-    expect(Option.getOrThrow(Either.getLeft(featureCatalogCheck)).featureId).toBe("not-installed");
+    expect(dependencyReply).toEqual({ status: "unknown", featureId: "not-installed" });
   });
 });
 
 describe("featureCatalogSchema", () => {
   it("accepts a complete valid unknown fixture", () => {
-    expect(Either.isRight(decodeFixture(validFixture))).toBe(true);
+    expect(decodeFixture(validFixture).success).toBe(true);
   });
 
   it.each([
@@ -494,7 +490,7 @@ describe("featureCatalogSchema", () => {
     {
       name: "excess properties",
       input: [{ ...validFixture[0], unexpected: true }, validFixture[1]],
-      message: "is unexpected",
+      message: "Unrecognized key",
     },
     {
       name: "generated runtime entrypoints",
@@ -514,7 +510,7 @@ describe("featureCatalogSchema", () => {
   ])("rejects $name", ({ input, message }) => {
     const featureCatalogCheck = decodeFixture(input);
 
-    expect(Either.isLeft(featureCatalogCheck)).toBe(true);
-    expect(String(Option.getOrThrow(Either.getLeft(featureCatalogCheck)))).toContain(message);
+    expect(featureCatalogCheck.success).toBe(false);
+    expect(String(featureCatalogCheck.error)).toContain(message);
   });
 });

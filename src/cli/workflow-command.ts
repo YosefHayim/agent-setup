@@ -49,10 +49,10 @@ const scaffoldCommand = Command.make(
         yield* TerminalUI.step(`workspace: ${targetRoot}`);
       }
 
-      const copiedWorkflows = yield* copyWorkflows({
-        targetRoot,
-        templateDirectory: yield* workflowTemplateDirectory,
-        force: args.overwrite,
+      const templateDirectory = yield* workflowTemplateDirectory;
+      const copiedWorkflows = yield* Effect.tryPromise({
+        try: () => copyWorkflows({ targetRoot, templateDirectory, force: args.overwrite }),
+        catch: (error) => error,
       });
       if (args.format === "json") {
         yield* TerminalUI.json({ workspace: targetRoot, ...copiedWorkflows });

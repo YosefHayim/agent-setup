@@ -1,132 +1,142 @@
 // Home and project roots, platform, and agent evidence, observed once per command and handed to capabilities.
 
-import { Command, FileSystem, Path } from "@effect/platform";
-import { Effect, Schema } from "effect";
+import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 
-import { type AgentDefinition, agentCatalog, agentEvidenceSchema } from "../catalog/agent-catalog.js";
+import { z } from "zod";
 
-class HostScanError extends Schema.TaggedError<HostScanError>()("HostScanError", {
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable host scan failure.",
-  }),
-}) {
-  get message(): string {
-    return `Cannot scan host: ${this.issue}`;
-  }
+import { type AgentDefinition, type AgentEvidence, agentCatalog } from "../catalog/agent-catalog.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
+
+const execFileAsync = promisify(execFile);
+
+export const hostOperatingSystems = [
+  "aix",
+  "android",
+  "darwin",
+  "freebsd",
+  "haiku",
+  "linux",
+  "openbsd",
+  "sunos",
+  "win32",
+  "cygwin",
+  "netbsd",
+] as const;
+
+// Read-only host observations used by feature diagnostics.
+export const hostPlatformSchema = z.strictObject({
+  operatingSystem: z.enum(hostOperatingSystems),
+});
+
+export type HostPlatform = z.infer<typeof hostPlatformSchema>;
+
+export interface HostScan {
+  readonly homeRoot: string;
+  readonly projectRoot: string;
+  readonly platform: HostPlatform;
+  readonly agentEvidence: AgentEvidence;
 }
-
-export const hostPlatformSchema = Schema.Struct({
-  operatingSystem: Schema.Literal(
-    "aix",
-    "android",
-    "darwin",
-    "freebsd",
-    "haiku",
-    "linux",
-    "openbsd",
-    "sunos",
-    "win32",
-    "cygwin",
-    "netbsd",
-  ).annotations({
-    description: "Node operating-system identifier used to evaluate feature platform requirements.",
-  }),
-}).annotations({
-  description: "Read-only host observations used by feature diagnostics.",
-});
-
-const hostScanSchema = Schema.Struct({
-  homeRoot: Schema.String.annotations({
-    description: "Absolute home root that owns global-scope files.",
-  }),
-  projectRoot: Schema.String.annotations({
-    description: "Absolute current-project root that owns project-scope files.",
-  }),
-  platform: hostPlatformSchema,
-  agentEvidence: agentEvidenceSchema,
-}).annotations({
-  description: "Complete host observation handed to capabilities so they never probe the environment.",
-});
-
-export type HostScan = Schema.Schema.Type<typeof hostScanSchema>;
 
 const uniqueSorted = (values: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(values)].sort();
 
-const absoluteRoot = (value: string, path: Path.Path): string => path.resolve(value).replaceAll("\\", "/");
+const absoluteRoot = (value: string): string => path.resolve(value).replaceAll("\\", "/");
 
 // cmux puts a wrapper for every agent it integrates with (grok, opencode, …) on each terminal's PATH whether or not
 // the agent is installed — its grok wrapper only prints "grok not found" — so a wrapper alone is not evidence.
 // e.g. "/Applications/cmux.app/Contents/Resources/bin/grok"
 const TERMINAL_WRAPPER_PATTERN = /\/cmux\.app\/Contents\/Resources\/bin\//u;
 
-// Effect Command passes no environment unless given one, and `which` needs PATH to find anything.
-const commandAvailable = (commandName: string) =>
-  Command.make("which", "-a", commandName).pipe(
-    Command.env(process.env),
-    Command.lines,
-    Effect.map((commandPaths) =>
-      commandPaths.some((commandPath) => commandPath.trim() !== "" && !TERMINAL_WRAPPER_PATTERN.test(commandPath)),
-    ),
-    Effect.catchAll(() => Effect.succeed(false)),
-  );
+const pathExists = async (filePath: string): Promise<boolean> => {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    // A missing path is the normal "not installed" answer, not a scan failure.
+    return false;
+  }
+};
+
+// `which` needs PATH to find anything, so the child gets this process's environment.
+const commandAvailable = async (commandName: string): Promise<boolean> => {
+  try {
+    const whichReply = await execFileAsync("which", ["-a", commandName], { env: process.env });
+    const commandPaths = whichReply.stdout.split("\n");
+    return commandPaths.some((commandPath) => commandPath.trim() !== "" && !TERMINAL_WRAPPER_PATTERN.test(commandPath));
+  } catch {
+    // `which` exits non-zero when the command is absent, which is the normal "not installed" answer.
+    return false;
+  }
+};
 
 const declaredEvidence = (select: (detection: AgentDefinition["detection"]) => ReadonlyArray<string>) =>
   uniqueSorted(agentCatalog.flatMap((agent) => select(agent.detection)));
 
-// Check every detection alternative the agent catalog declares, each exactly once.
-const captureAgentEvidence = (homeRoot: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const evidence = {
-      homePaths: yield* Effect.filter(
-        declaredEvidence((detection) => detection.homePaths),
-        (homePath) => fileSystem.exists(path.join(homeRoot, homePath)),
-      ),
-      absolutePaths: yield* Effect.filter(
-        declaredEvidence((detection) => detection.absolutePaths),
-        (absolutePath) => fileSystem.exists(absolutePath),
-      ),
-      commands: yield* Effect.filter(
-        declaredEvidence((detection) => detection.commands),
-        commandAvailable,
-      ),
-    };
-
-    return yield* Schema.decodeUnknown(agentEvidenceSchema, { onExcessProperty: "error" })(evidence).pipe(
-      Effect.mapError((error) => new HostScanError({ issue: `Observed agent evidence is invalid: ${String(error)}` })),
-    );
-  });
-
-export const scanHost = Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const homeRoot = absoluteRoot(process.env.HOME || process.env.USERPROFILE || "", path);
-  if (homeRoot === "/" || homeRoot === "") {
-    return yield* new HostScanError({
-      issue: "HOME (or USERPROFILE) must resolve to an absolute home directory.",
-    });
+// Checks one value at a time, in catalog order, and keeps the ones that are present.
+const keepPresentValues = async (
+  values: ReadonlyArray<string>,
+  isPresent: (value: string) => Promise<boolean>,
+): Promise<Array<string>> => {
+  const presentValues: Array<string> = [];
+  for (const value of values) {
+    const isValuePresent = await isPresent(value);
+    if (isValuePresent) {
+      presentValues.push(value);
+    }
   }
 
-  const projectRoot = absoluteRoot(process.cwd(), path);
-  const platform = yield* Schema.decodeUnknown(hostPlatformSchema, { onExcessProperty: "error" })({
-    operatingSystem: process.platform,
-  }).pipe(
-    Effect.mapError((error) => new HostScanError({ issue: `Host platform evidence is invalid: ${String(error)}` })),
-  );
-  const agentEvidence = yield* captureAgentEvidence(homeRoot);
+  return presentValues;
+};
 
-  return { homeRoot, projectRoot, platform, agentEvidence } satisfies HostScan;
-});
+// Checks every detection alternative the agent catalog declares, each exactly once.
+const captureAgentEvidence = async (homeRoot: string): Promise<AgentEvidence> => {
+  const declaredHomePaths = declaredEvidence((detection) => detection.homePaths);
+  const homePaths = await keepPresentValues(declaredHomePaths, (homePath) => pathExists(path.join(homeRoot, homePath)));
 
-export const destinationForScope = (input: {
+  const declaredAbsolutePaths = declaredEvidence((detection) => detection.absolutePaths);
+  const absolutePaths = await keepPresentValues(declaredAbsolutePaths, pathExists);
+
+  const declaredCommands = declaredEvidence((detection) => detection.commands);
+  const commands = await keepPresentValues(declaredCommands, commandAvailable);
+
+  return { homePaths, absolutePaths, commands };
+};
+
+export const scanHost = async (): Promise<HostScan> => {
+  const homeRoot = absoluteRoot(process.env.HOME || process.env.USERPROFILE || "");
+  const isHomeRootUnusable = homeRoot === "/" || homeRoot === "";
+  if (isHomeRootUnusable) {
+    throw new Error("Cannot scan host: HOME (or USERPROFILE) must resolve to an absolute home directory.");
+  }
+
+  const projectRoot = absoluteRoot(process.cwd());
+  const platformCheck = hostPlatformSchema.safeParse({ operatingSystem: process.platform });
+  const isPlatformInvalid = !platformCheck.success;
+  if (isPlatformInvalid) {
+    throw new Error(
+      `Cannot scan host: Host platform evidence is invalid: ${joinZodIssueMessages(platformCheck.error)}`,
+      {
+        cause: platformCheck.error,
+      },
+    );
+  }
+
+  const agentEvidence = await captureAgentEvidence(homeRoot);
+
+  return { homeRoot, projectRoot, platform: platformCheck.data, agentEvidence };
+};
+
+export const destinationForScope = (request: {
   scope: "global" | "project";
   homeRoot: string;
   projectRoot: string;
 }): { _tag: "global"; root: string } | { _tag: "project"; root: string } => {
-  switch (input.scope) {
+  switch (request.scope) {
     case "global":
-      return { _tag: "global", root: input.homeRoot };
+      return { _tag: "global", root: request.homeRoot };
     case "project":
-      return { _tag: "project", root: input.projectRoot };
+      return { _tag: "project", root: request.projectRoot };
   }
 };
