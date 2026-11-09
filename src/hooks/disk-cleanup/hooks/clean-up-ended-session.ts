@@ -16,7 +16,7 @@ const handOverEndedSession = (): void => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
   const endedSessionId = sessionIdFrom(hookInput);
   const watcherArguments = watcherArgumentsFor(endedSessionId);
-  startDetachedWatcher({ hookUrl: import.meta.url, watcherName: "cleanupWatcher", watcherArguments });
+  startDetachedWatcher({ hookUrl: import.meta.url, watcherName: "cleanup-watcher", watcherArguments });
 };
 
 try {

@@ -18,7 +18,7 @@ const handOverEndedSession = (): void => {
 
   startDetachedWatcher({
     hookUrl: import.meta.url,
-    watcherName: "rehomeWatcher",
+    watcherName: "rehome-watcher",
     watcherArguments: ["--agent", agent, "--session", sessionId, "--wait"],
   });
 };

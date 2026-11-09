@@ -4,8 +4,8 @@
 Read-only. Reads the Claude Code transcripts; writes only the --out file.
 
 Usage:
-  python3 scripts/sessionTokenUsage.py --since 2026-10-04 --until 2026-10-11 --out "$RUN_DIR/usage.json"
-  python3 scripts/sessionTokenUsage.py --since 2026-10-11 --compare "$BASELINE_RUN_DIR/usage.json"
+  python3 scripts/session_token_usage.py --since 2026-10-04 --until 2026-10-11 --out "$RUN_DIR/usage.json"
+  python3 scripts/session_token_usage.py --since 2026-10-11 --compare "$BASELINE_RUN_DIR/usage.json"
 """
 
 from __future__ import annotations

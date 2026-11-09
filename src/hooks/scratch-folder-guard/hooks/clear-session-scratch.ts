@@ -14,7 +14,11 @@ const handOverEndedSession = (): void => {
     return;
   }
 
-  startDetachedWatcher({ hookUrl: import.meta.url, watcherName: "scratchWatcher", watcherArguments: [endedSessionId] });
+  startDetachedWatcher({
+    hookUrl: import.meta.url,
+    watcherName: "scratch-watcher",
+    watcherArguments: [endedSessionId],
+  });
 };
 
 try {

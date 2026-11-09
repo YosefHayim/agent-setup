@@ -1,12 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 const hookPath = fileURLToPath(new URL("./active-run-reminder.ts", import.meta.url));
+// The hook runs from a temp repository, where a bare "tsx" would not resolve, so the tsx loader is given by its full URL.
+const requireFromTest = createRequire(import.meta.url);
+const tsxLoaderPath = requireFromTest.resolve("tsx");
+const tsxLoaderUrl = pathToFileURL(tsxLoaderPath).href;
 const REPOSITORY_NAME = "agent-run-repo";
 const ACTIVE_RUN_TITLE = "Code-shape cleanup";
 const roots: Array<string> = [];
@@ -73,8 +78,7 @@ const runHook = (request: {
   };
   delete environment.XDG_STATE_HOME;
   if (request.stateHome !== null) environment.XDG_STATE_HOME = request.stateHome;
-
-  return spawnSync(process.execPath, ["--import", "tsx", hookPath], {
+  return spawnSync(process.execPath, ["--import", tsxLoaderUrl, hookPath], {
     cwd: request.scenario.repositoryFolder,
     input: request.hookInput,
     encoding: "utf8",
