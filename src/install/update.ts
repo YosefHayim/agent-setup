@@ -94,7 +94,8 @@ export const update = (input: unknown) =>
     const missingId = isRefreshRequest
       ? (request.features.ids.find((id) => !featureIdsWithDependencies.includes(id)) ?? null)
       : null;
-    if (missingId !== null) {
+    const isFeatureMissing = missingId !== null;
+    if (isFeatureMissing) {
       return yield* new UpdateError({
         issue: `Feature ${missingId} is not installed in this scope; use install to add it.`,
       });
