@@ -352,15 +352,12 @@ describe("receiptSchema", () => {
     expect(Schema.decodeUnknownSync(jsonPointerSchema)(pointer)).toBe(pointer);
   });
 
-  it.each([
-    undefined,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    1n,
-    new Date("2026-01-01T00:00:00.000Z"),
-  ])("rejects a non-JSON previous value", (value) => {
-    expect(() => decodePreviousJson({ _tag: "value", value })).toThrow();
-  });
+  it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 1n, new Date("2026-01-01T00:00:00.000Z")])(
+    "rejects a non-JSON previous value",
+    (value) => {
+      expect(() => decodePreviousJson({ _tag: "value", value })).toThrow();
+    },
+  );
 
   it.each([
     { name: "duplicate", pointers: ["/rules", "/rules"] },

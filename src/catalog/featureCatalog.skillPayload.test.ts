@@ -79,12 +79,12 @@ const expectValidSkillFrontmatter = (skillMd: string, expectedName: string): voi
 };
 
 describe("shipped skills", () => {
-  it.each(installedSkills)("$skillId has valid Kimi/Kiro frontmatter under $sourceDirectory", ({
-    skillId,
-    sourceDirectory,
-  }) => {
-    expectValidSkillFrontmatter(path.join(skillRoot, sourceDirectory, "SKILL.md"), skillId);
-  });
+  it.each(installedSkills)(
+    "$skillId has valid Kimi/Kiro frontmatter under $sourceDirectory",
+    ({ skillId, sourceDirectory }) => {
+      expectValidSkillFrontmatter(path.join(skillRoot, sourceDirectory, "SKILL.md"), skillId);
+    },
+  );
 });
 
 // Skills with side effects the user starts by name; the model never runs them on its own.
@@ -101,21 +101,20 @@ const manualOnlySkillIds = [
 ];
 
 describe("manual-only skills", () => {
-  it.each(installedSkills)("$skillId is hidden from the model in Claude Code and Codex only when it is manual-only", ({
-    skillId,
-    sourceDirectory,
-    shippedPaths,
-  }) => {
-    const { frontmatter } = parseFrontmatter(path.join(skillRoot, sourceDirectory, "SKILL.md"));
-    const codexPolicy = path.join(skillRoot, sourceDirectory, "agents", "openai.yaml");
-    const codexPolicyText = existsSync(codexPolicy) ? readFileSync(codexPolicy, "utf8") : "";
-    const codexPolicyDocument = parse(codexPolicyText);
-    const isManualOnly = manualOnlySkillIds.includes(skillId);
+  it.each(installedSkills)(
+    "$skillId is hidden from the model in Claude Code and Codex only when it is manual-only",
+    ({ skillId, sourceDirectory, shippedPaths }) => {
+      const { frontmatter } = parseFrontmatter(path.join(skillRoot, sourceDirectory, "SKILL.md"));
+      const codexPolicy = path.join(skillRoot, sourceDirectory, "agents", "openai.yaml");
+      const codexPolicyText = existsSync(codexPolicy) ? readFileSync(codexPolicy, "utf8") : "";
+      const codexPolicyDocument = parse(codexPolicyText);
+      const isManualOnly = manualOnlySkillIds.includes(skillId);
 
-    expect(frontmatter?.["disable-model-invocation"] === true).toBe(isManualOnly);
-    expect(codexPolicyDocument?.policy?.allow_implicit_invocation === false).toBe(isManualOnly);
-    expect(shippedPaths.includes("agents")).toBe(existsSync(codexPolicy));
-  });
+      expect(frontmatter?.["disable-model-invocation"] === true).toBe(isManualOnly);
+      expect(codexPolicyDocument?.policy?.allow_implicit_invocation === false).toBe(isManualOnly);
+      expect(shippedPaths.includes("agents")).toBe(existsSync(codexPolicy));
+    },
+  );
 });
 
 const shippedSkillFiles = readdirSync(skillRoot, { recursive: true, encoding: "utf8" })

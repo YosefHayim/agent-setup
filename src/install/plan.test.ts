@@ -321,33 +321,26 @@ describe("checkPlan", () => {
     expect(issues(checkPlan(input))).toContain("is unexpected");
   });
 
-  it.each([
-    "../outside",
-    "/absolute/path",
-    ".claude/../outside",
-    "nested\\windows",
-  ])("rejects escaping or non-canonical relative path %s", (path) => {
-    expect(issues(checkPlan({ ...completePlan, operations: [write({ ...runtimeFile, path })] }))).toContain("path");
-  });
+  it.each(["../outside", "/absolute/path", ".claude/../outside", "nested\\windows"])(
+    "rejects escaping or non-canonical relative path %s",
+    (path) => {
+      expect(issues(checkPlan({ ...completePlan, operations: [write({ ...runtimeFile, path })] }))).toContain("path");
+    },
+  );
 
-  it.each([
-    "/workspace",
-    "/",
-    "C:/workspace",
-    "z:/workspace/project",
-  ])("accepts canonical cross-platform absolute root %s", (root) => {
-    expect(Either.isRight(checkPlan({ ...completePlan, root }))).toBe(true);
-  });
+  it.each(["/workspace", "/", "C:/workspace", "z:/workspace/project"])(
+    "accepts canonical cross-platform absolute root %s",
+    (root) => {
+      expect(Either.isRight(checkPlan({ ...completePlan, root }))).toBe(true);
+    },
+  );
 
-  it.each([
-    "C:workspace",
-    "C:\\workspace",
-    "C://workspace",
-    "/workspace//nested",
-    "C:/workspace/../outside",
-  ])("rejects non-canonical absolute root %s", (root) => {
-    expect(issues(checkPlan({ ...completePlan, root }))).toContain("root");
-  });
+  it.each(["C:workspace", "C:\\workspace", "C://workspace", "/workspace//nested", "C:/workspace/../outside"])(
+    "rejects non-canonical absolute root %s",
+    (root) => {
+      expect(issues(checkPlan({ ...completePlan, root }))).toContain("root");
+    },
+  );
 
   it.each([
     {
