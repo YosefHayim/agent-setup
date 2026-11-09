@@ -10,10 +10,10 @@ It installs into global `~/.claude` or project-local `.claude/`, keeps Schema-va
 
 ## Quick start
 
-Install the safe default scratch folder guard globally:
+From a checkout of this repo, run `pnpm install` once. Then install the safe default scratch folder guard globally:
 
 ```bash
-npx agent-setup install
+pnpm tsx src/cli/main.ts install
 ```
 
 Then restart Claude Code so hooks and skills load in the next session.
@@ -21,7 +21,7 @@ Then restart Claude Code so hooks and skills load in the next session.
 For a repo-local install that can be committed with the project:
 
 ```bash
-npx agent-setup install --scope project
+pnpm tsx src/cli/main.ts install --scope project
 ```
 
 ## Usage
@@ -29,15 +29,15 @@ npx agent-setup install --scope project
 Print command help, or open the interactive TUI (same options as CLI args; shows an ordered plan and asks for approval before applying):
 
 ```bash
-npx agent-setup
-npx agent-setup menu
+pnpm tsx src/cli/main.ts
+pnpm tsx src/cli/main.ts menu
 ```
 
 Add a specific skill or hook set. `install` only adds: features that are already installed stay installed:
 
 ```bash
-npx agent-setup install write-readme update-agent-docs
-npx agent-setup install image-to-code
+pnpm tsx src/cli/main.ts install write-readme update-agent-docs
+pnpm tsx src/cli/main.ts install image-to-code
 ```
 
 Keep an existing install and refresh its copied skills and hooks. Named IDs must already be installed; every installed feature is refreshed and none is removed:
@@ -152,7 +152,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 ## Recommended community skills
 
 <!-- AUTO:SKILLS:START -->
-These skills ship with agent-setup for convenience — installable the same way (`npx agent-setup install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:
+These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:
 
 | Skill | What it does | By |
 | --- | --- | --- |
@@ -212,14 +212,14 @@ The hook code is intentionally small: compiled JavaScript, Node built-ins, and a
 
 ```bash
 pnpm install
-pnpm generate-readme
+pnpm readme:generate
 pnpm test
 pnpm typecheck
 pnpm build
 pnpm check
 ```
 
-`pnpm generate-readme` rewrites only the marked feature, skill, and settings sections above from `src/catalog/featureCatalog.ts`, `src/skills/*/SKILL.md`, `src/config/configSchema.ts`, and `src/config/environmentVariables.ts`. The pre-push hook runs `pnpm check`, whose `generate-readme:check` fails on a stale README; it never rewrites or stages files, so run `pnpm generate-readme` yourself.
+`pnpm readme:generate` rewrites only the marked feature, skill, and settings sections above from `src/catalog/featureCatalog.ts`, `src/skills/*/SKILL.md`, `src/config/configSchema.ts`, and `src/config/environmentVariables.ts`. The pre-push hook runs `pnpm check`, whose `generate-readme:check` fails on a stale README; it never rewrites or stages files, so run `pnpm readme:generate` yourself.
 
 ## License
 

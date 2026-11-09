@@ -1,5 +1,6 @@
 {
-  "$schema": "https://unpkg.com/knip@6.43.0/schema.json",
+  "$schema": "https://unpkg.com/knip@6.44.2/schema.json",
   "entry": ["src/hooks/**/*.ts", "src/statuslines/**/*.mjs"],
-  "project": ["src/**/*.{ts,mjs,js}", "!src/skills/**"]
+  "project": ["src/**/*.{ts,mjs,js}", "!src/skills/**"],
+  "includeEntryExports": true
 }

@@ -17,7 +17,8 @@
     "!dist/src/scripts"
   ],
   "scripts": {
-    "cli": "tsx src/cli/main.ts",
+    "dev": "tsx watch src/cli/main.ts",
+    "prod": "pnpm build && node dist/src/cli/main.js",
     "prepare": "husky",
     "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc && node -e \"require('node:fs').chmodSync('dist/src/cli/main.js',0o755)\"",
@@ -26,11 +27,9 @@
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/agent-setup.tsbuildinfo",
     "lint": "biome check . && knip",
     "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
-    "prepublishOnly": "npm run build",
-    "generate-readme": "tsx src/scripts/generateReadme.ts",
-    "generate-readme:check": "tsx src/scripts/generateReadme.ts --check",
-    "check": "turbo run lint typecheck test build generate-readme:check --output-logs=errors-only"
+    "readme:generate": "tsx src/scripts/generateReadme.ts",
+    "readme:check": "tsx src/scripts/generateReadme.ts --check",
+    "check": "turbo run lint typecheck test build readme:check --output-logs=errors-only"
   },
   "keywords": [
     "claude-code",
@@ -65,23 +64,23 @@
   },
   "packageManager": "pnpm@11.18.0",
   "dependencies": {
-    "@effect/cli": "0.76.0",
+    "@effect/cli": "0.77.2",
     "@effect/platform": "0.97.2",
     "@effect/platform-node": "0.108.0",
     "effect": "3.22.2",
     "jsonc-parser": "3.3.1",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.2",
+    "@biomejs/biome": "2.6.6",
     "@effect/vitest": "0.30.0",
     "@types/node": "22.20.0",
     "@vitest/coverage-v8": "3.2.7",
     "glob": "13.0.6",
     "husky": "9.1.7",
-    "knip": "6.43.0",
-    "tsx": "4.22.4",
-    "turbo": "2.11.8",
+    "knip": "6.44.2",
+    "tsx": "4.23.15",
+    "turbo": "2.11.10",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   }

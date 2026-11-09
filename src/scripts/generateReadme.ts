@@ -74,7 +74,7 @@ const featuresTable = (): string =>
 
 const communitySection = (descriptions: ReadonlyMap<string, string>): string =>
   [
-    "These skills ship with agent-setup for convenience — installable the same way (`npx agent-setup install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:",
+    "These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:",
     "",
     "| Skill | What it does | By |",
     "| --- | --- | --- |",
@@ -138,7 +138,7 @@ if (!process.argv.includes("--check")) {
   writeFileSync(README_PATH, renderedReadme);
   console.log("✅ README.md updated");
 } else if (renderedReadme !== currentReadme) {
-  console.error("README.md is stale. Run `pnpm generate-readme`.");
+  console.error("README.md is stale. Run `pnpm readme:generate`.");
   process.exitCode = 1;
 } else {
   console.log("README.md matches its sources");

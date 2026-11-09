@@ -82,15 +82,15 @@ All paths are in the agent-setup repo. Put the new skill next to related skills 
    A skill that writes run records starts its run with the "start a run" snippet from `src/skills/_shared/agent-artifacts.md` (`SKILL="<id>"`, `RUN_DIR`, one `report.md`). It also gets a row in the "run report folders" list of `src/catalog/featureCatalog.skillPayload.test.ts`, which checks its SKILL.md for `SKILL="<id>"` and `RUN_DIR`, and a row in the `which-skill` REFERENCE "Agent artifact paths" table.
 4. **Routing** — a row in the fitting table of `src/skills/whichSkill/REFERENCE.md`: the user's phrases → `` `<id>` ``.
 5. **Siblings** — when the new skill takes work from a sibling, add "For …, use <id>." to that sibling's description.
-6. **README** — run `pnpm generate-readme`. Never edit the generated sections by hand.
+6. **README** — run `pnpm readme:generate`. Never edit the generated sections by hand.
 
 ## Install
 
 `install <id>` adds the feature and keeps everything already installed. Run from the agent-setup repo after `pnpm check` (it builds `dist/`, which the hooks install from):
 
 ```bash
-pnpm cli install <id>
+pnpm tsx src/cli/main.ts install <id>
 ls ~/.claude/skills/<id>/SKILL.md
 ```
 
-For a project install, run the same command from the target repo: replace `pnpm cli` with `node <agent-setup repo>/dist/src/cli/main.js` (the project is the current folder), add `--scope project`, and check `.claude/skills/<id>/SKILL.md`.
+For a project install, run the same command from the target repo: replace `pnpm tsx src/cli/main.ts` with `node <agent-setup repo>/dist/src/cli/main.js` (the project is the current folder), add `--scope project`, and check `.claude/skills/<id>/SKILL.md`.
