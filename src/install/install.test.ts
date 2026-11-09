@@ -411,12 +411,10 @@ layer(NodeContext.layer)("install", (it) => {
     expect(decoded._tag).toBe("Left");
   });
 
-  it.each([
-    "/workspace/$HOME",
-    '/workspace/"quoted"',
-    "/workspace/`command`",
-    "/workspace/back\\slash",
-  ])("rejects an installation root that cannot be embedded safely in generated commands: %s", (root) => {
-    expect(decodeInstallRequest(installRequest({ root, preparedRoot: "/package/dist" }))._tag).toBe("Left");
-  });
+  it.each(["/workspace/$HOME", '/workspace/"quoted"', "/workspace/`command`", "/workspace/back\\slash"])(
+    "rejects an installation root that cannot be embedded safely in generated commands: %s",
+    (root) => {
+      expect(decodeInstallRequest(installRequest({ root, preparedRoot: "/package/dist" }))._tag).toBe("Left");
+    },
+  );
 });

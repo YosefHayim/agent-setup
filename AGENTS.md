@@ -7,7 +7,7 @@ Entrypoint for coding agents and maintainers. Claude Code, Codex, Cursor, Kiro, 
 **agent-setup** is a TypeScript CLI that installs, updates, uninstalls, diagnoses, configures, and scaffolds an owned set of agent skills, dependency-free hooks, agent configuration, and copyable single-gate CI/publish workflow templates.
 
 ```bash
-npx agent-setup install image-to-code
+pnpm tsx src/cli/main.ts install image-to-code
 ```
 
 Voice lives in **agent-voice** and free provider routing in **free-model-router**, each in its own repository. Do not add either back here.
@@ -42,12 +42,6 @@ Hard rules agents must hold every turn.
 - **Shape** — capability-owned paths; camelCase authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
 - **Local tooling** — local `src/scripts/dev/` for personal/one-off scripts. All maintained build/check tools live under `src/scripts/`, and product code never imports them.
 - **Git hooks** — there is no pre-commit hook; pre-push runs `pnpm check`. A new worktree needs `pnpm install` before its first push. Hooks report drift and never rewrite or stage files.
-- **Branching** — never commit product work on `main`/default; use a topic branch (`feat/…`, `fix/…`, `refactor/…`, `chore/…`). Refinements to an existing feature still get their own branch.
-- **Remote branches** — do not delete remote branches unless the user explicitly asks; leave them for handoff/CI after push or PR.
-- **Parallel features** — one task per worktree under `.worktrees/`; issue + branch + PR to default with `Fixes #n` / `Closes #n`. Use `run-tasks-in-parallel` (setup-lanes / land-lanes).
-- **Messy whole-repo cleanup** — backup default branch first, then one sub-agent per feature with PRs for human review (`clean-repo-by-feature`); ask host mode (background subagents vs cmux terminal per lane vs briefs only); never damage main history.
-- **Unsure which skill** — run `which-skill` first: refine freeform → primary existing skill + pasteable prompt (do not invent a parallel workflow).
-- **Ship** — check gate green before push/PR; no force-push to protected branches; merge to default only when asked.
 
 ## Validate changes
 

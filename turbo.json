@@ -32,7 +32,7 @@
     "build": {
       "outputs": ["dist/**"]
     },
-    "generate-readme:check": {
+    "readme:check": {
       "dependsOn": ["build"]
     }
   }

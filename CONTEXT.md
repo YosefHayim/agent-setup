@@ -9,7 +9,7 @@ Orientation: what this is, its moving parts, and how they fit. For the words, se
 
 ## Actors
 
-- **The owner / user** — runs `npx agent-setup install` to wire guardrails into `~/.claude` (global) or `./.claude` (project).
+- **The owner / user** — runs `pnpm tsx src/cli/main.ts install` to wire guardrails into `~/.claude` (global) or `./.claude` (project).
 - **Claude Code, Codex, and Grok** — verified native lifecycle-hook targets.
 - **Other agents** — detected and wired only through verified catalog-driven formats; unsupported hook adapters are reported, not guessed.
 - **CI / `workflow scaffold` consumers** — repositories that copy the single-gate CI/publish set from `src/templates/workflows/`.

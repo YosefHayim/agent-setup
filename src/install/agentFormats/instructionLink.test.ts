@@ -106,14 +106,12 @@ describe("planInstructionLink", () => {
     });
   });
 
-  it.each([
-    "model: sonnet\n",
-    "model: sonnet",
-    "read:\n  - USER.md",
-    "read:\r\n  - USER.md",
-  ])("round-trips Aider configuration %j byte for byte", (original) => {
-    expect(decode(roundTrip({ original }).bytes)).toBe(original);
-  });
+  it.each(["model: sonnet\n", "model: sonnet", "read:\n  - USER.md", "read:\r\n  - USER.md"])(
+    "round-trips Aider configuration %j byte for byte",
+    (original) => {
+      expect(decode(roundTrip({ original }).bytes)).toBe(original);
+    },
+  );
 
   it("keeps a later Aider root key separated from a non-terminated original prefix", () => {
     const installed = write({ current: "model: sonnet" });
@@ -146,19 +144,19 @@ describe("planInstructionLink", () => {
     expect(rejects(request({ desired: "absent", current, previousFile: installed.file }))).toBe(true);
   });
 
-  it.each([
-    '"read":\n  - "AGENTS.md"\n',
-    "read:\n  - AGENTS.md # user-owned\n",
-  ])("recognizes one semantically equivalent pre-existing Aider reference in %j", (current) => {
-    const aiderWrite = write({ current });
+  it.each(['"read":\n  - "AGENTS.md"\n', "read:\n  - AGENTS.md # user-owned\n"])(
+    "recognizes one semantically equivalent pre-existing Aider reference in %j",
+    (current) => {
+      const aiderWrite = write({ current });
 
-    expect(decode(aiderWrite.bytes)).toBe(current);
-    expect(aiderWrite.file.ownership).toMatchObject({
-      keyPreviouslyPresent: true,
-      insertedPrefix: "",
-      previouslyPresent: true,
-    });
-  });
+      expect(decode(aiderWrite.bytes)).toBe(current);
+      expect(aiderWrite.file.ownership).toMatchObject({
+        keyPreviouslyPresent: true,
+        insertedPrefix: "",
+        previouslyPresent: true,
+      });
+    },
+  );
 
   it("restores the exact prior Continue rules value while preserving unrelated JSON bytes", () => {
     const original = '{ "theme" : "dark", "rules" : ["USER.md"] }\n';
