@@ -84,7 +84,7 @@ type ConfigSetting = {
   readonly optional: boolean;
 };
 
-const configFields = configSchema.from.fields;
+const configFields = configSchema.fields;
 
 export const configSettings: ReadonlyArray<ConfigSetting> = Struct.keys(configFields).map((key) => {
   const property: ConfigProperty = configFields[key];
