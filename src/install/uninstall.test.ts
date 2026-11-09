@@ -45,7 +45,7 @@ const installRequest = (input: { root: string; preparedRoot: string }) => ({
   destination: { _tag: "project", root: input.root },
   host: { homeRoot: input.root },
   preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: ["make-code-readable"] },
+  features: { _tag: "selected", ids: ["make-code-readable", "scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["vendor"] } },

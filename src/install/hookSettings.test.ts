@@ -145,7 +145,7 @@ layer(NodeContext.layer)("hook settings", (it) => {
       for (const hookFile of [claudeSettingsPath, codexHooksPath]) {
         const settings = yield* readText(hookFile);
         expect(settings).toContain("agent-voice-stop");
-        expect(settings).toContain("recordIdleCompactEvent.js");
+        expect(settings).toContain("askScratchCleanup.js");
       }
 
       yield* uninstall(uninstallRequest(root));
@@ -161,8 +161,8 @@ layer(NodeContext.layer)("hook settings", (it) => {
       const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
       yield* install(request);
       const changedSettings = (yield* readText(claudeSettingsPath)).replace(
-        "recordIdleCompactEvent.js",
-        "recordIdleCompactEvent.js --changed",
+        "askScratchCleanup.js",
+        "askScratchCleanup.js --changed",
       );
       yield* writeFiles(root, { [claudeSettingsPath]: changedSettings });
 

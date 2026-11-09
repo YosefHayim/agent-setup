@@ -155,6 +155,7 @@ layer(NodeContext.layer)("doctor", (it) => {
         expect(report.discrepancies).toEqual([
           { _tag: "receiptScopeMismatch", requestedScope: "project", receiptScope: "global" },
           { _tag: "packageVersionMismatch", installedVersion: "0.9.0", preparedVersion: "1.0.0" },
+          { _tag: "missingFeatureDependency", featureId: "plan-page" },
           { _tag: "unsupportedFeaturePlatform", featureId: "make-promo-video", platform: "macos" },
           { _tag: "detectedAgentNotManaged", agentId: "cursor" },
           { _tag: "managedAgentNotDetected", agentId: "codex" },

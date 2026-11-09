@@ -112,7 +112,7 @@ describe("planInstructionFile", () => {
     const operation = write({ currentBytes: existing });
 
     expect(decode(operation.bytes)).toBe(
-      `# User rules\n\nKeep trailing spaces.  \n\n${startMarker}\n## make-code-readable\n\nAlpha uses agent-setup.\n${endMarker}\n`,
+      `# User rules\n\nKeep trailing spaces.  \n\n${startMarker}\n## make-code-readable\n\nAlpha body.\n${endMarker}\n`,
     );
     expect(operation.bytes.slice(0, existing.byteLength)).toEqual(existing);
   });

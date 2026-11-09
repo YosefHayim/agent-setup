@@ -103,7 +103,7 @@ layer(NodeContext.layer)("update", (it) => {
       }
       expect(yield* readText("AGENTS.md")).toBe("User instructions.\n");
       expect(yield* readText(".claude/settings.json")).toContain('"theme": "dark"');
-      expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
+      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
 
       const receipt = JSON.parse(yield* readText(".claude/agent-setup/receipt.json"));
       expect(receipt.features).toEqual(["scratch-folder-guard"]);
@@ -118,7 +118,7 @@ layer(NodeContext.layer)("update", (it) => {
   it.scoped("refreshes named installed features and keeps the rest of the receipt selection", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, readText, exists } = yield* workspace;
-      const baseRequest = request({ root, preparedRoot, features: ["make-code-readable"] });
+      const baseRequest = request({ root, preparedRoot, features: ["make-code-readable", "scratch-folder-guard"] });
       yield* install({ ...baseRequest, configuration: selectedDefaults });
 
       const updateSummary = yield* update({
@@ -200,7 +200,7 @@ layer(NodeContext.layer)("update", (it) => {
       yield* install({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["claude-code"] } });
-      expect(yield* readText(".claude/settings.json")).toContain("SessionStart");
+      expect(yield* readText(".claude/settings.json")).toContain("scratchFolderGuard/hooks/scratchFolderGuard.js");
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       expect(yield* readText(".claude/settings.json")).toBe(originalSettings);
