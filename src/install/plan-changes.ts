@@ -1,5 +1,7 @@
 /** Plan an install or an uninstall: keep restoration history, restore stale files first, write only what changed, and publish the receipt last. */
 
+import { isDeepStrictEqual } from "node:util";
+
 import { Either, Schema } from "effect";
 
 import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
@@ -23,9 +25,6 @@ import {
   reservedReceiptPaths,
 } from "./plan.js";
 import { receiptSchema } from "./receipt.js";
-
-const isSameSerializedValue = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
 
 const reverseValues = <Value>(values: ReadonlyArray<Value>): ReadonlyArray<Value> =>
   values.map((_, index) => values[values.length - index - 1]);
@@ -352,7 +351,7 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
         return (
           candidate !== undefined &&
           value.pointer === candidate.pointer &&
-          isSameSerializedValue(value.installed, candidate.installed)
+          isDeepStrictEqual(value.installed, candidate.installed)
         );
       })
     );
@@ -383,7 +382,7 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
 const installedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
   left.path === right.path &&
   left.kind._tag === right.kind._tag &&
-  isSameSerializedValue(left.owner, right.owner) &&
+  isDeepStrictEqual(left.owner, right.owner) &&
   installedOwnershipEqual(left.ownership, right.ownership);
 
 export const planInstall = (input: unknown) =>
