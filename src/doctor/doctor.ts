@@ -114,14 +114,16 @@ const preparedRuntimeStatus = async (
   feature: FeatureDefinition,
   packageRoot: string,
 ): Promise<PreparedRuntimeStatus> => {
-  const isRuntimeNotRequired = feature.runtime._tag === "none";
+  const runtime = feature.runtime;
+
+  const isRuntimeNotRequired = runtime._tag === "none";
 
   if (isRuntimeNotRequired) {
     return { _tag: "notRequired" };
   }
 
   const typeScriptExtensionLength = 3;
-  const entrypoint = `${feature.runtime.sourceEntrypoint.slice(0, -typeScriptExtensionLength)}.js`;
+  const entrypoint = `${runtime.sourceEntrypoint.slice(0, -typeScriptExtensionLength)}.js`;
   const relativePath = `hooks/${feature.sourceDirectory}/${entrypoint}`;
   const isEntrypointPresent = await isPathPresent(path.join(packageRoot, relativePath));
 
@@ -176,9 +178,10 @@ const listManagedAgentIds = (receipt: Receipt | null): Array<string> => {
   }
 
   return receipt.ownedFiles.flatMap((file) => {
-    const isAgentOwned = file.owner._tag === "agent";
+    const owner = file.owner;
+    const isAgentOwned = owner._tag === "agent";
 
-    return isAgentOwned ? file.owner.agentIds : [];
+    return isAgentOwned ? owner.agentIds : [];
   });
 };
 

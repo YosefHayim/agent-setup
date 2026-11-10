@@ -551,9 +551,10 @@ export const desiredHookGroups = ({
       const doesReadAgentId = registration.readsAgentId === true;
       const command = doesReadAgentId ? `AGENT_SETUP_AGENT_ID=${agent.id} ${runtimeCommand}` : runtimeCommand;
       const isBackgroundHook = registration.runsInBackground === true && agent.id === CLAUDE_CODE_AGENT_ID;
-      const hasMatcherPattern = registration.matcher._tag === "pattern";
+      const matcher = registration.matcher;
+      const hasMatcherPattern = matcher._tag === "pattern";
       const group: ManagedHookGroup = {
-        ...(hasMatcherPattern ? { matcher: registration.matcher.value } : {}),
+        ...(hasMatcherPattern ? { matcher: matcher.value } : {}),
         hooks: [{ type: "command", command, ...(isBackgroundHook ? { async: true as const } : {}) }],
       };
 

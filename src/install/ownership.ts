@@ -424,12 +424,21 @@ const parseJsonSourceOrNull = (source: string): { readonly parsedValue: unknown 
 const jsonValuesEqual = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
-  const isLexicalAbsent = ownedValue.previous._tag === "missing" || ownedValue.previous.lexical == null;
+  const previous = ownedValue.previous;
+
+  const isPreviousMissing = previous._tag === "missing";
+  if (isPreviousMissing) {
+    return false;
+  }
+
+  const lexical = previous.lexical;
+
+  const isLexicalAbsent = lexical == null;
   if (isLexicalAbsent) {
     return false;
   }
 
-  const lexicalSource = parseJsonSourceOrNull(ownedValue.previous.lexical.source);
+  const lexicalSource = parseJsonSourceOrNull(lexical.source);
 
   const isLexicalSourceUnparsed = lexicalSource === null;
   if (isLexicalSourceUnparsed) {
@@ -438,7 +447,7 @@ const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
 
   const isLexicalJsonValid = jsonValueSchema.safeParse(lexicalSource.parsedValue).success;
 
-  return isLexicalJsonValid && jsonValuesEqual(lexicalSource.parsedValue, ownedValue.previous.value);
+  return isLexicalJsonValid && jsonValuesEqual(lexicalSource.parsedValue, previous.value);
 };
 
 const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {

@@ -63,13 +63,15 @@ interface PreviousFileRule {
 }
 
 const findBrokenPreviousFileRules = (request: InstructionLinkRequestFields): Array<PreviousFileRule> => {
-  const isPreviousFileMissing = request.previousFile._tag === "missing";
+  const previousFile = request.previousFile;
+
+  const isPreviousFileMissing = previousFile._tag === "missing";
 
   if (isPreviousFileMissing) {
     return [];
   }
 
-  const file = request.previousFile.file;
+  const file = previousFile.file;
   const target = request.agent.target;
   const rules: Array<PreviousFileRule> = [
     {
@@ -130,8 +132,9 @@ const currentBytes = (request: InstructionLinkRequest): Uint8Array | undefined =
 
 const addReference = (request: InstructionLinkRequest): InstructionLinkPlan => {
   const target = request.agent.target;
-  const isPreviousFileOwned = request.previousFile._tag === "owned";
-  const ownership = isPreviousFileOwned ? request.previousFile.file.ownership : null;
+  const previousFile = request.previousFile;
+  const isPreviousFileOwned = previousFile._tag === "owned";
+  const ownership = isPreviousFileOwned ? previousFile.file.ownership : null;
   const link = {
     currentBytes: currentBytes(request),
     configPath: target.configPath,
@@ -198,13 +201,15 @@ const planReferenceChange = (request: InstructionLinkRequest): InstructionLinkPl
     return addReference(request);
   }
 
-  const isPreviousFileMissing = request.previousFile._tag === "missing";
+  const previousFile = request.previousFile;
+
+  const isPreviousFileMissing = previousFile._tag === "missing";
 
   if (isPreviousFileMissing) {
     return { _tag: "none" };
   }
 
-  const file = request.previousFile.file;
+  const file = previousFile.file;
   const bytes = unownedBytes(request, file.ownership);
   const isEmptyAndNew = bytes.byteLength === 0 && !file.ownership.filePreviouslyPresent;
 

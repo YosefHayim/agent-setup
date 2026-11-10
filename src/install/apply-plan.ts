@@ -156,7 +156,7 @@ const createPendingRecoveryRecord = (transaction: Transaction): RecoveryRecord =
   root: transaction.preparedPlan.root,
   receiptPath: transaction.preparedPlan.receipt.targetPath,
   transactionRoot: transaction.preparedPlan.transactionRoot,
-  snapshots: transaction.snapshots,
+  snapshots: [...transaction.snapshots],
 });
 
 const preparePlan = (plan: Plan, root: string): PreparedPlan => {

@@ -220,7 +220,9 @@ export const addJsonRule = (link: JsonRulesLink): { bytes: Uint8Array; ownership
     throw new Error(RECEIPTED_RULES_CHANGED_MESSAGE);
   }
 
-  const isInstructionListed = previousRules?.includes(link.instructionPath);
+  const isRulesMissing = previousRules == null;
+
+  const isInstructionListed = !isRulesMissing && previousRules.includes(link.instructionPath);
   if (isInstructionListed) {
     return {
       bytes: textEncoder.encode(source),
@@ -229,7 +231,6 @@ export const addJsonRule = (link: JsonRulesLink): { bytes: Uint8Array; ownership
   }
 
   const desiredRules = [...(previousRules ?? []), link.instructionPath];
-  const isRulesMissing = previousRules === undefined;
   const editedSource = isRulesMissing
     ? insertMissingJsonRules(source, desiredRules)
     : replaceRules(source, desiredRules);
