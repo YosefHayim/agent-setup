@@ -9,8 +9,18 @@ export const hashBytes = (bytes: Uint8Array): string => createHash("sha256").upd
 export const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && left.every((leftByte, index) => leftByte === right[index]);
 
-export const isNotFound = (error: unknown): boolean =>
+const isNodeFileMissing = (error: unknown): boolean =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
+
+// Effect's FileSystem still reports missing host files as a SystemError with reason NotFound.
+const isEffectFileMissing = (error: unknown): boolean =>
+  error instanceof Error &&
+  "_tag" in error &&
+  error._tag === "SystemError" &&
+  "reason" in error &&
+  error.reason === "NotFound";
+
+export const isNotFound = (error: unknown): boolean => isNodeFileMissing(error) || isEffectFileMissing(error);
 
 const decodeUtf8 = (bytes: Uint8Array, filename: string): StrictTextReply => {
   try {

@@ -148,7 +148,9 @@ const missingReceiptSnapshot: ReceiptSnapshot = { _tag: "missing" };
 
 const readReceiptBytesOrNull = async (receiptPath: string): Promise<Uint8Array | null> => {
   try {
-    return await readFile(receiptPath);
+    const receiptFileBytes = await readFile(receiptPath);
+
+    return new Uint8Array(receiptFileBytes);
   } catch (error) {
     const isReceiptMissing = isNotFound(error);
     if (isReceiptMissing) {

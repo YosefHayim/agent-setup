@@ -326,7 +326,7 @@ describe("checkPlan", () => {
       },
     },
   ])("rejects unknown keys on the $name", ({ input }) => {
-    expect(rejectionMessage(() => checkPlan(input))).toContain("is unexpected");
+    expect(rejectionMessage(() => checkPlan(input))).toContain("Unrecognized key");
   });
 
   it.each(["../outside", "/absolute/path", ".claude/../outside", "nested\\windows"])(
@@ -369,7 +369,7 @@ describe("checkPlan", () => {
   ])("rejects $name with a property-addressed issue", ({ operations, message }) => {
     const checked = rejectionMessage(() => checkPlan({ ...completePlan, operations }));
 
-    expect(checked).toContain('["operations"][1]["file"]["path"]');
+    expect(checked).toContain("operations.1.file.path");
     expect(checked).toContain(message);
   });
 
@@ -378,7 +378,7 @@ describe("checkPlan", () => {
     const second = { ...managedConfigFile, path: ".agent-setup/hooks/SCRATCH-FOLDER-GUARD.JS" };
 
     expect(rejectionMessage(() => checkPlan(removalPlan([remove(first), remove(second)])))).toContain(
-      '["operations"][1]["file"]["path"]',
+      "operations.1.file.path",
     );
   });
 
@@ -428,7 +428,7 @@ describe("checkPlan", () => {
   ])("rejects an operation conflicting with the reserved $label path", ({ reservedPath }) => {
     const checked = rejectionMessage(() => checkPlan(removalPlan([remove({ ...runtimeFile, path: reservedPath })])));
 
-    expect(checked).toContain('["operations"][0]["file"]["path"]');
+    expect(checked).toContain("operations.0.file.path");
     expect(checked).toContain(reservedPath);
   });
 
@@ -436,7 +436,7 @@ describe("checkPlan", () => {
     const file = { ...runtimeFile, path: ".claude/agent-setup/recovery.json/snapshot" };
     const checked = rejectionMessage(() => checkPlan(publishPlan([write(file)], [file])));
 
-    expect(checked).toContain('["receipt"]["receipt"]["ownedFiles"][0]["path"]');
+    expect(checked).toContain("receipt.receipt.ownedFiles.0.path");
     expect(checked).toContain("recovery.json");
   });
 
@@ -718,12 +718,12 @@ describe("planInstall", () => {
         ...jsonReferenceFile,
         ownership: { ...yamlReferenceFile.ownership, reference: "AGENT-SETUP.md" },
       },
-      issuePath: '["desired"]["receipt"]["ownedFiles"][0]["ownership"]["_tag"]',
+      issuePath: "desired.receipt.ownedFiles.0.ownership._tag",
     },
     {
       name: "the file kind or owner",
       desiredFile: { ...settingsFile, path: jsonReferenceFile.path },
-      issuePath: 'ownedFiles"][0]["kind"]',
+      issuePath: "desired.receipt.ownedFiles.0.kind",
     },
   ])("rejects changing $name at an already receipted path", ({ desiredFile, issuePath }) => {
     const checked = rejectionMessage(() =>
