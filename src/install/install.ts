@@ -376,7 +376,7 @@ const planAndApplyInstall = async (
   };
   const plan = planInstall({
     root: request.destination.root,
-    previous: previousReceipt === undefined ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
+    previous: previousReceipt == null ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
     restorations,
     desired: { receipt, writes },
     receiptTarget,
