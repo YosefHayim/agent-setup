@@ -197,7 +197,7 @@ const readPreparedSkill = async (
   const directory = join(preparedPackageRoot, "skills", installedSkill.id);
   const sourceFiles = await readPreparedFiles(directory);
   const skillFile = sourceFiles.find((file) => file.path === "SKILL.md");
-  const isSkillFileMissing = skillFile === undefined;
+  const isSkillFileMissing = skillFile == null;
   if (isSkillFileMissing) {
     throw createInstallError(`Prepared skill ${installedSkill.id} is missing SKILL.md.`);
   }

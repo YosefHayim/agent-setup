@@ -341,7 +341,7 @@ describe("applyPlan", () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
     const seededBytes: Readonly<Record<string, Uint8Array>> = seeded;
     const currentBytes: Uint8Array | undefined = seededBytes[target];
-    const isTargetPresent = currentBytes !== undefined;
+    const isTargetPresent = currentBytes != null;
     seedFiles(root, seededBytes);
     const plan = createWritePlan(root, {
       files: { [target]: isTargetPresent ? createExpectedFile(currentBytes) : expectedMissing },

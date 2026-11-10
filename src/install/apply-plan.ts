@@ -249,7 +249,7 @@ const captureTargets = async (preparedPlan: PreparedPlan): Promise<Array<TargetS
 
 const findSnapshot = (transaction: Transaction, targetPath: string): TargetSnapshot => {
   const snapshot = transaction.snapshots.find((candidate) => candidate.targetPath === targetPath);
-  const isSnapshotMissing = snapshot === undefined;
+  const isSnapshotMissing = snapshot == null;
   if (isSnapshotMissing) {
     throw new Error(`Transaction snapshot missing for ${targetPath}`);
   }
