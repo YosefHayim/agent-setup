@@ -9,6 +9,9 @@ import { defaultConfig } from "../config/config-schema.js";
 import { install } from "./install.js";
 import { update } from "./update.js";
 
+const installEffect = (request: unknown) =>
+  Effect.tryPromise({ try: (signal) => install(request, signal), catch: (error) => error });
+
 const packageFiles = {
   "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
   "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
@@ -85,7 +88,7 @@ layer(NodeContext.layer)("update", (it) => {
         "AGENTS.md": "User instructions.\n",
         ".claude/settings.json": '{\n  "theme": "dark"\n}\n',
       });
-      yield* install({
+      yield* installEffect({
         ...request({ root, preparedRoot, features: ["make-code-readable"] }),
         configuration: selectedDefaults,
       });
@@ -119,7 +122,7 @@ layer(NodeContext.layer)("update", (it) => {
     Effect.gen(function* () {
       const { root, preparedRoot, readText, exists } = yield* workspace;
       const baseRequest = request({ root, preparedRoot, features: ["make-code-readable", "scratch-folder-guard"] });
-      yield* install({ ...baseRequest, configuration: selectedDefaults });
+      yield* installEffect({ ...baseRequest, configuration: selectedDefaults });
 
       const updateSummary = yield* update({
         ...baseRequest,
@@ -139,7 +142,7 @@ layer(NodeContext.layer)("update", (it) => {
     Effect.gen(function* () {
       const { root, preparedRoot, readText, exists } = yield* workspace;
       const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
-      yield* install({ ...baseRequest, configuration: selectedDefaults });
+      yield* installEffect({ ...baseRequest, configuration: selectedDefaults });
       const originalReceipt = yield* readText(".claude/agent-setup/receipt.json");
 
       const error = yield* Effect.flip(
@@ -157,7 +160,7 @@ layer(NodeContext.layer)("update", (it) => {
   it.scoped("refuses an update after bytes inside a receipted instruction block change", () =>
     Effect.gen(function* () {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      yield* install({
+      yield* installEffect({
         ...request({ root, preparedRoot, features: ["make-code-readable"] }),
         configuration: selectedDefaults,
       });
@@ -183,7 +186,7 @@ layer(NodeContext.layer)("update", (it) => {
       const { root, preparedRoot, writeFiles, readText } = yield* workspace;
       const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* writeFiles(root, { ".claude/settings.json": originalSettings });
-      yield* install({ ...baseRequest, configuration: selectedDefaults });
+      yield* installEffect({ ...baseRequest, configuration: selectedDefaults });
 
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
@@ -197,7 +200,7 @@ layer(NodeContext.layer)("update", (it) => {
       const originalSettings = '{\r\n\t"env": { "keep":"yes" }\r\n}\r\n';
       const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
       yield* writeFiles(root, { ".claude/settings.json": originalSettings });
-      yield* install({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
+      yield* installEffect({ ...baseRequest, agents: { _tag: "selected", ids: ["cursor"] } });
 
       yield* update({ ...baseRequest, agents: { _tag: "selected", ids: ["claude-code"] } });
       expect(yield* readText(".claude/settings.json")).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
@@ -212,7 +215,7 @@ layer(NodeContext.layer)("update", (it) => {
       const { fileSystem, path, root, preparedRoot, writeFiles, readText } = yield* workspace;
       const configPath = ".claude/agent-setup/config.json";
       const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
-      yield* install({
+      yield* installEffect({
         ...baseRequest,
         configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["fixtures"] } },
       });
@@ -240,7 +243,7 @@ layer(NodeContext.layer)("update", (it) => {
       const { root, preparedRoot, writeFiles, readText, exists } = yield* workspace;
       yield* writeFiles(root, { ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
 
-      const installSummary = yield* install({
+      const installSummary = yield* installEffect({
         ...request({ root, preparedRoot, features: ["run-tasks-in-parallel"] }),
         configuration: selectedDefaults,
       });

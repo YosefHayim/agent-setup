@@ -46,10 +46,14 @@ export const uninstallCommand = Command.make(
       }
 
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-      const uninstallation = yield* uninstall({
+      const uninstallRequest = {
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
         host: { homeRoot: host.homeRoot },
         interaction: args.yes ? { _tag: "scripted" } : { _tag: "interactive" },
+      };
+      const uninstallation = yield* Effect.tryPromise({
+        try: (signal) => uninstall(uninstallRequest, signal),
+        catch: (error) => error,
       });
       if (args.format === "json") {
         yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(uninstallation), catch: (error) => error });

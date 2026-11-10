@@ -1,7 +1,9 @@
-import { FileSystem, Path } from "@effect/platform";
-import { NodeContext } from "@effect/platform-node";
-import { expect, layer } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import { defaultConfig } from "../config/config-schema.js";
 import { install } from "./install.js";
@@ -18,28 +20,40 @@ const packageFiles = {
   "skills/make-code-readable/references/review-and-apply.md": "# Review and apply\n",
 };
 
-const workspace = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-uninstall-root-" });
-  const preparedRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-uninstall-prepared-" });
-  const writeFiles = (base: string, files: Readonly<Record<string, string>>) =>
-    Effect.forEach(Object.entries(files), ([relativePath, contents]) =>
-      Effect.gen(function* () {
-        const destination = path.join(base, relativePath);
-        yield* fileSystem.makeDirectory(path.dirname(destination), { recursive: true });
-        yield* fileSystem.writeFileString(destination, contents);
-      }),
-    );
+const notAbortedSignal = new AbortController().signal;
 
-  const readText = (relativePath: string) => fileSystem.readFileString(path.join(root, relativePath));
+const temporaryDirectories: string[] = [];
 
-  const exists = (relativePath: string) => fileSystem.exists(path.join(root, relativePath));
-
-  yield* writeFiles(preparedRoot, packageFiles);
-
-  return { root, preparedRoot, writeFiles, readText, exists };
+afterEach(async () => {
+  const directoriesToRemove = temporaryDirectories.splice(0);
+  await Promise.all(directoriesToRemove.map((directory) => rm(directory, { recursive: true, force: true })));
 });
+
+const makeTemporaryDirectory = async (prefix: string): Promise<string> => {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+
+  return directory;
+};
+
+const writeFiles = async (base: string, files: Readonly<Record<string, string>>): Promise<void> => {
+  for (const [relativePath, fileString] of Object.entries(files)) {
+    const destination = join(base, relativePath);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, fileString);
+  }
+};
+
+const createWorkspace = async (): Promise<{ root: string; preparedRoot: string }> => {
+  const root = await makeTemporaryDirectory("agent-setup-uninstall-root-");
+  const preparedRoot = await makeTemporaryDirectory("agent-setup-uninstall-prepared-");
+  await writeFiles(preparedRoot, packageFiles);
+
+  return { root, preparedRoot };
+};
+
+const readFileContents = (root: string, relativePath: string): Promise<string> =>
+  readFile(join(root, relativePath), "utf8");
 
 const installRequest = (input: { root: string; preparedRoot: string }) => ({
   destination: { _tag: "project", root: input.root },
@@ -59,132 +73,126 @@ const uninstallRequest = (root: string) => ({
 
 const uninstalled = { _tag: "uninstalled", scope: "project", interaction: { _tag: "scripted" } };
 
-layer(NodeContext.layer)("uninstall", (it) => {
-  it.scoped("restores every receipted format exactly and removes installer-created files", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, readText, exists } = yield* workspace;
-      const originals = {
-        ".claude/agent-setup/config.json": `${JSON.stringify(defaultConfig, null, 2)}\n`,
-        ".claude/settings.json": '{\r\n\t"theme":"dark",\r\n\t"hooks": { }\r\n}\r\n',
-        "AGENTS.md": "User instructions.\n",
-        ".aider.conf.yml": "model: sonnet\n",
-        ".continue/config.json": '{\r\n\t"models": []\r\n}\r\n',
-      };
-      const installerCreatedFiles = [
-        ".claude/agent-setup/receipt.json",
-        ...Object.keys(packageFiles)
-          .filter((packagePath) => packagePath.startsWith("hooks/"))
-          .map((packagePath) => `.claude/agent-setup/${packagePath}`),
-        ".claude/skills/make-code-readable/SKILL.md",
-        ".cursor/rules/make-code-readable.mdc",
-      ];
-      yield* writeFiles(root, originals);
-      yield* install(installRequest({ root, preparedRoot }));
-      for (const created of installerCreatedFiles) {
-        expect(yield* exists(created)).toBe(true);
-      }
+describe("uninstall", () => {
+  it("restores every receipted format exactly and removes installer-created files", async () => {
+    const { root, preparedRoot } = await createWorkspace();
+    const originals = {
+      ".claude/agent-setup/config.json": `${JSON.stringify(defaultConfig, null, 2)}\n`,
+      ".claude/settings.json": '{\r\n\t"theme":"dark",\r\n\t"hooks": { }\r\n}\r\n',
+      "AGENTS.md": "User instructions.\n",
+      ".aider.conf.yml": "model: sonnet\n",
+      ".continue/config.json": '{\r\n\t"models": []\r\n}\r\n',
+    };
+    const installerCreatedFiles = [
+      ".claude/agent-setup/receipt.json",
+      ...Object.keys(packageFiles)
+        .filter((packagePath) => packagePath.startsWith("hooks/"))
+        .map((packagePath) => `.claude/agent-setup/${packagePath}`),
+      ".claude/skills/make-code-readable/SKILL.md",
+      ".cursor/rules/make-code-readable.mdc",
+    ];
 
-      expect(yield* uninstall(uninstallRequest(root))).toEqual(uninstalled);
-      for (const [relativePath, contents] of Object.entries(originals)) {
-        expect(yield* readText(relativePath)).toBe(contents);
-      }
-      for (const created of installerCreatedFiles) {
-        expect(yield* exists(created)).toBe(false);
-      }
-    }),
-  );
+    await writeFiles(root, originals);
+    await install(installRequest({ root, preparedRoot }), notAbortedSignal);
+    for (const created of installerCreatedFiles) {
+      expect(existsSync(join(root, created))).toBe(true);
+    }
 
-  it.scoped("leaves unreceipted agent files untouched", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      const userFiles = {
-        ".cursor/rules/user.mdc": "User-owned rule.\n",
-        ".claude/skills/user/SKILL.md": "User-owned skill.\n",
-      };
-      yield* install(installRequest({ root, preparedRoot }));
-      yield* writeFiles(root, userFiles);
+    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
+    for (const [relativePath, fileString] of Object.entries(originals)) {
+      expect(await readFileContents(root, relativePath)).toBe(fileString);
+    }
+    for (const created of installerCreatedFiles) {
+      expect(existsSync(join(root, created))).toBe(false);
+    }
+    expect(uninstallation).toEqual(uninstalled);
+  });
 
-      yield* uninstall(uninstallRequest(root));
+  it("leaves unreceipted agent files untouched", async () => {
+    const { root, preparedRoot } = await createWorkspace();
+    const userFiles = {
+      ".cursor/rules/user.mdc": "User-owned rule.\n",
+      ".claude/skills/user/SKILL.md": "User-owned skill.\n",
+    };
+    await install(installRequest({ root, preparedRoot }), notAbortedSignal);
+    await writeFiles(root, userFiles);
 
-      for (const [relativePath, contents] of Object.entries(userFiles)) {
-        expect(yield* readText(relativePath)).toBe(contents);
-      }
-    }),
-  );
+    await uninstall(uninstallRequest(root), notAbortedSignal);
 
-  it.scoped("removes the folders its removed files leave empty and keeps folders still in use", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, exists } = yield* workspace;
-      yield* install(installRequest({ root, preparedRoot }));
-      yield* writeFiles(root, { ".claude/skills/user/SKILL.md": "User-owned skill.\n" });
+    for (const [relativePath, fileString] of Object.entries(userFiles)) {
+      expect(await readFileContents(root, relativePath)).toBe(fileString);
+    }
+  });
 
-      yield* uninstall(uninstallRequest(root));
+  it("removes the folders its removed files leave empty and keeps folders still in use", async () => {
+    const { root, preparedRoot } = await createWorkspace();
+    await install(installRequest({ root, preparedRoot }), notAbortedSignal);
+    await writeFiles(root, { ".claude/skills/user/SKILL.md": "User-owned skill.\n" });
 
-      for (const emptied of [".claude/agent-setup", ".claude/skills/make-code-readable", ".agents", ".cursor"]) {
-        expect(yield* exists(emptied)).toBe(false);
-      }
-      expect(yield* exists(".claude/skills/user/SKILL.md")).toBe(true);
-    }),
-  );
+    await uninstall(uninstallRequest(root), notAbortedSignal);
 
-  it.scoped("returns absent without mutating files when no receipt exists", () =>
-    Effect.gen(function* () {
-      const { root, writeFiles, readText } = yield* workspace;
-      yield* writeFiles(root, { ".cursor/rules/user.mdc": "User-owned rule.\n" });
+    for (const emptied of [".claude/agent-setup", ".claude/skills/make-code-readable", ".agents", ".cursor"]) {
+      expect(existsSync(join(root, emptied))).toBe(false);
+    }
+    expect(existsSync(join(root, ".claude/skills/user/SKILL.md"))).toBe(true);
+  });
 
-      expect(yield* uninstall(uninstallRequest(root))).toEqual({ ...uninstalled, _tag: "absent" });
-      expect(yield* readText(".cursor/rules/user.mdc")).toBe("User-owned rule.\n");
-    }),
-  );
+  it("returns absent without mutating files when no receipt exists", async () => {
+    const root = await makeTemporaryDirectory("agent-setup-uninstall-root-");
+    await writeFiles(root, { ".cursor/rules/user.mdc": "User-owned rule.\n" });
+
+    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
+
+    expect(uninstallation).toEqual({ ...uninstalled, _tag: "absent" });
+    expect(await readFileContents(root, ".cursor/rules/user.mdc")).toBe("User-owned rule.\n");
+  });
 
   // Runtime hooks were created from missing: uninstall force-removes them even if edited.
   // Drift still blocks only when a prior host file must be restored (wholeFile previous present).
-  it.scoped("still removes installer-created files when their bytes drifted after install", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, exists } = yield* workspace;
-      const hookFile = ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js";
-      yield* install(installRequest({ root, preparedRoot }));
-      yield* writeFiles(root, { [hookFile]: "user changed this\n" });
+  it("still removes installer-created files when their bytes drifted after install", async () => {
+    const { root, preparedRoot } = await createWorkspace();
+    const hookFile = ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js";
+    await install(installRequest({ root, preparedRoot }), notAbortedSignal);
+    await writeFiles(root, { [hookFile]: "user changed this\n" });
 
-      expect(yield* uninstall(uninstallRequest(root))).toEqual(uninstalled);
-      expect(yield* exists(hookFile)).toBe(false);
-      expect(yield* exists(".claude/agent-setup/receipt.json")).toBe(false);
-    }),
-  );
+    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
 
-  it.scoped("restores a multiline pre-existing hook value byte for byte", () =>
-    Effect.gen(function* () {
-      const { root, preparedRoot, writeFiles, readText } = yield* workspace;
-      const originalSettings = [
-        "{",
-        '  "hooks": {',
-        '    "PreToolUse": [',
-        "      {",
-        '        "matcher": "Read",',
-        '        "hooks": [{ "type": "command", "command": "user-command" }]',
-        "      }",
-        "    ]",
-        "  },",
-        '  "theme": "dark"',
-        "}",
-        "",
-      ].join("\n");
-      yield* writeFiles(root, { ".claude/settings.json": originalSettings });
-      yield* install(installRequest({ root, preparedRoot }));
+    expect(uninstallation).toEqual(uninstalled);
+    expect(existsSync(join(root, hookFile))).toBe(false);
+    expect(existsSync(join(root, ".claude/agent-setup/receipt.json"))).toBe(false);
+  });
 
-      yield* uninstall(uninstallRequest(root));
+  it("restores a multiline pre-existing hook value byte for byte", async () => {
+    const { root, preparedRoot } = await createWorkspace();
+    const originalSettings = [
+      "{",
+      '  "hooks": {',
+      '    "PreToolUse": [',
+      "      {",
+      '        "matcher": "Read",',
+      '        "hooks": [{ "type": "command", "command": "user-command" }]',
+      "      }",
+      "    ]",
+      "  },",
+      '  "theme": "dark"',
+      "}",
+      "",
+    ].join("\n");
+    await writeFiles(root, { ".claude/settings.json": originalSettings });
+    await install(installRequest({ root, preparedRoot }), notAbortedSignal);
 
-      expect(yield* readText(".claude/settings.json")).toBe(originalSettings);
-    }),
-  );
+    await uninstall(uninstallRequest(root), notAbortedSignal);
+
+    expect(await readFileContents(root, ".claude/settings.json")).toBe(originalSettings);
+  });
 
   it("strictly rejects agent detection and prepared-package inputs", () => {
-    const decoded = Schema.decodeUnknownEither(uninstallRequestSchema, { onExcessProperty: "error" })({
+    const decodedCheck = uninstallRequestSchema.safeParse({
       ...uninstallRequest("/workspace"),
       agents: { _tag: "detected", evidence: { homePaths: [".cursor"], absolutePaths: [], commands: [] } },
       preparedPackage: { root: "/package/dist", version: "0.12.0" },
     });
 
-    expect(decoded._tag).toBe("Left");
+    expect(decodedCheck.success).toBe(false);
   });
 });

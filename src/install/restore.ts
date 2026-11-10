@@ -1,10 +1,10 @@
 /** Plan the final unowned bytes of receipted files: what uninstall and update write back or remove. */
 
-import { Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { join } from "node:path";
+
+import { z } from "zod";
 
 import { agentCatalog } from "../catalog/agent-catalog.js";
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { planInstructionFile } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { hashBytes } from "./file-bytes.js";
@@ -16,165 +16,153 @@ import { type OwnedFile, ownedFileSchema } from "./ownership.js";
 import { absoluteRootSchema, type FileChange } from "./plan.js";
 import type { Receipt } from "./receipt.js";
 
-type RestoreTarget = {
+interface RestoreTarget {
   readonly file: OwnedFile;
   readonly snapshot: FileSnapshot;
-};
+}
 
-const restoreWholeFile = ({ file, snapshot }: RestoreTarget): Either.Either<FileChange, Error> => {
-  if (file.ownership._tag !== "wholeFile") {
-    return Either.left(createInstallError(`File ${file.path} requires a format-specific restoration.`));
+const restoreWholeFile = ({ file, snapshot }: RestoreTarget): FileChange => {
+  const ownership = file.ownership;
+  const isFormatSpecific = ownership._tag !== "wholeFile";
+  if (isFormatSpecific) {
+    throw createInstallError(`File ${file.path} requires a format-specific restoration.`);
   }
 
-  const ownership = file.ownership;
   // We created this path from nothing, so uninstall must not stick on drift, upgrades, or prior deletion;
   // expectedCurrent still binds the transaction to the bytes observed at plan time.
-  if (ownership.previous._tag === "missing") {
-    return Either.try({
-      try: () =>
-        checkFileChange({
-          _tag: "remove",
-          file,
-          unownedBytes: new Uint8Array(),
-          expectedCurrent: expectedCurrent(snapshot),
-        }),
-      catch: wrapAsInstallError,
+  const previous = ownership.previous;
+  const isNewFile = previous._tag === "missing";
+  if (isNewFile) {
+    return checkFileChange({
+      _tag: "remove",
+      file,
+      unownedBytes: new Uint8Array(),
+      expectedCurrent: expectedCurrent(snapshot),
     });
   }
 
-  if (snapshot._tag === "missing" || hashBytes(snapshot.bytes) === ownership.installedHash) {
-    return Either.try({
-      try: () =>
-        checkFileChange({
-          _tag: "restore",
-          file,
-          bytes: ownership.previous.bytes,
-          expectedCurrent: expectedCurrent(snapshot),
-        }),
-      catch: wrapAsInstallError,
+  const isFileMissingOrUnchanged = snapshot._tag === "missing" || hashBytes(snapshot.bytes) === ownership.installedHash;
+  if (isFileMissingOrUnchanged) {
+    return checkFileChange({
+      _tag: "restore",
+      file,
+      bytes: previous.bytes,
+      expectedCurrent: expectedCurrent(snapshot),
     });
   }
 
-  return Either.left(createInstallError(`Receipted file ${file.path} changed after installation.`));
+  throw createInstallError(`Receipted file ${file.path} changed after installation.`);
 };
 
 const checkFormatRestoration = (
   { file, snapshot, format }: RestoreTarget & { readonly format: string },
-  plan: Either.Either<{ readonly _tag: string }, unknown>,
-): Either.Either<FileChange, Error> =>
-  Either.flatMap(Either.mapLeft(plan, wrapAsInstallError), (operation) =>
-    operation._tag === "none"
-      ? Either.left(createInstallError(`${format} restoration for ${file.path} returned no operation.`))
-      : Either.try({
-          try: () => checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) }),
-          catch: wrapAsInstallError,
-        }),
-  );
-
-const restoreInstructionFile = (target: RestoreTarget) =>
-  checkFormatRestoration(
-    { ...target, format: "Instruction" },
-    Either.try({
-      try: () =>
-        planInstructionFile({
-          path: target.file.path,
-          desired: { _tag: "absent" },
-          currentFile: target.snapshot,
-          previousFile: { _tag: "owned", file: target.file },
-        }),
-      catch: wrapAsInstallError,
-    }),
-  );
-
-const restoreInstructionLink = (target: RestoreTarget): Either.Either<FileChange, Error> => {
-  const { file } = target;
-  if (file.owner._tag !== "agent" || file.owner.agentIds.length !== 1) {
-    return Either.left(createInstallError(`Native config restoration for ${file.path} requires one agent owner.`));
+  operation: { readonly _tag: string },
+): FileChange => {
+  const isOperationNone = operation._tag === "none";
+  if (isOperationNone) {
+    throw createInstallError(`${format} restoration for ${file.path} returned no operation.`);
   }
 
-  const agentId = file.owner.agentIds.at(0);
-  const agent = agentCatalog.find((candidate) => candidate.id === agentId);
-  if (agent === undefined || agent.target._tag !== "instructionLink") {
-    return Either.left(createInstallError(`Native config restoration for ${file.path} has no catalog agent.`));
-  }
-
-  return checkFormatRestoration(
-    { ...target, format: "Native config" },
-    Either.try({
-      try: () =>
-        planInstructionLink({
-          agent,
-          desired: { _tag: "absent" },
-          currentFile: target.snapshot,
-          previousFile: { _tag: "owned", file },
-        }),
-      catch: wrapAsInstallError,
-    }),
-  );
+  return checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) });
 };
 
-const restoreRequestSchema = Schema.Struct({
-  root: zodAsEffectSchema(absoluteRootSchema).annotations({
-    description: "Canonical installation root containing the receipted files.",
-  }),
-  files: Schema.Array(zodAsEffectSchema(ownedFileSchema)).annotations({
-    description: "Exact receipt entries whose final unowned state must be computed.",
-  }),
-}).annotations({
-  description: "Receipt-authorized file restoration request with no detection authority.",
-});
+const restoreInstructionFile = (target: RestoreTarget): FileChange => {
+  const instructionOperation = planInstructionFile({
+    path: target.file.path,
+    desired: { _tag: "absent" },
+    currentFile: target.snapshot,
+    previousFile: { _tag: "owned", file: target.file },
+  });
+
+  return checkFormatRestoration({ ...target, format: "Instruction" }, instructionOperation);
+};
+
+const restoreInstructionLink = (target: RestoreTarget): FileChange => {
+  const { file } = target;
+  const owner = file.owner;
+  const isNotSingleAgentOwner = owner._tag !== "agent" || owner.agentIds.length !== 1;
+  if (isNotSingleAgentOwner) {
+    throw createInstallError(`Native config restoration for ${file.path} requires one agent owner.`);
+  }
+
+  const agentId = owner.agentIds.at(0);
+  const agent = agentCatalog.find((candidate) => candidate.id === agentId);
+  const isCatalogAgentMissing = agent == null || agent.target._tag !== "instructionLink";
+  if (isCatalogAgentMissing) {
+    throw createInstallError(`Native config restoration for ${file.path} has no catalog agent.`);
+  }
+
+  const linkOperation = planInstructionLink({
+    agent,
+    desired: { _tag: "absent" },
+    currentFile: target.snapshot,
+    previousFile: { _tag: "owned", file },
+  });
+
+  return checkFormatRestoration({ ...target, format: "Native config" }, linkOperation);
+};
+
+const restoreRequestSchema = z
+  .strictObject({
+    root: absoluteRootSchema.describe("Canonical installation root containing the receipted files."),
+    files: z.array(ownedFileSchema).describe("Exact receipt entries whose final unowned state must be computed."),
+  })
+  .describe("Receipt-authorized file restoration request with no detection authority.");
+
+const planFileRestoration = async ({ root, file }: { root: string; file: OwnedFile }): Promise<FileChange> => {
+  const snapshot = await readFileSnapshot(join(root, file.path));
+  const target: RestoreTarget = { file, snapshot };
+
+  switch (file.kind._tag) {
+    case "instruction":
+      return restoreInstructionFile(target);
+    case "instructionLink":
+      return restoreInstructionLink(target);
+    case "settings":
+      return restoreSettings({ ...target, installedHooksFolder: join(root, hooksPath) });
+    case "runtime":
+    case "skill":
+    case "rule":
+    case "managedConfig":
+    case "receipt":
+      return restoreWholeFile(target);
+  }
+};
 
 // Computes each receipted file's final unowned bytes without touching the filesystem.
-export const planRestorations = (input: unknown) =>
-  Effect.gen(function* () {
-    const request = yield* Schema.decodeUnknown(restoreRequestSchema, { onExcessProperty: "error" })(input).pipe(
-      Effect.mapError((error) => createInstallError(SchemaParseIssue.TreeFormatter.formatErrorSync(error))),
-    );
-    const path = yield* Path.Path;
+export const planRestorations = async (input: unknown): Promise<FileChange[]> => {
+  try {
+    const request = restoreRequestSchema.parse(input);
+    const restorations: FileChange[] = [];
+    for (const file of request.files) {
+      restorations.push(await planFileRestoration({ root: request.root, file }));
+    }
 
-    return yield* Effect.forEach(request.files, (file) =>
-      Effect.gen(function* () {
-        const target = {
-          file,
-          snapshot: yield* Effect.tryPromise({
-            try: () => readFileSnapshot(path.join(request.root, file.path)),
-            catch: (error) => error,
-          }),
-        };
-        switch (file.kind._tag) {
-          case "instruction":
-            return yield* restoreInstructionFile(target);
-          case "instructionLink":
-            return yield* restoreInstructionLink(target);
-          case "settings":
-            return yield* Effect.try({
-              try: () => restoreSettings({ ...target, installedHooksFolder: path.join(request.root, hooksPath) }),
-              catch: wrapAsInstallError,
-            });
-          default:
-            return yield* restoreWholeFile(target);
-        }
-      }),
-    );
-  }).pipe(Effect.mapError(wrapAsInstallError));
+    return restorations;
+  } catch (error) {
+    throw wrapAsInstallError(error);
+  }
+};
 
-export const planStaleRestorations = (input: {
+export const planStaleRestorations = async (input: {
   root: string;
   previousReceipt: Receipt | undefined;
   desiredWrites: ReadonlyArray<FileChange>;
   settingsPlans: ReadonlyArray<FileChange>;
-}) =>
-  Effect.gen(function* () {
-    if (input.previousReceipt === undefined) {
-      return [];
-    }
+}): Promise<FileChange[]> => {
+  const previousReceipt = input.previousReceipt;
+  const isThereNoPreviousReceipt = previousReceipt == null;
+  if (isThereNoPreviousReceipt) {
+    return [];
+  }
 
-    const desiredPaths = new Set(input.desiredWrites.map((write) => write.file.path));
-    const settingsRestorations = input.settingsPlans.filter((operation) => operation._tag !== "write");
-    const settingsPaths = new Set(settingsRestorations.map((operation) => operation.file.path));
-    const staleFiles = input.previousReceipt.ownedFiles.filter(
-      (file) => !desiredPaths.has(file.path) && !settingsPaths.has(file.path),
-    );
+  const desiredPaths = new Set(input.desiredWrites.map((write) => write.file.path));
+  const settingsRestorations = input.settingsPlans.filter((operation) => operation._tag !== "write");
+  const settingsPaths = new Set(settingsRestorations.map((operation) => operation.file.path));
+  const staleFiles = previousReceipt.ownedFiles.filter(
+    (file) => !desiredPaths.has(file.path) && !settingsPaths.has(file.path),
+  );
+  const staleFileRestorations = await planRestorations({ root: input.root, files: staleFiles });
 
-    return [...settingsRestorations, ...(yield* planRestorations({ root: input.root, files: staleFiles }))];
-  });
+  return [...settingsRestorations, ...staleFileRestorations];
+};
