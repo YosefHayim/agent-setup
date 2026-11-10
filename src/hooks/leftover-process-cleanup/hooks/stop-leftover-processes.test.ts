@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isProcessAlive } from "../../lib/process-alive.js";
+import { isProcessAlive } from "../../process-alive.js";
 
 const hookPath = fileURLToPath(new URL("./stop-leftover-processes.ts", import.meta.url));
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");

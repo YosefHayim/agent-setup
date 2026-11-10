@@ -9,8 +9,8 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 
-import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { nonEmptyTrimmedTextSchema } from "#src/install/text-rules.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 

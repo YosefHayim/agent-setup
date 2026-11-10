@@ -2,8 +2,8 @@
 import fs from "node:fs";
 /** Mask a PNG by region for isolating animatable layers before tracing. */
 import { PNG } from "pngjs";
-import { hexToRgb, inPoly } from "../lib/png.js";
-import type { MaskBox, MaskConfig } from "../lib/types.js";
+import { hexToRgb, inPoly } from "#src/png.js";
+import type { MaskBox, MaskConfig } from "#src/types.js";
 
 const configPath = process.argv[2];
 if (!configPath) {

@@ -5,9 +5,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { gitAnswerLines } from "../../lib/git-answers.js";
-import { printDecisionAndExit } from "../../lib/hook-output.js";
-import { type ActiveRun, createReminderLine } from "../lib/create-reminder-line.js";
+import { gitAnswerLines } from "../../git-answers.js";
+import { printDecisionAndExit } from "../../hook-output.js";
+import { type ActiveRun, createReminderLine } from "../create-reminder-line.js";
 
 const ACTIVE_RUN_FILE_NAME = "active-run.json";
 const SUPPORTED_HOOK_EVENT_NAMES = ["SessionStart", "SubagentStart"] as const;

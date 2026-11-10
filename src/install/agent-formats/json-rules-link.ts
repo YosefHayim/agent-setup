@@ -2,13 +2,12 @@
 
 import { applyEdits, type Node as JsonNode, modify, parseTree } from "jsonc-parser";
 import { z } from "zod";
-
-import { joinZodIssueMessages } from "../../zod-issue-messages.js";
-import { decodeStrictText, lineEnding } from "../file-bytes.js";
-import { findDuplicateJsonKey } from "../find-duplicate-json-key.js";
-import { readErrorMessage } from "../install-request.js";
-import { encodeJson, hashJsonValue, jsonPropertyName } from "../json-edit.js";
-import type { InstalledJsonValue, JsonValuesOwnership, PreviousJsonValue } from "../ownership.js";
+import { decodeStrictText, lineEnding } from "#src/install/file-bytes.js";
+import { findDuplicateJsonKey } from "#src/install/find-duplicate-json-key.js";
+import { readErrorMessage } from "#src/install/install-request.js";
+import { encodeJson, hashJsonValue, jsonPropertyName } from "#src/install/json-edit.js";
+import type { InstalledJsonValue, JsonValuesOwnership, PreviousJsonValue } from "#src/install/ownership.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const textEncoder = new TextEncoder();
 const RULES_KEY = "rules";

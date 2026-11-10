@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 /** Build a clip path for the waving hand silhouette from a hand PNG. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "../lib/argv.js";
+import { argString, parseArgs } from "#src/argv.js";
 
 const args = parseArgs(process.argv.slice(2));
 const input = argString(args, "input") || "out/hand.png";

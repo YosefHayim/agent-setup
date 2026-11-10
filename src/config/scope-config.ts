@@ -3,11 +3,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
-import { isNotFound } from "../install/file-bytes.js";
-import { type InstallationDestination, receiptPath } from "../install/install-paths.js";
-import { preparePackage } from "../install/prepare-package.js";
-import { readReceipt, type Scope } from "../install/receipt.js";
-import { update } from "../install/update.js";
+import { isNotFound } from "#src/install/file-bytes.js";
+import { type InstallationDestination, receiptPath } from "#src/install/install-paths.js";
+import { preparePackage } from "#src/install/prepare-package.js";
+import { readReceipt, type Scope } from "#src/install/receipt.js";
+import { update } from "#src/install/update.js";
 import { managedConfigPath, planManagedConfig, readConfigFile } from "./config-file.js";
 import { type Config, defaultConfig } from "./config-schema.js";
 import { destinationForScope, type HostScan, scanHost } from "./host-scan.js";

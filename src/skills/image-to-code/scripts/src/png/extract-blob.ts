@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 /** Extract soft lavender background blob from a PNG as an SVG path. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "../lib/argv.js";
+import { argString, parseArgs } from "#src/argv.js";
 
 const args = parseArgs(process.argv.slice(2));
 const input = argString(args, "input") || "design.png";

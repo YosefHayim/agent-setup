@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 
-import { featureCatalog } from "../catalog/feature-catalog.js";
+import { featureCatalog } from "#src/catalog/feature-catalog.js";
 import { createCommand, type FormatOptions, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 

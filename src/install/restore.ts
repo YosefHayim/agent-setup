@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import { agentCatalog } from "../catalog/agent-catalog.js";
+import { agentCatalog } from "#src/catalog/agent-catalog.js";
 import { planInstructionFile } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { hashBytes } from "./file-bytes.js";

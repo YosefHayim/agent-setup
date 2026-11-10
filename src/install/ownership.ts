@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { agentCatalog, agentIdSchema } from "../catalog/agent-catalog.js";
-import { addZodIssueDetails, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { agentCatalog, agentIdSchema } from "#src/catalog/agent-catalog.js";
+import { addZodIssueDetails, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { replaceBytesWithBase64 } from "./file-bytes.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 

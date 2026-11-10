@@ -4,8 +4,8 @@
 
 import { readFileSync } from "node:fs";
 
-import { startDetachedWatcher } from "../../lib/detached-watcher.js";
-import { sessionIdFrom } from "../../lib/session-ids.js";
+import { startDetachedWatcher } from "../../detached-watcher.js";
+import { sessionIdFrom } from "../../session-ids.js";
 
 const handOverEndedSession = (): void => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));

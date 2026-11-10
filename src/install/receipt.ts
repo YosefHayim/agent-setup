@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import { z } from "zod";
 
-import { addDependencies, featureIdSchema, retiredFeatureIds } from "../catalog/feature-catalog.js";
-import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { addDependencies, featureIdSchema, retiredFeatureIds } from "#src/catalog/feature-catalog.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { decodeStrictText, isNotFound, replaceBytesWithBase64 } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { type OwnedFile, ownedFileSchema, pathsConflict } from "./ownership.js";

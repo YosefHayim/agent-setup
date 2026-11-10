@@ -23,7 +23,7 @@ The authored content under `src/skills/` copied verbatim into an installed skill
 _Avoid_: "payload" (alone), "skill code".
 
 **hook code**
-Dependency-free code under `src/hooks/<sourceDirectory>/` (folders `hooks/`, `watchers/`, `command/`, `lib/`), installed to `.claude/agent-setup/hooks/`.
+Dependency-free code under `src/hooks/<sourceDirectory>/` (folders `hooks/`, `watchers/`, `command/`, plus its lib files), installed to `.claude/agent-setup/hooks/`.
 _Avoid_: "skills".
 
 **hook**
@@ -31,7 +31,7 @@ A zero-dependency script that runs on an agent hook event and must be **fail-ope
 _Avoid_: "callback", "handler".
 
 **hook library**
-The dependency-free code every hook feature shares under `src/hooks/lib/`, copied into each feature's `lib/` at install.
+The dependency-free code every hook feature shares, the files directly under `src/hooks/`, copied into each feature's `lib/` at install.
 _Avoid_: "bundle", "binary".
 
 **watcher**
@@ -142,7 +142,7 @@ _Avoid_: "linter", "prettier".
 _Avoid_: "test/ dir".
 
 **SSOT**
-Single source of truth: `src/config/config-schema.ts` holds the managed-configuration contract, `src/config/environment-variables.ts` every environment variable, and `src/hooks/lib/hook-config.ts` the hook projection.
+Single source of truth: `src/config/config-schema.ts` holds the managed-configuration contract, `src/config/environment-variables.ts` every environment variable, and `src/hooks/hook-config.ts` the hook projection.
 _Avoid_: "source of truth".
 
 **agent-voice / free-model-router**

@@ -1,6 +1,6 @@
-import { configSettings, defaultSettingValue, withSettingValue } from "../config/config-schema.js";
-import { locateConfigTarget, readConfig, saveConfig } from "../config/scope-config.js";
-import type { Scope } from "../install/receipt.js";
+import { configSettings, defaultSettingValue, withSettingValue } from "#src/config/config-schema.js";
+import { locateConfigTarget, readConfig, saveConfig } from "#src/config/scope-config.js";
+import type { Scope } from "#src/install/receipt.js";
 import { type ConfigSetting, formatSettingValue, showConfig, withSettingText } from "./config-command.js";
 import * as TerminalUI from "./terminal-ui.js";
 

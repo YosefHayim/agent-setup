@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { featureCatalog } from "../catalog/feature-catalog.js";
+import { featureCatalog } from "#src/catalog/feature-catalog.js";
 import { preparePackage } from "./prepare-package.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

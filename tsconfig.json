@@ -15,6 +15,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,
+    "customConditions": ["source"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],

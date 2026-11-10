@@ -9,13 +9,13 @@ import { existsSync, writeSync } from "node:fs";
 import os from "node:os";
 import { parseArgs } from "node:util";
 
-import { readConfig } from "../../lib/hook-config.js";
-import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../lib/watcher-lock.js";
-import { type ClaudeSession, claudeSessionIsLive, findClaudeSession } from "../lib/claude-sessions.js";
-import { codexThreadIsLive, listCodexThreads } from "../lib/codex-threads.js";
-import { discoverRepos } from "../lib/local-repos.js";
-import { type RehomeAgent, rehomeLockFile } from "../lib/rehome-ledger.js";
-import { runSweep, type SessionPlan } from "../lib/session-sweep.js";
+import { readConfig } from "../../hook-config.js";
+import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../watcher-lock.js";
+import { type ClaudeSession, claudeSessionIsLive, findClaudeSession } from "../claude-sessions.js";
+import { codexThreadIsLive, listCodexThreads } from "../codex-threads.js";
+import { discoverRepos } from "../local-repos.js";
+import { type RehomeAgent, rehomeLockFile } from "../rehome-ledger.js";
+import { runSweep, type SessionPlan } from "../session-sweep.js";
 
 type WatcherOptions = {
   readonly agents: ReadonlyArray<RehomeAgent>;

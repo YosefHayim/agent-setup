@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Rebuild an HTML viewer page embedding an optimized SVG. */
 import fs from "node:fs";
-import { argString, parseArgs } from "../lib/argv.js";
+import { argString, parseArgs } from "#src/argv.js";
 
 const args = parseArgs(process.argv.slice(2));
 const svgPath = argString(args, "svg") || "out.min.svg";

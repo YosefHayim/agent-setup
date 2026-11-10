@@ -8,10 +8,10 @@ import {
   defaultSettingValue,
   settingValueFromText,
   withSettingValue,
-} from "../config/config-schema.js";
-import { locateConfigTarget, readConfig, saveConfig } from "../config/scope-config.js";
-import type { Scope } from "../install/receipt.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+} from "#src/config/config-schema.js";
+import { locateConfigTarget, readConfig, saveConfig } from "#src/config/scope-config.js";
+import type { Scope } from "#src/install/receipt.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import {
   confirmDestructive,
   createCliUsageError,

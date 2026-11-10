@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { isNotFound } from "./file-bytes.js";
 import { versionSchema } from "./receipt.js";
 

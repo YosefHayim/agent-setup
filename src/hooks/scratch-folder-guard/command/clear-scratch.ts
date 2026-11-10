@@ -6,9 +6,9 @@
 import { writeSync } from "node:fs";
 import os from "node:os";
 
-import { SESSION_ID_PATTERN } from "../../lib/session-ids.js";
-import { emptyScratchFolder } from "../lib/scratch-removal.js";
-import { agentScratchFolders } from "../lib/session-scratch.js";
+import { SESSION_ID_PATTERN } from "../../session-ids.js";
+import { emptyScratchFolder } from "../scratch-removal.js";
+import { agentScratchFolders } from "../session-scratch.js";
 
 const clearScratch = (): void => {
   const sessionId = process.argv[2] || "";

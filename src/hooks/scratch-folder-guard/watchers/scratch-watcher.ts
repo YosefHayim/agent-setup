@@ -7,11 +7,11 @@ import { writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { hasRunningSubagents } from "../../lib/claude-subagents.js";
-import { readConfig } from "../../lib/hook-config.js";
-import { removeAbandonedScratch } from "../lib/abandoned-scratch.js";
-import { removeScratchFolders } from "../lib/scratch-removal.js";
-import { claudeSessionFolders } from "../lib/session-scratch.js";
+import { hasRunningSubagents } from "../../claude-subagents.js";
+import { readConfig } from "../../hook-config.js";
+import { removeAbandonedScratch } from "../abandoned-scratch.js";
+import { removeScratchFolders } from "../scratch-removal.js";
+import { claudeSessionFolders } from "../session-scratch.js";
 
 // A session restarted while its subagents run can pick them up again on resume, and they need the clones, logs and
 // build output they left. A subagent folder that cannot be read could hold one of them.

@@ -7,8 +7,8 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 
-import { type AgentDefinition, type AgentEvidence, agentCatalog } from "../catalog/agent-catalog.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { type AgentDefinition, type AgentEvidence, agentCatalog } from "#src/catalog/agent-catalog.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 

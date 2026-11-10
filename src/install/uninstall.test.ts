@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "../config/config-schema.js";
+import { defaultConfig } from "#src/config/config-schema.js";
 import { install } from "./install.js";
 import { uninstall, uninstallRequestSchema } from "./uninstall.js";
 

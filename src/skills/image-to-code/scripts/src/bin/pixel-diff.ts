@@ -9,8 +9,8 @@ import pixelmatch from "pixelmatch";
  */
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
-import { argBool, argString, parseArgs } from "../lib/argv.js";
-import type { DiffReport, HotspotCell } from "../lib/types.js";
+import { argBool, argString, parseArgs } from "#src/argv.js";
+import type { DiffReport, HotspotCell } from "#src/types.js";
 
 function fail(message: string): never {
   console.error(`pixel-diff: ${message}`);

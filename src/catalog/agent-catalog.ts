@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
+import { nonEmptyTrimmedTextSchema } from "#src/install/text-rules.js";
 
 // e.g. "claude-code", "cursor" — not "ClaudeCode" or "claude_code"
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;

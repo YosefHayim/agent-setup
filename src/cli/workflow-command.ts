@@ -4,9 +4,9 @@ import { join, resolve } from "node:path";
 
 import { Argument, type Command, Option } from "commander";
 
-import { isNotFound } from "../install/file-bytes.js";
-import { findPackageRoot } from "../install/package-root.js";
-import { copyWorkflows } from "../workflows/copy-workflows.js";
+import { isNotFound } from "#src/install/file-bytes.js";
+import { findPackageRoot } from "#src/install/package-root.js";
+import { copyWorkflows } from "#src/workflows/copy-workflows.js";
 import { createCliUsageError, createCommand, type FormatOptions, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 

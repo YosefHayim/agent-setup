@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "../config/host-scan.js";
-import { checkHealth, type Discrepancy, type HealthReport } from "../doctor/doctor.js";
-import { preparePackage } from "../install/prepare-package.js";
+import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { checkHealth, type Discrepancy, type HealthReport } from "#src/doctor/doctor.js";
+import { preparePackage } from "#src/install/prepare-package.js";
 import { createCommand, type FormatOptions, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 

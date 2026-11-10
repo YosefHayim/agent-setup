@@ -2,12 +2,12 @@ import { readFile } from "node:fs/promises";
 
 import { z } from "zod";
 
-import { bytesEqual, hashBytes } from "../install/file-bytes.js";
-import { findDuplicateJsonKey } from "../install/find-duplicate-json-key.js";
-import type { PreviousFileValue } from "../install/ownership.js";
-import type { WriteOperation } from "../install/plan.js";
-import type { Scope } from "../install/receipt.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { bytesEqual, hashBytes } from "#src/install/file-bytes.js";
+import { findDuplicateJsonKey } from "#src/install/find-duplicate-json-key.js";
+import type { PreviousFileValue } from "#src/install/ownership.js";
+import type { WriteOperation } from "#src/install/plan.js";
+import type { Scope } from "#src/install/receipt.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { type Config, configSchema, defaultConfig } from "./config-schema.js";
 
 export const managedConfigPath = ".claude/agent-setup/config.json";

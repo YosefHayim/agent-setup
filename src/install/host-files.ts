@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { createInstallError } from "./install-request.js";
 import type { FileOwner, OwnedFile, PreviousFileValue } from "./ownership.js";

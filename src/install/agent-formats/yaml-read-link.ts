@@ -1,7 +1,7 @@
 import { isMap, isScalar, isSeq, parseDocument } from "yaml";
 
-import { decodeStrictText, lineEnding } from "../file-bytes.js";
-import type { YamlSequenceValueOwnership } from "../ownership.js";
+import { decodeStrictText, lineEnding } from "#src/install/file-bytes.js";
+import type { YamlSequenceValueOwnership } from "#src/install/ownership.js";
 
 const textEncoder = new TextEncoder();
 

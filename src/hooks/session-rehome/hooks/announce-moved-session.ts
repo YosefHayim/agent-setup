@@ -8,15 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { allowAndExit, printDecisionAndExit } from "../../lib/hook-output.js";
-import { movedSessionNotice } from "../lib/moved-session-notice.js";
-import {
-  claimSweepSlot,
-  ledgerEntryFor,
-  readLastMoves,
-  recordLedgerEntry,
-  rehomeAgentFrom,
-} from "../lib/rehome-ledger.js";
+import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
+import { movedSessionNotice } from "../moved-session-notice.js";
+import { claimSweepSlot, ledgerEntryFor, readLastMoves, recordLedgerEntry, rehomeAgentFrom } from "../rehome-ledger.js";
 
 type SessionStartEvent = { readonly sessionId: string; readonly source: string; readonly cwd: string };
 

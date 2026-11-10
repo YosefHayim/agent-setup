@@ -1,16 +1,16 @@
 import { z } from "zod";
-import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
-import { installedSkillSchema } from "../../catalog/feature-catalog.js";
-import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../../zod-issue-messages.js";
-import { hashBytes } from "../file-bytes.js";
+import { agentDefinitionSchema, agentTargetSchema } from "#src/catalog/agent-catalog.js";
+import { installedSkillSchema } from "#src/catalog/feature-catalog.js";
+import { hashBytes } from "#src/install/file-bytes.js";
 import {
   agentOwnerSchema,
   fileKindSchema,
   previousFileValueSchema,
   relativePathSchema,
   wholeFileOwnershipSchema,
-} from "../ownership.js";
-import { writeOperationSchema } from "../plan.js";
+} from "#src/install/ownership.js";
+import { writeOperationSchema } from "#src/install/plan.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 
 const createSkillPlanError = (issue: string): Error => new Error(`Cannot plan a skill directory: ${issue}`);
 

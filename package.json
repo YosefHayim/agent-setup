@@ -6,6 +6,12 @@
   "bin": {
     "agent-setup": "dist/src/cli/main.js"
   },
+  "imports": {
+    "#src/*": {
+      "source": "./src/*",
+      "default": "./dist/src/*"
+    }
+  },
   "files": [
     "dist",
     "src/skills",
@@ -17,7 +23,7 @@
     "!dist/src/scripts"
   ],
   "scripts": {
-    "dev": "tsx watch src/cli/main.ts",
+    "dev": "tsx watch --conditions=source src/cli/main.ts",
     "prod": "pnpm build && node dist/src/cli/main.js",
     "prepare": "husky",
     "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -27,8 +33,8 @@
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/agent-setup.tsbuildinfo",
     "lint": "biome check . && knip",
     "lint:fix": "biome check --write .",
-    "readme:generate": "tsx src/scripts/generate-readme.ts",
-    "readme:check": "tsx src/scripts/generate-readme.ts --check",
+    "readme:generate": "tsx --conditions=source src/scripts/generate-readme.ts",
+    "readme:check": "tsx --conditions=source src/scripts/generate-readme.ts --check",
     "check": "turbo run lint typecheck test build readme:check --output-logs=errors-only"
   },
   "keywords": [

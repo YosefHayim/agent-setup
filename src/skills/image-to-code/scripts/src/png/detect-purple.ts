@@ -2,7 +2,7 @@
 import fs from "node:fs";
 /** Find saturated-violet clusters (sparkles + eyes) via connected components. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "../lib/argv.js";
+import { argString, parseArgs } from "#src/argv.js";
 
 const args = parseArgs(process.argv.slice(2));
 const input = argString(args, "input") || "design.png";

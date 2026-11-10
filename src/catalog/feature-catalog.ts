@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
+import { nonEmptyTrimmedTextSchema } from "#src/install/text-rules.js";
 
 // e.g. "scratch-folder-guard", "image-to-code" — not "ScratchFolderGuard" or "png_to_code"
 const FEATURE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;

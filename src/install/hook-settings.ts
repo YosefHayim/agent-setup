@@ -2,9 +2,9 @@ import type { PlatformPath } from "node:path";
 
 import { z } from "zod";
 
-import type { AgentDefinition } from "../catalog/agent-catalog.js";
-import { featureCatalog } from "../catalog/feature-catalog.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import type { AgentDefinition } from "#src/catalog/agent-catalog.js";
+import { featureCatalog } from "#src/catalog/feature-catalog.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { decodeStrictText } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { applicationOwner, checkFileChange, expectedCurrent, type FileSnapshot } from "./host-files.js";
