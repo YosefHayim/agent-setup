@@ -124,47 +124,47 @@ const parseArgumentList = (argv) => {
     isMachineReadable: false,
     strict: false,
   };
-  for (const arg of argv) {
-    const isHelpFlag = arg === "--help" || arg === "-h";
+  for (const argument of argv) {
+    const isHelpFlag = argument === "--help" || argument === "-h";
     if (isHelpFlag) return { ...argumentList, help: true };
 
-    const isMachineReadableFlag = arg === "--json";
+    const isMachineReadableFlag = argument === "--json";
     if (isMachineReadableFlag) {
       argumentList.isMachineReadable = true;
       continue;
     }
 
-    const isStrictFlag = arg === "--strict";
+    const isStrictFlag = argument === "--strict";
     if (isStrictFlag) {
       argumentList.strict = true;
       continue;
     }
 
-    const isStrategyFlag = arg.startsWith(STRATEGY_FLAG_PREFIX);
+    const isStrategyFlag = argument.startsWith(STRATEGY_FLAG_PREFIX);
     if (isStrategyFlag) {
-      argumentList.strategy = arg.slice(STRATEGY_FLAG_PREFIX.length);
+      argumentList.strategy = argument.slice(STRATEGY_FLAG_PREFIX.length);
       continue;
     }
 
-    const isKeyFlag = arg.startsWith(KEY_FLAG_PREFIX);
+    const isKeyFlag = argument.startsWith(KEY_FLAG_PREFIX);
     if (isKeyFlag) {
-      argumentList.key = arg.slice(KEY_FLAG_PREFIX.length);
+      argumentList.key = argument.slice(KEY_FLAG_PREFIX.length);
       continue;
     }
 
-    const isBudgetsFlag = arg.startsWith(BUDGETS_FLAG_PREFIX);
+    const isBudgetsFlag = argument.startsWith(BUDGETS_FLAG_PREFIX);
     if (isBudgetsFlag) {
-      argumentList.budgets = arg.slice(BUDGETS_FLAG_PREFIX.length);
+      argumentList.budgets = argument.slice(BUDGETS_FLAG_PREFIX.length);
       continue;
     }
 
-    const isUnknownFlag = arg.startsWith("--");
-    if (isUnknownFlag) throw new Error(`Unknown argument: ${arg}`);
+    const isUnknownFlag = argument.startsWith("--");
+    if (isUnknownFlag) throw new Error(`Unknown argument: ${argument}`);
 
     const isUrlAlreadyGiven = Boolean(argumentList.url);
-    if (isUrlAlreadyGiven) throw new Error(`Unexpected argument: ${arg}`);
+    if (isUrlAlreadyGiven) throw new Error(`Unexpected argument: ${argument}`);
 
-    argumentList.url = arg;
+    argumentList.url = argument;
   }
 
   const isUrlMissing = !argumentList.url;

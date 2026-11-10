@@ -20,11 +20,11 @@ const fail: (message: string) => never = (message: string) => {
 const firstArgumentIndex = 2;
 
 const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
-const targetArg = readStringArgument(argumentList, "target");
+const targetPathArgument = readStringArgument(argumentList, "target");
 
-const actualArg = readStringArgument(argumentList, "input");
+const actualPathOrUrl = readStringArgument(argumentList, "input");
 
-const isTargetOrActualMissing = !targetArg || !actualArg;
+const isTargetOrActualMissing = !targetPathArgument || !actualPathOrUrl;
 if (isTargetOrActualMissing) {
   fail(
     "usage: tsx src/bin/pixel-diff.ts --target <design.png> --input <build.html|url> " +
@@ -32,7 +32,7 @@ if (isTargetOrActualMissing) {
   );
 }
 
-const targetPath = path.resolve(targetArg);
+const targetPath = path.resolve(targetPathArgument);
 
 const isTargetFileMissing = !fs.existsSync(targetPath);
 if (isTargetFileMissing) fail(`target not found: ${targetPath}`);
@@ -57,8 +57,8 @@ const maxRatio = hasMaxRatioOption ? Number(argumentList["max-ratio"]) : default
 const outPath = path.resolve(readStringArgument(argumentList, "out") || "diff.png");
 const isFreezeRequested = !readBooleanArgument(argumentList, "no-freeze");
 
-const isActualUrl = /^(https?|file):\/\//.test(actualArg);
-const url = isActualUrl ? actualArg : pathToFileURL(path.resolve(actualArg)).href;
+const isActualUrl = /^(https?|file):\/\//.test(actualPathOrUrl);
+const url = isActualUrl ? actualPathOrUrl : pathToFileURL(path.resolve(actualPathOrUrl)).href;
 
 let actual: PNG;
 const browser = await chromium.launch();
@@ -101,52 +101,52 @@ const diffPixels = pixelmatch(target.data, actual.data, diff.data, width, height
 });
 fs.writeFileSync(outPath, PNG.sync.write(diff));
 
-const cols = 8;
+const columnCount = 8;
 const maximumGridRows = 16;
 
-const gridHeightCells = Math.max(1, Math.min(maximumGridRows, Math.round((cols * height) / width)));
-const cellW = width / cols;
-const cellH = height / gridHeightCells;
-const cellCounts = new Array<number>(gridHeightCells * cols).fill(0);
+const gridHeightCells = Math.max(1, Math.min(maximumGridRows, Math.round((columnCount * height) / width)));
+const cellWidth = width / columnCount;
+const cellHeight = height / gridHeightCells;
+const cellCounts = new Array<number>(gridHeightCells * columnCount).fill(0);
 for (let y = 0; y < height; y++) {
   for (let column = 0; column < width; column++) {
     const bytesPerPixel = 4;
 
-    const p = (y * width + column) * bytesPerPixel;
+    const pixelIndex = (y * width + column) * bytesPerPixel;
 
     const blueChannelOffset = 2;
 
     const isNotDiff =
-      diff.data[p] !== diffColor[0] ||
-      diff.data[p + 1] !== diffColor[1] ||
-      diff.data[p + blueChannelOffset] !== diffColor[2];
+      diff.data[pixelIndex] !== diffColor[0] ||
+      diff.data[pixelIndex + 1] !== diffColor[1] ||
+      diff.data[pixelIndex + blueChannelOffset] !== diffColor[2];
     if (isNotDiff) continue;
 
-    const c = Math.min(cols - 1, Math.floor(column / cellW));
-    const r = Math.min(gridHeightCells - 1, Math.floor(y / cellH));
-    cellCounts[r * cols + c]++;
+    const cellColumn = Math.min(columnCount - 1, Math.floor(column / cellWidth));
+    const cellRow = Math.min(gridHeightCells - 1, Math.floor(y / cellHeight));
+    cellCounts[cellRow * columnCount + cellColumn]++;
   }
 }
 const topDiffRegionCount = 5;
 
 const hotspots: HotspotCell[] = cellCounts
-  .map((count, i) => {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    const x0 = Math.round(c * cellW);
-    const y0 = Math.round(r * cellH);
-    const w = Math.round((c + 1) * cellW) - x0;
-    const h = Math.round((r + 1) * cellH) - y0;
+  .map((count, index) => {
+    const cellRow = Math.floor(index / columnCount);
+    const cellColumn = index % columnCount;
+    const cellLeft = Math.round(cellColumn * cellWidth);
+    const cellTop = Math.round(cellRow * cellHeight);
+    const cellPixelWidth = Math.round((cellColumn + 1) * cellWidth) - cellLeft;
+    const cellPixelHeight = Math.round((cellRow + 1) * cellHeight) - cellTop;
     const pixelPercentDecimals = 2;
 
     return {
       count,
-      pct: +((count / (w * h)) * PERCENT_SCALE).toFixed(pixelPercentDecimals),
-      bbox: { x: x0, y: y0, w, h },
+      pct: +((count / (cellPixelWidth * cellPixelHeight)) * PERCENT_SCALE).toFixed(pixelPercentDecimals),
+      bbox: { x: cellLeft, y: cellTop, w: cellPixelWidth, h: cellPixelHeight },
     };
   })
   .filter((cell) => cell.count > 0)
-  .sort((a, b) => b.count - a.count)
+  .sort((firstCell, secondCell) => secondCell.count - firstCell.count)
   .slice(0, topDiffRegionCount);
 
 const ratio = diffPixels / (width * height);

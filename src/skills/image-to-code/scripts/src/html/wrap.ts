@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 const firstArgumentIndex = 2;
 
-const [inSvg, outHtml, sizeArg] = process.argv.slice(firstArgumentIndex);
+const [inSvg, outHtml, sizeArgument] = process.argv.slice(firstArgumentIndex);
 
 const isSvgOrHtmlMissing = !inSvg || !outHtml;
 if (isSvgOrHtmlMissing) {
@@ -15,18 +15,18 @@ if (isSvgOrHtmlMissing) {
 
 const defaultSvgSizePixels = 1254;
 
-const size = Number(sizeArg || defaultSvgSizePixels);
+const size = Number(sizeArgument || defaultSvgSizePixels);
 
 let svg = fs.readFileSync(inSvg, "utf8");
 
 const isViewBoxMissing = !/viewBox=/.test(svg);
 if (isViewBoxMissing) {
-  const w = (svg.match(/width="(\d+(?:\.\d+)?)"/) || [])[1];
+  const svgWidth = (svg.match(/width="(\d+(?:\.\d+)?)"/) || [])[1];
 
-  const h = (svg.match(/height="(\d+(?:\.\d+)?)"/) || [])[1];
+  const svgHeight = (svg.match(/height="(\d+(?:\.\d+)?)"/) || [])[1];
 
-  const hasCanvasSize = w && h;
-  if (hasCanvasSize) svg = svg.replace(/<svg /, `<svg viewBox="0 0 ${w} ${h}" `);
+  const hasCanvasSize = svgWidth && svgHeight;
+  if (hasCanvasSize) svg = svg.replace(/<svg /, `<svg viewBox="0 0 ${svgWidth} ${svgHeight}" `);
 }
 
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>

@@ -107,12 +107,12 @@ const fetchOrigin = async (origin) => {
   }
 };
 
-const createSummary = ({ failures, manifest, outDir, successes }) => {
+const createSummary = ({ failures, manifest, outputDirectory, successes }) => {
   const lines = [
     "# Update Agent Docs Sources",
     "",
     `Generated: ${manifest.generatedAt}`,
-    `Output: ${outDir}`,
+    `Output: ${outputDirectory}`,
     "",
     "## Fetched",
     "",
@@ -161,13 +161,13 @@ const runFetchCommand = async () => {
     process.exit(1);
   }
 
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const skillDir = path.resolve(scriptDir, "..");
-  const originPath = path.join(skillDir, "sources.json");
+  const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const skillDirectory = path.resolve(scriptDirectory, "..");
+  const originPath = path.join(skillDirectory, "sources.json");
   const origins = await readDocumentFile(originPath);
-  const outDir = path.resolve(saveToFolder);
+  const outputDirectory = path.resolve(saveToFolder);
 
-  await mkdir(outDir, { recursive: true });
+  await mkdir(outputDirectory, { recursive: true });
 
   const fetched = await Promise.all(origins.map((origin) => fetchOrigin(origin)));
   const successes = [];
@@ -182,7 +182,7 @@ const runFetchCommand = async () => {
 
     const extension = pickFileExtension(fetchAttempt.source, fetchAttempt.contentType);
     const fileName = `${fetchAttempt.source.id}${ORIGIN_FILE_SUFFIX}.${extension}`;
-    await writeFile(path.join(outDir, fileName), fetchAttempt.pageDocument);
+    await writeFile(path.join(outputDirectory, fileName), fetchAttempt.pageDocument);
 
     successes.push({
       bytes: Buffer.byteLength(fetchAttempt.pageDocument, UTF8_ENCODING),
@@ -212,11 +212,14 @@ const runFetchCommand = async () => {
 
   const indentSpaceCount = 2;
 
-  await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, indentSpaceCount)}\n`);
-  await writeFile(path.join(outDir, "summary.md"), createSummary({ failures, manifest, outDir, successes }));
+  await writeFile(path.join(outputDirectory, "manifest.json"), `${JSON.stringify(manifest, null, indentSpaceCount)}\n`);
+  await writeFile(
+    path.join(outputDirectory, "summary.md"),
+    createSummary({ failures, manifest, outputDirectory, successes }),
+  );
 
   console.log(`Fetched ${successes.length}/${origins.length} official sources.`);
-  console.log(`Cache: ${outDir}`);
+  console.log(`Cache: ${outputDirectory}`);
 
   const hasFailures = failures.length > 0;
   if (hasFailures) {

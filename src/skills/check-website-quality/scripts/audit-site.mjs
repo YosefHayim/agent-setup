@@ -18,7 +18,7 @@ const SEO_DIMENSION_ID = "seo";
 const OK = "ok";
 const PARTIAL = "partial";
 const MISSING = "missing";
-const NA = "na";
+const NOT_APPLICABLE = "na";
 const SECURITY_DIMENSION_ID = "security";
 const AGENTS_DIMENSION_ID = "agents";
 const INTERNAL_TOOL_EVIDENCE = "internal tool — not a public web surface";
@@ -43,7 +43,7 @@ const createSecurityEvidence = (codeMarkers, fileMarkers) => {
   const isHeadersFilePresent = Boolean(fileMarkers.headers);
   if (isHeadersFilePresent) return "public/_headers present";
 
-  const isCspSetInHeaders = codeMarkers.headersFn && codeMarkers.csp;
+  const isCspSetInHeaders = codeMarkers.hasHeadersFunction && codeMarkers.csp;
   if (isCspSetInHeaders) return "next.config headers() + CSP";
 
   const isManifestCspFound = codeMarkers.manifestCsp;
@@ -110,9 +110,9 @@ const scoreDimensions = (collectedSignals, settings = {}) => {
 
   const secOk =
     (fileMarkers.headers && (codeMarkers.csp || codeMarkers.hsts)) ||
-    (codeMarkers.headersFn && codeMarkers.csp) ||
+    (codeMarkers.hasHeadersFunction && codeMarkers.csp) ||
     codeMarkers.manifestCsp;
-  const secPartial = fileMarkers.headers || codeMarkers.csp || codeMarkers.headersFn;
+  const secPartial = fileMarkers.headers || codeMarkers.csp || codeMarkers.hasHeadersFunction;
   dimensions.push(
     createDimension({
       id: SECURITY_DIMENSION_ID,
@@ -128,7 +128,7 @@ const scoreDimensions = (collectedSignals, settings = {}) => {
       createDimension({
         id: SEO_DIMENSION_ID,
         label: SEO_DIMENSION_LABEL,
-        score: NA,
+        score: NOT_APPLICABLE,
         evidence: INTERNAL_TOOL_EVIDENCE,
         warn: null,
       }),
@@ -137,7 +137,7 @@ const scoreDimensions = (collectedSignals, settings = {}) => {
       createDimension({
         id: AGENTS_DIMENSION_ID,
         label: AGENT_READABILITY_LABEL,
-        score: NA,
+        score: NOT_APPLICABLE,
         evidence: INTERNAL_TOOL_EVIDENCE,
         warn: null,
       }),
@@ -264,7 +264,7 @@ const readCodeMarkers = (scannedCode, modernAsset) => {
     dynamicImport: /next\/dynamic|React\.lazy|\blazy\(|\bimport\(/.test(scannedCode),
     csp: /Content-Security-Policy/i.test(scannedCode),
     hsts: /Strict-Transport-Security/i.test(scannedCode),
-    headersFn: /async\s+headers\s*\(|\bheaders\s*\(\s*\)\s*\{/.test(scannedCode),
+    hasHeadersFunction: /async\s+headers\s*\(|\bheaders\s*\(\s*\)\s*\{/.test(scannedCode),
     manifestCsp: /content_security_policy/i.test(scannedCode),
     htmlLang: /<html[^>]*\slang=|\blang:\s*["']/.test(scannedCode),
     titleMeta: /<title[\s>]|title:\s*["'`]|export\s+const\s+metadata|generateMetadata/.test(scannedCode),
@@ -390,7 +390,7 @@ const runAuditCommand = (processArgv) => {
 
     console.log(`${statusMarks[dimension.score]} ${dimension.label.padEnd(labelColumnWidth)} ${dimension.evidence}`);
 
-    const isWarningShown = Boolean(dimension.warn) && dimension.score !== NA;
+    const isWarningShown = Boolean(dimension.warn) && dimension.score !== NOT_APPLICABLE;
     if (isWarningShown) console.log(`   ⚠ ${dimension.warn}`);
   }
   console.log("");

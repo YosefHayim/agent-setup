@@ -10,14 +10,14 @@ const firstArgumentIndex = 2;
 const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
 const pngPath = readStringArgument(argumentList, "input") || "design.png";
 const png = PNG.sync.read(fs.readFileSync(pngPath));
-const { width: W, height: H, data: pixelBytes } = png;
+const { width, height, data: pixelBytes } = png;
 
-const isViolet = (i: number) => {
+const isViolet = (byteOffset: number) => {
   const blueChannelOffset = 2;
 
-  const r = pixelBytes[i],
-    g = pixelBytes[i + 1],
-    b = pixelBytes[i + blueChannelOffset];
+  const red = pixelBytes[byteOffset],
+    green = pixelBytes[byteOffset + 1],
+    blue = pixelBytes[byteOffset + blueChannelOffset];
   const minimumBlueRedGap = 10;
 
   const minimumRedGreenGap = 20;
@@ -29,67 +29,74 @@ const isViolet = (i: number) => {
   const minimumBlueChannel = 150;
 
   return (
-    b > minimumBlueChannel &&
-    r > minimumRedChannel &&
-    r < maximumRedChannel &&
-    g < r - minimumRedGreenGap &&
-    b > r + minimumBlueRedGap
+    blue > minimumBlueChannel &&
+    red > minimumRedChannel &&
+    red < maximumRedChannel &&
+    green < red - minimumRedGreenGap &&
+    blue > red + minimumBlueRedGap
   );
 };
 
-const seen = new Uint8Array(W * H);
-const comps: { area: number; cx: number; cy: number; bbox: { x: number; y: number; w: number; h: number } }[] = [];
+const seen = new Uint8Array(width * height);
+const violetBlobs: { area: number; cx: number; cy: number; bbox: { x: number; y: number; w: number; h: number } }[] =
+  [];
 const stack: number[] = [];
-for (let y = 0; y < H; y++) {
-  for (let column = 0; column < W; column++) {
-    const p = y * W + column;
+for (let y = 0; y < height; y++) {
+  for (let column = 0; column < width; column++) {
+    const pixelIndex = y * width + column;
 
-    const isSkippedPixel = seen[p] || !isViolet(p * BYTES_PER_PIXEL);
+    const isSkippedPixel = seen[pixelIndex] || !isViolet(pixelIndex * BYTES_PER_PIXEL);
     if (isSkippedPixel) continue;
 
     stack.length = 0;
-    stack.push(p);
-    seen[p] = 1;
+    stack.push(pixelIndex);
+    seen[pixelIndex] = 1;
     let minHorizontal = column,
       maxHorizontal = column,
       minY = y,
       maxY = y,
       area = 0,
-      sx = 0,
-      sy = 0;
+      sumX = 0,
+      sumY = 0;
     while (stack.length) {
-      const q = stack.pop()!;
-      const qx = q % W,
-        qy = (q / W) | 0;
+      const currentPixelIndex = stack.pop()!;
+      const currentX = currentPixelIndex % width,
+        currentY = (currentPixelIndex / width) | 0;
       area++;
-      sx += qx;
-      sy += qy;
+      sumX += currentX;
+      sumY += currentY;
 
-      const isLeftOfBounds = qx < minHorizontal;
-      if (isLeftOfBounds) minHorizontal = qx;
+      const isLeftOfBounds = currentX < minHorizontal;
+      if (isLeftOfBounds) minHorizontal = currentX;
 
-      const isRightOfBounds = qx > maxHorizontal;
-      if (isRightOfBounds) maxHorizontal = qx;
+      const isRightOfBounds = currentX > maxHorizontal;
+      if (isRightOfBounds) maxHorizontal = currentX;
 
-      const isAboveBounds = qy < minY;
-      if (isAboveBounds) minY = qy;
+      const isAboveBounds = currentY < minY;
+      if (isAboveBounds) minY = currentY;
 
-      const isBelowBounds = qy > maxY;
-      if (isBelowBounds) maxY = qy;
+      const isBelowBounds = currentY > maxY;
+      if (isBelowBounds) maxY = currentY;
 
-      const nb = [q - 1, q + 1, q - W, q + W];
-      for (const n of nb) {
-        const isOutsideImageOrSeen = n < 0 || n >= W * H || seen[n];
+      const neighborPixelIndexes = [
+        currentPixelIndex - 1,
+        currentPixelIndex + 1,
+        currentPixelIndex - width,
+        currentPixelIndex + width,
+      ];
+      for (const neighborPixelIndex of neighborPixelIndexes) {
+        const isOutsideImageOrSeen =
+          neighborPixelIndex < 0 || neighborPixelIndex >= width * height || seen[neighborPixelIndex];
         if (isOutsideImageOrSeen) continue;
 
-        const nx = n % W;
+        const neighborX = neighborPixelIndex % width;
 
-        const isScanlineWrapStep = Math.abs(nx - qx) > 1;
+        const isScanlineWrapStep = Math.abs(neighborX - currentX) > 1;
         if (isScanlineWrapStep) continue;
 
-        if (isViolet(n * BYTES_PER_PIXEL)) {
-          seen[n] = 1;
-          stack.push(n);
+        if (isViolet(neighborPixelIndex * BYTES_PER_PIXEL)) {
+          seen[neighborPixelIndex] = 1;
+          stack.push(neighborPixelIndex);
         }
       }
     }
@@ -98,15 +105,15 @@ for (let y = 0; y < H; y++) {
 
     const isLargeEnoughBlob = area >= minimumBlobPixelCount;
     if (isLargeEnoughBlob)
-      comps.push({
+      violetBlobs.push({
         area,
-        cx: Math.round(sx / area),
-        cy: Math.round(sy / area),
+        cx: Math.round(sumX / area),
+        cy: Math.round(sumY / area),
         bbox: { x: minHorizontal, y: minY, w: maxHorizontal - minHorizontal + 1, h: maxY - minY + 1 },
       });
   }
 }
-comps.sort((a, b) => b.area - a.area);
+violetBlobs.sort((firstBlob, secondBlob) => secondBlob.area - firstBlob.area);
 const indentSpaceCount = 2;
 
-console.log(JSON.stringify(comps, null, indentSpaceCount));
+console.log(JSON.stringify(violetBlobs, null, indentSpaceCount));

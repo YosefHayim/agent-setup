@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 
 const firstArgumentIndex = 2;
 
-const [inHtml, outPng, sizeArg, delayArg] = process.argv.slice(firstArgumentIndex);
+const [inHtml, outPng, sizeArgument, frameDelayArgument] = process.argv.slice(firstArgumentIndex);
 
 const isHtmlOrPngMissing = !inHtml || !outPng;
 if (isHtmlOrPngMissing) {
@@ -17,8 +17,8 @@ if (isHtmlOrPngMissing) {
 
 const defaultScreenshotSizePixels = 420;
 
-const size = Number(sizeArg || defaultScreenshotSizePixels);
-const delay = Number(delayArg || 0);
+const size = Number(sizeArgument || defaultScreenshotSizePixels);
+const delay = Number(frameDelayArgument || 0);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
 await page.goto(pathToFileURL(path.resolve(inHtml)).href, { waitUntil: "networkidle" });
