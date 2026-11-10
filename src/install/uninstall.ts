@@ -108,7 +108,7 @@ export const uninstall = (input: unknown) =>
         new UninstallError({ issue: `Generated uninstall plan is invalid: ${readErrorMessage(error)}` }),
     });
 
-    yield* applyPlan(plannedUninstall);
+    yield* Effect.tryPromise({ try: (signal) => applyPlan(plannedUninstall, signal), catch: (error) => error });
 
     return uninstallSummary("uninstalled", request);
   }).pipe(Effect.mapError(toUninstallError));

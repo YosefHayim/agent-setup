@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { rmdir } from "node:fs/promises";
-
-import { FileSystem, Path } from "@effect/platform";
-import { BadArgument, type PlatformError, SystemError } from "@effect/platform/Error";
-import { Cause, Effect, Exit, Ref } from "effect";
+import type { Stats } from "node:fs";
+import { copyFile, link, mkdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { type FileSnapshot, readFileSnapshot } from "./host-files.js";
+import { readErrorMessage } from "./install-request.js";
 import type { ExpectedCurrent, FileChange, Plan, Precondition, ReceiptOperation } from "./plan.js";
 import { encodeReceiptJson } from "./receipt.js";
 import {
@@ -18,28 +17,28 @@ import {
 } from "./recovery.js";
 import { parentDirectories, validatePlanRoot, validateTarget } from "./target-paths.js";
 
-type PreparedFile = {
+interface PreparedFile {
   readonly operation: FileChange;
   readonly targetPath: string;
   readonly preparedPath: string;
   readonly snapshotPath: string;
-};
+}
 
-type PreparedPrecondition = {
+interface PreparedPrecondition {
   readonly precondition: Precondition;
   readonly targetPath: string;
   readonly snapshotPath: string;
-};
+}
 
-type PreparedReceipt = {
+interface PreparedReceipt {
   readonly operation: ReceiptOperation;
   readonly targetPath: string;
   readonly recoveryPath: string;
   readonly preparedPath: string;
   readonly snapshotPath: string;
-};
+}
 
-type PreparedPlan = {
+interface PreparedPlan {
   // The real path of the plan root, resolved once; every target must stay inside it.
   readonly root: string;
   readonly transactionRoot: string;
@@ -49,250 +48,109 @@ type PreparedPlan = {
   readonly files: ReadonlyArray<PreparedFile>;
   readonly preconditions: ReadonlyArray<PreparedPrecondition>;
   readonly receipt: PreparedReceipt;
-};
+}
 
-// What a target holds as far as this transaction knows: its captured original, or bytes this transaction committed.
-type TargetState = TargetSnapshot["original"] | { readonly _tag: "bytes"; readonly value: Uint8Array };
+// What this transaction knows a target holds: its captured original, or bytes this transaction wrote.
+type KnownTarget = TargetSnapshot["original"] | { readonly _tag: "bytes"; readonly bytes: Uint8Array };
 
-type Mutation = {
+interface Mutation {
   readonly snapshot: TargetSnapshot;
-  readonly current: TargetState;
-};
+  readonly current: KnownTarget;
+}
 
-type Transaction = {
+interface Transaction {
   readonly preparedPlan: PreparedPlan;
   readonly snapshots: ReadonlyArray<TargetSnapshot>;
-  readonly mutations: Ref.Ref<ReadonlyArray<Mutation>>;
-  readonly createdDirectories: Ref.Ref<ReadonlyArray<string>>;
-};
+  mutations: ReadonlyArray<Mutation>;
+  createdDirectories: ReadonlyArray<string>;
+  readonly signal: AbortSignal;
+}
 
-type CommitStep = {
+interface PreparedCommit {
+  readonly path: string;
+  readonly readBytes: () => Promise<Uint8Array>;
+}
+
+interface CaptureTarget {
   readonly targetPath: string;
-  // Absent when the target is removed rather than replaced.
-  readonly prepared?: {
-    readonly path: string;
-    readonly bytes: Effect.Effect<Uint8Array, PlatformError, FileSystem.FileSystem>;
-  };
+  readonly snapshotPath: string;
+}
+
+interface PlannedTarget {
+  readonly targetPath: string;
+  readonly expected: ExpectedCurrent;
+}
+
+interface UnchangedCheck {
+  readonly targetPath: string;
+  readonly expected: KnownTarget;
+  // Completes the failure message: "changed after <since>".
+  readonly since: "it was captured" | "this transaction mutated it";
+}
+
+type RecoveryMarkerPublication = "published" | "alreadyHeld";
+
+const isAlreadyExists = (error: unknown): boolean =>
+  error instanceof Error && "code" in error && error.code === "EEXIST";
+
+// Returns null when nothing is at the path, so a missing file is not an error.
+const statIfPresent = async (filePath: string): Promise<Stats | null> => {
+  try {
+    return await stat(filePath);
+  } catch (error) {
+    const isMissing = isNotFound(error);
+    if (isMissing) {
+      return null;
+    }
+
+    throw error;
+  }
 };
 
-const badArgument = (method: string, description: string) =>
-  new BadArgument({ module: "FileSystem", method, description });
+const isPathPresent = async (filePath: string): Promise<boolean> => {
+  const fileStats = await statIfPresent(filePath);
 
-const isAlreadyExists = (error: PlatformError): boolean =>
-  error._tag === "SystemError" && error.reason === "AlreadyExists";
+  return fileStats != null;
+};
 
-const checkTarget = (root: string, targetPath: string) =>
-  Effect.tryPromise({ try: () => validateTarget(root, targetPath), catch: (cause) => cause });
+// The first failure stays the visible message, so the user still sees the first problem.
+const combineFailures = (failures: ReadonlyArray<unknown>): unknown => {
+  const [firstFailure] = failures;
+  const isSingleFailure = failures.length === 1;
+  if (isSingleFailure) {
+    return firstFailure;
+  }
 
-const checkPlanRoot = (planRoot: string) =>
-  Effect.tryPromise({ try: () => validatePlanRoot(planRoot), catch: (cause) => cause });
+  return new AggregateError(failures, readErrorMessage(firstFailure));
+};
 
-const combineCauses = (causes: ReadonlyArray<Cause.Cause<unknown>>): Cause.Cause<unknown> =>
-  causes.reduce((combined, cause) => Cause.sequential(combined, cause), Cause.empty);
+// Runs every step, even after one fails, and returns the failures in order.
+const collectFailures = async (steps: ReadonlyArray<() => Promise<unknown>>): Promise<Array<unknown>> => {
+  const failures: Array<unknown> = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (failure) {
+      failures.push(failure);
+    }
+  }
 
-const failureCauses = (exits: ReadonlyArray<Exit.Exit<unknown, unknown>>) =>
-  exits.flatMap((exit) => (Exit.isFailure(exit) ? [exit.cause] : []));
+  return failures;
+};
 
-const unfinishedChange = (recoveryPath: string) => Cause.fail(createUnfinishedChangeError(recoveryPath));
+// Runs the cleanup, then returns the error to throw: the original failure plus any cleanup failure.
+const createFailureAfterCleanUp = async (failure: unknown, cleanup: () => Promise<unknown>): Promise<unknown> => {
+  const cleanupFailures = await collectFailures([cleanup]);
 
-// Runs the cleanup, then fails with the original cause plus any cleanup failure.
-const failAfter = <R>(cause: Cause.Cause<unknown>, cleanup: Effect.Effect<unknown, unknown, R>) =>
-  Effect.flatMap(Effect.exit(cleanup), (cleanupExit) =>
-    Effect.failCause(Exit.isFailure(cleanupExit) ? Cause.sequential(cause, cleanupExit.cause) : cause),
-  );
+  return combineFailures([failure, ...cleanupFailures]);
+};
 
-const pathExists = (filePath: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-    fileSystem.stat(filePath).pipe(
-      Effect.as(true),
-      Effect.catchIf(isNotFound, () => Effect.succeed(false)),
-    ),
-  );
-
-const targetSnapshot = (targetPath: string, original: TargetSnapshot["original"]): TargetSnapshot => ({
+const createTargetSnapshot = (targetPath: string, original: TargetSnapshot["original"]): TargetSnapshot => ({
   targetPath,
   original,
 });
 
-const preparePlan = (plan: Plan, root: string) =>
-  Effect.map(Path.Path, (path): PreparedPlan => {
-    const transactionRoot = path.join(root, `.agent-setup-transaction-${randomUUID()}`);
-    const preparedDirectory = path.join(transactionRoot, "prepared");
-    const snapshotsDirectory = path.join(transactionRoot, "snapshots");
-    const receiptTargetPath = path.resolve(root, plan.receipt.target.path);
-
-    return {
-      root,
-      transactionRoot,
-      preparedDirectory,
-      snapshotsDirectory,
-      pendingRecordPath: path.join(transactionRoot, "pending.json"),
-      files: plan.operations.map((operation, index) => ({
-        operation,
-        targetPath: path.resolve(root, operation.file.path),
-        preparedPath: path.join(preparedDirectory, String(index)),
-        snapshotPath: path.join(snapshotsDirectory, String(index)),
-      })),
-      preconditions: plan.preconditions.map((precondition, index) => ({
-        precondition,
-        targetPath: path.resolve(root, precondition.path),
-        snapshotPath: path.join(snapshotsDirectory, `precondition-${index}`),
-      })),
-      receipt: {
-        operation: plan.receipt,
-        targetPath: receiptTargetPath,
-        recoveryPath: path.join(path.dirname(receiptTargetPath), "recovery.json"),
-        preparedPath: path.join(preparedDirectory, "receipt"),
-        snapshotPath: path.join(snapshotsDirectory, "receipt"),
-      },
-    };
-  });
-
-const preflightTargets = (preparedPlan: PreparedPlan) =>
-  Effect.forEach(
-    [
-      ...preparedPlan.files.map((file) => file.targetPath),
-      ...preparedPlan.preconditions.map((precondition) => precondition.targetPath),
-      preparedPlan.receipt.targetPath,
-      preparedPlan.receipt.recoveryPath,
-    ],
-    (targetPath) => checkTarget(preparedPlan.root, targetPath),
-    { discard: true },
-  );
-
-const ensureRecoveryAbsent = (recoveryPath: string) =>
-  Effect.gen(function* () {
-    if (yield* pathExists(recoveryPath)) {
-      return yield* Effect.fail(createUnfinishedChangeError(recoveryPath));
-    }
-  });
-
-const removeTransaction = (preparedPlan: PreparedPlan) =>
-  Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-    fileSystem.remove(preparedPlan.transactionRoot, { recursive: true, force: true }),
-  );
-
-const captureTarget = (root: string, target: { targetPath: string; snapshotPath: string }) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    yield* checkTarget(root, target.targetPath);
-    const current = yield* Effect.tryPromise({
-      try: () => readFileSnapshot(target.targetPath),
-      catch: (error) => error,
-    });
-    if (current._tag === "missing") {
-      return targetSnapshot(target.targetPath, { _tag: "missing" });
-    }
-
-    yield* fileSystem.writeFile(target.snapshotPath, current.bytes, { mode: 0o600 });
-    return targetSnapshot(target.targetPath, { _tag: "file", snapshotPath: target.snapshotPath });
-  });
-
-// Capture may be interrupted, but the transaction directory it created is always removed.
-const captureTargets = (preparedPlan: PreparedPlan) =>
-  Effect.uninterruptible(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      yield* fileSystem.makeDirectory(preparedPlan.transactionRoot, { mode: 0o700 });
-      const captureExit = yield* Effect.exit(
-        Effect.interruptible(
-          Effect.gen(function* () {
-            yield* fileSystem.makeDirectory(preparedPlan.preparedDirectory, { mode: 0o700 });
-            yield* fileSystem.makeDirectory(preparedPlan.snapshotsDirectory, { mode: 0o700 });
-            return yield* Effect.forEach(
-              [...preparedPlan.files, ...preparedPlan.preconditions, preparedPlan.receipt],
-              (target) => captureTarget(preparedPlan.root, target),
-            );
-          }),
-        ),
-      );
-      if (Exit.isSuccess(captureExit)) {
-        return captureExit.value;
-      }
-
-      return yield* failAfter(captureExit.cause, removeTransaction(preparedPlan));
-    }),
-  );
-
-const findSnapshot = (transaction: Transaction, targetPath: string) => {
-  const snapshot = transaction.snapshots.find((candidate) => candidate.targetPath === targetPath);
-
-  return snapshot === undefined
-    ? Effect.dieMessage(`Transaction snapshot missing for ${targetPath}`)
-    : Effect.succeed(snapshot);
-};
-
-const matchesPlannedState = (transaction: Transaction, target: { targetPath: string; expected: ExpectedCurrent }) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const snapshot = yield* findSnapshot(transaction, target.targetPath);
-    if (target.expected._tag === "missing" && snapshot.original._tag === "missing") {
-      return;
-    }
-
-    if (target.expected._tag === "file" && snapshot.original._tag === "file") {
-      const capturedBytes = yield* fileSystem.readFile(snapshot.original.snapshotPath);
-      if (hashBytes(capturedBytes) === target.expected.sha256) {
-        return;
-      }
-    }
-
-    return yield* badArgument(
-      "stat",
-      `Transaction target ${target.targetPath} no longer matches the state inspected during planning.`,
-    );
-  });
-
-const validatePlanPreconditions = (transaction: Transaction) => {
-  const { files, preconditions, receipt } = transaction.preparedPlan;
-
-  return Effect.forEach(
-    [
-      ...files.map((file) => ({ targetPath: file.targetPath, expected: file.operation.expectedCurrent })),
-      ...preconditions.map((guard) => ({ targetPath: guard.targetPath, expected: guard.precondition.expectedCurrent })),
-      { targetPath: receipt.targetPath, expected: receipt.operation.expectedCurrent },
-    ],
-    (target) => matchesPlannedState(transaction, target),
-    { discard: true },
-  );
-};
-
-const prepareFile = (file: PreparedFile) =>
-  Effect.gen(function* () {
-    if (file.operation._tag === "remove") {
-      return;
-    }
-
-    const fileSystem = yield* FileSystem.FileSystem;
-    yield* fileSystem.writeFile(file.preparedPath, file.operation.bytes);
-  });
-
-const prepareTargets = (preparedPlan: PreparedPlan) =>
-  Effect.gen(function* () {
-    yield* Effect.forEach(preparedPlan.files, prepareFile, { discard: true });
-    if (preparedPlan.receipt.operation._tag === "receiptPublish") {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const receiptJson = encodeReceiptJson(preparedPlan.receipt.operation.receipt);
-      yield* fileSystem.writeFileString(preparedPlan.receipt.preparedPath, receiptJson);
-    }
-  });
-
-const ensureTargetParent = (transaction: Transaction, targetPath: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    for (const directory of parentDirectories(transaction.preparedPlan.root, targetPath)) {
-      const isDirectory = yield* fileSystem.stat(directory).pipe(
-        Effect.map((entry) => entry.type === "Directory"),
-        Effect.catchIf(isNotFound, () => Effect.succeed(false)),
-      );
-      if (!isDirectory) {
-        yield* fileSystem.makeDirectory(directory);
-        yield* Ref.update(transaction.createdDirectories, (directories) => [...directories, directory]);
-      }
-    }
-  });
-
-const pendingRecoveryRecord = (transaction: Transaction): RecoveryRecord => ({
+const createPendingRecoveryRecord = (transaction: Transaction): RecoveryRecord => ({
   _tag: "pending",
   version: 1,
   root: transaction.preparedPlan.root,
@@ -301,304 +159,478 @@ const pendingRecoveryRecord = (transaction: Transaction): RecoveryRecord => ({
   snapshots: transaction.snapshots,
 });
 
-// The marker is hard-linked into place so only one concurrent transaction can publish it.
-// Succeeds with false when another transaction already holds it.
-const publishRecoveryMarker = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const { pendingRecordPath, receipt, root } = transaction.preparedPlan;
-    const recoveryJson = encodeRecoveryRecordJson(pendingRecoveryRecord(transaction));
+const preparePlan = (plan: Plan, root: string): PreparedPlan => {
+  const transactionRoot = join(root, `.agent-setup-transaction-${randomUUID()}`);
+  const preparedDirectory = join(transactionRoot, "prepared");
+  const snapshotsDirectory = join(transactionRoot, "snapshots");
+  const receiptTargetPath = resolve(root, plan.receipt.target.path);
 
-    yield* fileSystem.writeFileString(pendingRecordPath, recoveryJson, { flag: "wx", mode: 0o600 });
-    yield* ensureTargetParent(transaction, receipt.recoveryPath);
-    yield* checkTarget(root, receipt.recoveryPath);
-    return yield* fileSystem.link(pendingRecordPath, receipt.recoveryPath).pipe(
-      Effect.as(true),
-      Effect.catchIf(isAlreadyExists, () => Effect.succeed(false)),
-    );
-  });
-
-const verifyRecoveryMarker = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const recoveryPath = transaction.preparedPlan.receipt.recoveryPath;
-    const recoveryJson = yield* fileSystem.readFileString(recoveryPath);
-    const recoveryRecord = yield* Effect.try({
-      try: () => decodeRecoveryRecordJson(recoveryJson),
-      catch: (cause) => cause,
-    });
-    const isRecoveryRecordChanged =
-      encodeRecoveryRecordJson(recoveryRecord) !== encodeRecoveryRecordJson(pendingRecoveryRecord(transaction));
-    if (isRecoveryRecordChanged) {
-      return yield* badArgument("readFile", `Recovery marker ${recoveryPath} changed during the transaction.`);
-    }
-  });
-
-const holdsState = (current: FileSnapshot, expected: TargetState) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    if (current._tag === "missing" || expected._tag === "missing") {
-      return current._tag === expected._tag;
-    }
-
-    const expectedBytes =
-      expected._tag === "bytes" ? expected.value : yield* fileSystem.readFile(expected.snapshotPath);
-    return bytesEqual(current.bytes, expectedBytes);
-  });
-
-type UnchangedCheck = {
-  readonly targetPath: string;
-  readonly expected: TargetState;
-  // Completes the failure message: "changed after <since>".
-  readonly since: "it was captured" | "this transaction mutated it";
+  return {
+    root,
+    transactionRoot,
+    preparedDirectory,
+    snapshotsDirectory,
+    pendingRecordPath: join(transactionRoot, "pending.json"),
+    files: plan.operations.map((operation, index) => ({
+      operation,
+      targetPath: resolve(root, operation.file.path),
+      preparedPath: join(preparedDirectory, String(index)),
+      snapshotPath: join(snapshotsDirectory, String(index)),
+    })),
+    preconditions: plan.preconditions.map((precondition, index) => ({
+      precondition,
+      targetPath: resolve(root, precondition.path),
+      snapshotPath: join(snapshotsDirectory, `precondition-${index}`),
+    })),
+    receipt: {
+      operation: plan.receipt,
+      targetPath: receiptTargetPath,
+      recoveryPath: join(dirname(receiptTargetPath), "recovery.json"),
+      preparedPath: join(preparedDirectory, "receipt"),
+      snapshotPath: join(snapshotsDirectory, "receipt"),
+    },
+  };
 };
 
-// Fails unless the target still holds the expected state, so no step overwrites bytes someone else changed.
-const ensureUnchanged = (transaction: Transaction, check: UnchangedCheck) =>
-  Effect.gen(function* () {
-    yield* checkTarget(transaction.preparedPlan.root, check.targetPath);
-    const current = yield* Effect.tryPromise({
-      try: () => readFileSnapshot(check.targetPath),
-      catch: (error) => error,
-    });
-    if (yield* holdsState(current, check.expected)) {
+const preflightTargets = async (preparedPlan: PreparedPlan): Promise<void> => {
+  const targetPaths = [
+    ...preparedPlan.files.map((file) => file.targetPath),
+    ...preparedPlan.preconditions.map((precondition) => precondition.targetPath),
+    preparedPlan.receipt.targetPath,
+    preparedPlan.receipt.recoveryPath,
+  ];
+  for (const targetPath of targetPaths) {
+    await validateTarget(preparedPlan.root, targetPath);
+  }
+};
+
+const ensureRecoveryAbsent = async (recoveryPath: string): Promise<void> => {
+  const isRecoveryPresent = await isPathPresent(recoveryPath);
+  if (isRecoveryPresent) {
+    throw createUnfinishedChangeError(recoveryPath);
+  }
+};
+
+const removeTransaction = (preparedPlan: PreparedPlan): Promise<void> =>
+  rm(preparedPlan.transactionRoot, { recursive: true, force: true });
+
+const captureTarget = async (root: string, target: CaptureTarget): Promise<TargetSnapshot> => {
+  await validateTarget(root, target.targetPath);
+  const currentSnapshot = await readFileSnapshot(target.targetPath);
+  const isMissing = currentSnapshot._tag === "missing";
+  if (isMissing) {
+    return createTargetSnapshot(target.targetPath, { _tag: "missing" });
+  }
+
+  await writeFile(target.snapshotPath, currentSnapshot.bytes, { mode: 0o600 });
+
+  return createTargetSnapshot(target.targetPath, { _tag: "file", snapshotPath: target.snapshotPath });
+};
+
+// The transaction directory is removed again if any capture step fails.
+const captureTargets = async (preparedPlan: PreparedPlan): Promise<Array<TargetSnapshot>> => {
+  await mkdir(preparedPlan.transactionRoot, { mode: 0o700 });
+  try {
+    await mkdir(preparedPlan.preparedDirectory, { mode: 0o700 });
+    await mkdir(preparedPlan.snapshotsDirectory, { mode: 0o700 });
+
+    const snapshots: Array<TargetSnapshot> = [];
+    for (const target of [...preparedPlan.files, ...preparedPlan.preconditions, preparedPlan.receipt]) {
+      const snapshot = await captureTarget(preparedPlan.root, target);
+      snapshots.push(snapshot);
+    }
+
+    return snapshots;
+  } catch (captureFailure) {
+    const failureAfterCleanUp = await createFailureAfterCleanUp(captureFailure, () => removeTransaction(preparedPlan));
+    throw failureAfterCleanUp;
+  }
+};
+
+const findSnapshot = (transaction: Transaction, targetPath: string): TargetSnapshot => {
+  const snapshot = transaction.snapshots.find((candidate) => candidate.targetPath === targetPath);
+  const isSnapshotMissing = snapshot == null;
+  if (isSnapshotMissing) {
+    throw new Error(`Transaction snapshot missing for ${targetPath}`);
+  }
+
+  return snapshot;
+};
+
+const ensureMatchesPlannedState = async (transaction: Transaction, target: PlannedTarget): Promise<void> => {
+  const snapshot = findSnapshot(transaction, target.targetPath);
+  const { original } = snapshot;
+  const { expected } = target;
+  const isMissingAsPlanned = expected._tag === "missing" && original._tag === "missing";
+  if (isMissingAsPlanned) {
+    return;
+  }
+
+  const isFileAsPlanned = expected._tag === "file" && original._tag === "file";
+  if (isFileAsPlanned) {
+    const capturedBytes = await readFile(original.snapshotPath);
+    const isSameHash = hashBytes(capturedBytes) === expected.sha256;
+    if (isSameHash) {
       return;
     }
+  }
 
-    return yield* badArgument("stat", `Transaction target ${check.targetPath} changed after ${check.since}.`);
-  });
-
-const setMutationState = (transaction: Transaction, mutation: Mutation) =>
-  Ref.update(transaction.mutations, (recorded) =>
-    recorded.map((candidate) =>
-      candidate.snapshot.targetPath === mutation.snapshot.targetPath
-        ? { ...candidate, current: mutation.current }
-        : candidate,
-    ),
+  throw new Error(
+    `FileSystem.stat: Transaction target ${target.targetPath} no longer matches the state inspected during planning.`,
   );
+};
 
-// Every step is recorded before the next one, so rollback knows exactly what this transaction left on disk.
-const commitTarget = (transaction: Transaction, step: CommitStep) =>
-  Effect.uninterruptible(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      if (step.prepared !== undefined) {
-        yield* ensureTargetParent(transaction, step.targetPath);
-      }
+const validatePlanPreconditions = async (transaction: Transaction): Promise<void> => {
+  const { files, preconditions, receipt } = transaction.preparedPlan;
+  const plannedTargets: Array<PlannedTarget> = [
+    ...files.map((file) => ({ targetPath: file.targetPath, expected: file.operation.expectedCurrent })),
+    ...preconditions.map((preparedPrecondition) => ({
+      targetPath: preparedPrecondition.targetPath,
+      expected: preparedPrecondition.precondition.expectedCurrent,
+    })),
+    { targetPath: receipt.targetPath, expected: receipt.operation.expectedCurrent },
+  ];
+  for (const plannedTarget of plannedTargets) {
+    await ensureMatchesPlannedState(transaction, plannedTarget);
+  }
+};
 
-      const snapshot = yield* findSnapshot(transaction, step.targetPath);
-      yield* ensureUnchanged(transaction, {
-        targetPath: step.targetPath,
-        expected: snapshot.original,
-        since: "it was captured",
-      });
-      const preparedBytes = step.prepared === undefined ? undefined : yield* step.prepared.bytes;
+const prepareFile = async (file: PreparedFile): Promise<void> => {
+  const { operation, preparedPath } = file;
+  const isRemoval = operation._tag === "remove";
+  if (isRemoval) {
+    return;
+  }
 
-      yield* Ref.update(transaction.mutations, (recorded) => [...recorded, { snapshot, current: snapshot.original }]);
-      yield* fileSystem.remove(step.targetPath, { force: true });
-      yield* setMutationState(transaction, { snapshot, current: { _tag: "missing" } });
-      if (step.prepared === undefined || preparedBytes === undefined) {
-        return;
-      }
+  await writeFile(preparedPath, operation.bytes);
+};
 
-      yield* fileSystem.rename(step.prepared.path, step.targetPath);
-      yield* setMutationState(transaction, { snapshot, current: { _tag: "bytes", value: preparedBytes } });
-    }),
-  );
+const prepareTargets = async (preparedPlan: PreparedPlan): Promise<void> => {
+  for (const file of preparedPlan.files) {
+    await prepareFile(file);
+  }
 
-const commitFiles = (transaction: Transaction) =>
-  Effect.forEach(
-    transaction.preparedPlan.files,
-    ({ operation, targetPath, preparedPath }) =>
-      commitTarget(transaction, {
-        targetPath,
-        prepared:
-          operation._tag === "remove" ? undefined : { path: preparedPath, bytes: Effect.succeed(operation.bytes) },
-      }),
-    { discard: true },
-  );
+  const { operation, preparedPath } = preparedPlan.receipt;
+  const isReceiptPublish = operation._tag === "receiptPublish";
+  if (isReceiptPublish) {
+    const encodedReceipt = encodeReceiptJson(operation.receipt);
+    await writeFile(preparedPath, encodedReceipt);
+  }
+};
 
-const commitReceipt = (transaction: Transaction) => {
-  const { operation, targetPath, preparedPath } = transaction.preparedPlan.receipt;
-  const readPreparedReceipt = Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFile(preparedPath));
+const ensureTargetParent = async (transaction: Transaction, targetPath: string): Promise<void> => {
+  for (const directory of parentDirectories(transaction.preparedPlan.root, targetPath)) {
+    const directoryStats = await statIfPresent(directory);
+    const isDirectory = directoryStats?.isDirectory() === true;
+    if (isDirectory) {
+      continue;
+    }
 
-  return commitTarget(transaction, {
-    targetPath,
-    prepared: operation._tag === "receiptPublish" ? { path: preparedPath, bytes: readPreparedReceipt } : undefined,
+    await mkdir(directory);
+    transaction.createdDirectories = [...transaction.createdDirectories, directory];
+  }
+};
+
+// The marker is hard-linked into place so only one concurrent transaction can publish it.
+// Returns "alreadyHeld" when another transaction already holds it.
+const publishRecoveryMarker = async (transaction: Transaction): Promise<RecoveryMarkerPublication> => {
+  const { pendingRecordPath, receipt, root } = transaction.preparedPlan;
+  const encodedRecoveryRecord = encodeRecoveryRecordJson(createPendingRecoveryRecord(transaction));
+
+  await writeFile(pendingRecordPath, encodedRecoveryRecord, { flag: "wx", mode: 0o600 });
+  await ensureTargetParent(transaction, receipt.recoveryPath);
+  await validateTarget(root, receipt.recoveryPath);
+  try {
+    await link(pendingRecordPath, receipt.recoveryPath);
+    return "published";
+  } catch (linkFailure) {
+    const isHeldByAnother = isAlreadyExists(linkFailure);
+    if (isHeldByAnother) {
+      return "alreadyHeld";
+    }
+
+    throw linkFailure;
+  }
+};
+
+// Returns true when this transaction published the marker. A failed attempt cleans up by what is on disk.
+const claimRecoveryMarker = async (transaction: Transaction): Promise<boolean> => {
+  try {
+    const publication = await publishRecoveryMarker(transaction);
+
+    return publication === "published";
+  } catch (markerFailure) {
+    const failureAfterAttempt = await createFailureAfterMarkerAttempt(transaction, markerFailure);
+    throw failureAfterAttempt;
+  }
+};
+
+const verifyRecoveryMarker = async (transaction: Transaction): Promise<void> => {
+  const { recoveryPath } = transaction.preparedPlan.receipt;
+  const encodedMarker = await readFile(recoveryPath, "utf8");
+  const recordOnDisk = decodeRecoveryRecordJson(encodedMarker);
+  const isRecordChanged =
+    encodeRecoveryRecordJson(recordOnDisk) !== encodeRecoveryRecordJson(createPendingRecoveryRecord(transaction));
+  if (isRecordChanged) {
+    throw new Error(`FileSystem.readFile: Recovery marker ${recoveryPath} changed during the transaction.`);
+  }
+};
+
+const isHoldingKnownTarget = async (current: FileSnapshot, known: KnownTarget): Promise<boolean> => {
+  const isCurrentMissing = current._tag === "missing";
+  if (isCurrentMissing) {
+    return known._tag === "missing";
+  }
+
+  const isKnownMissing = known._tag === "missing";
+  if (isKnownMissing) {
+    return false;
+  }
+
+  const isKnownInMemory = known._tag === "bytes";
+  if (isKnownInMemory) {
+    return bytesEqual(current.bytes, known.bytes);
+  }
+
+  const capturedBytes = await readFile(known.snapshotPath);
+
+  return bytesEqual(current.bytes, capturedBytes);
+};
+
+// Fails unless the target still holds the known state, so no step overwrites bytes someone else changed.
+const ensureUnchanged = async (transaction: Transaction, check: UnchangedCheck): Promise<void> => {
+  await validateTarget(transaction.preparedPlan.root, check.targetPath);
+  const currentSnapshot = await readFileSnapshot(check.targetPath);
+  const isStillKnown = await isHoldingKnownTarget(currentSnapshot, check.expected);
+  if (isStillKnown) {
+    return;
+  }
+
+  throw new Error(`FileSystem.stat: Transaction target ${check.targetPath} changed after ${check.since}.`);
+};
+
+const setKnownTarget = (transaction: Transaction, targetPath: string, knownTarget: KnownTarget): void => {
+  transaction.mutations = transaction.mutations.map((mutation) => {
+    const isOtherTarget = mutation.snapshot.targetPath !== targetPath;
+    if (isOtherTarget) {
+      return mutation;
+    }
+
+    return { ...mutation, current: knownTarget };
   });
 };
 
-const restoreTarget = (transaction: Transaction, mutation: Mutation) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const { targetPath, original } = mutation.snapshot;
-    yield* ensureUnchanged(transaction, {
-      targetPath,
-      expected: mutation.current,
-      since: "this transaction mutated it",
-    });
-    yield* fileSystem.remove(targetPath, { force: true });
-    if (original._tag === "file") {
-      yield* fileSystem.copyFile(original.snapshotPath, targetPath);
+const findCheckedSnapshot = async (transaction: Transaction, targetPath: string): Promise<TargetSnapshot> => {
+  const snapshot = findSnapshot(transaction, targetPath);
+  await ensureUnchanged(transaction, { targetPath, expected: snapshot.original, since: "it was captured" });
+
+  return snapshot;
+};
+
+// Records the captured original before the target is removed, so rollback can restore it.
+const recordAndRemove = async (transaction: Transaction, snapshot: TargetSnapshot): Promise<void> => {
+  transaction.mutations = [...transaction.mutations, { snapshot, current: snapshot.original }];
+  await rm(snapshot.targetPath, { force: true });
+  setKnownTarget(transaction, snapshot.targetPath, { _tag: "missing" });
+};
+
+// Every step is recorded before the next one, so rollback knows exactly what this transaction left on disk.
+const replaceTarget = async (transaction: Transaction, targetPath: string, prepared: PreparedCommit): Promise<void> => {
+  await ensureTargetParent(transaction, targetPath);
+  const snapshot = await findCheckedSnapshot(transaction, targetPath);
+  const preparedBytes = await prepared.readBytes();
+  await recordAndRemove(transaction, snapshot);
+  await rename(prepared.path, targetPath);
+  setKnownTarget(transaction, targetPath, { _tag: "bytes", bytes: preparedBytes });
+  transaction.signal.throwIfAborted();
+};
+
+const removeTarget = async (transaction: Transaction, targetPath: string): Promise<void> => {
+  const snapshot = await findCheckedSnapshot(transaction, targetPath);
+  await recordAndRemove(transaction, snapshot);
+  transaction.signal.throwIfAborted();
+};
+
+const commitFiles = async (transaction: Transaction): Promise<void> => {
+  for (const { operation, targetPath, preparedPath } of transaction.preparedPlan.files) {
+    const isRemoval = operation._tag === "remove";
+    if (isRemoval) {
+      await removeTarget(transaction, targetPath);
+    } else {
+      await replaceTarget(transaction, targetPath, { path: preparedPath, readBytes: async () => operation.bytes });
     }
+  }
+};
+
+const commitReceipt = async (transaction: Transaction): Promise<void> => {
+  const { operation, targetPath, preparedPath } = transaction.preparedPlan.receipt;
+  const isReceiptPublish = operation._tag === "receiptPublish";
+  if (isReceiptPublish) {
+    await replaceTarget(transaction, targetPath, { path: preparedPath, readBytes: () => readFile(preparedPath) });
+    return;
+  }
+
+  await removeTarget(transaction, targetPath);
+};
+
+const restoreTarget = async (transaction: Transaction, mutation: Mutation): Promise<void> => {
+  const { targetPath, original } = mutation.snapshot;
+  await ensureUnchanged(transaction, {
+    targetPath,
+    expected: mutation.current,
+    since: "this transaction mutated it",
   });
+  await rm(targetPath, { force: true });
+  const isFileOriginal = original._tag === "file";
+  if (isFileOriginal) {
+    await copyFile(original.snapshotPath, targetPath);
+  }
+};
 
-// Undoes recorded mutations newest first and returns the causes of any that could not be undone.
-const restoreTargets = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    const mutations = yield* Ref.get(transaction.mutations);
-    const exits = yield* Effect.forEach([...mutations].reverse(), (mutation) =>
-      Effect.exit(restoreTarget(transaction, mutation)),
-    );
+// Undoes recorded mutations newest first and returns the failures of any that could not be undone.
+const restoreTargets = (transaction: Transaction): Promise<Array<unknown>> => {
+  const newestFirst = [...transaction.mutations].reverse();
 
-    return failureCauses(exits);
-  });
+  return collectFailures(newestFirst.map((mutation) => () => restoreTarget(transaction, mutation)));
+};
 
-// @effect/platform lacks atomic nonrecursive directory removal.
-const removeEmptyDirectory = (directory: string) =>
-  Effect.tryPromise({
-    try: () => rmdir(directory),
-    catch: (cause) =>
-      new SystemError({
-        reason: "Unknown",
-        module: "FileSystem",
-        method: "rmdir",
-        pathOrDescriptor: directory,
-        description: "Could not remove an empty directory.",
-        cause,
-      }),
-  });
+// Node's rmdir refuses a folder that still holds anything, so a failure here means the folder stays.
+const removeEmptyDirectory = async (directory: string): Promise<void> => {
+  try {
+    await rmdir(directory);
+  } catch (cause) {
+    throw new Error("Could not remove an empty directory.", { cause });
+  }
+};
 
-const removeCreatedDirectories = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    const directories = yield* Ref.get(transaction.createdDirectories);
-    const deepestFirst = [...new Set(directories)].sort((left, right) => right.length - left.length);
-
-    yield* Effect.forEach(deepestFirst, removeEmptyDirectory, { discard: true });
-  });
+const removeCreatedDirectories = async (transaction: Transaction): Promise<void> => {
+  const deepestFirst = [...new Set(transaction.createdDirectories)].sort((left, right) => right.length - left.length);
+  for (const directory of deepestFirst) {
+    await removeEmptyDirectory(directory);
+  }
+};
 
 // Folders that held only removed files are left empty, so remove them too. One that still holds
 // anything, or cannot be removed, stays and does not fail the finished transaction.
-const removeEmptiedDirectories = (preparedPlan: PreparedPlan) =>
-  Effect.gen(function* () {
-    const removedPaths = [...preparedPlan.files, preparedPlan.receipt]
-      .filter((target) => target.operation._tag === "remove")
-      .map((target) => target.targetPath);
-    const parents = removedPaths.map((targetPath) => parentDirectories(preparedPlan.root, targetPath));
-    const deepestFirst = [...new Set(parents.flat())].sort((left, right) => right.length - left.length);
+const removeEmptiedDirectories = async (preparedPlan: PreparedPlan): Promise<void> => {
+  const removedPaths = [...preparedPlan.files, preparedPlan.receipt]
+    .filter((target) => target.operation._tag === "remove")
+    .map((target) => target.targetPath);
+  const parentLists = removedPaths.map((targetPath) => parentDirectories(preparedPlan.root, targetPath));
+  const deepestFirst = [...new Set(parentLists.flat())].sort((left, right) => right.length - left.length);
 
-    yield* Effect.forEach(deepestFirst, (directory) => Effect.ignore(removeEmptyDirectory(directory)), {
-      discard: true,
-    });
-  });
+  await collectFailures(deepestFirst.map((directory) => () => removeEmptyDirectory(directory)));
+};
 
 // Unlinks the marker only after proving it is still the one this transaction published.
-const releaseMarker = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    yield* verifyRecoveryMarker(transaction);
-    yield* fileSystem.remove(transaction.preparedPlan.receipt.recoveryPath);
-    yield* removeTransaction(transaction.preparedPlan);
-  });
+const releaseMarker = async (transaction: Transaction): Promise<void> => {
+  await verifyRecoveryMarker(transaction);
+  await rm(transaction.preparedPlan.receipt.recoveryPath);
+  await removeTransaction(transaction.preparedPlan);
+};
 
-const cleanupWithoutMarker = (transaction: Transaction) =>
-  Effect.zipRight(removeTransaction(transaction.preparedPlan), removeCreatedDirectories(transaction));
+const cleanupWithoutMarker = async (transaction: Transaction): Promise<void> => {
+  await removeTransaction(transaction.preparedPlan);
+  await removeCreatedDirectories(transaction);
+};
 
-const cleanupWithMarker = (transaction: Transaction) =>
-  Effect.zipRight(releaseMarker(transaction), removeCreatedDirectories(transaction));
+const cleanupWithMarker = async (transaction: Transaction): Promise<void> => {
+  await releaseMarker(transaction);
+  await removeCreatedDirectories(transaction);
+};
 
 // A failed or defective link may still have published the marker, so clean up by what is on disk.
-const cleanupAfterMarkerAttempt = (transaction: Transaction) =>
-  Effect.gen(function* () {
-    if (yield* pathExists(transaction.preparedPlan.receipt.recoveryPath)) {
-      return yield* cleanupWithMarker(transaction);
-    }
+const cleanupAfterMarkerAttempt = async (transaction: Transaction): Promise<void> => {
+  const isMarkerOnDisk = await isPathPresent(transaction.preparedPlan.receipt.recoveryPath);
+  if (isMarkerOnDisk) {
+    await cleanupWithMarker(transaction);
+    return;
+  }
 
-    return yield* cleanupWithoutMarker(transaction);
-  });
+  await cleanupWithoutMarker(transaction);
+};
 
-const failAfterMarkerAttempt = (transaction: Transaction, cause: Cause.Cause<unknown>) =>
-  Effect.gen(function* () {
-    const cleanupExit = yield* Effect.exit(cleanupAfterMarkerAttempt(transaction));
-    if (Exit.isSuccess(cleanupExit)) {
-      return yield* Effect.failCause(cause);
-    }
+const createFailureAfterMarkerAttempt = async (transaction: Transaction, markerFailure: unknown): Promise<unknown> => {
+  const cleanupFailures = await collectFailures([() => cleanupAfterMarkerAttempt(transaction)]);
+  const isCleanupClean = cleanupFailures.length === 0;
+  if (isCleanupClean) {
+    return markerFailure;
+  }
 
-    return yield* Effect.failCause(
-      combineCauses([cause, cleanupExit.cause, unfinishedChange(transaction.preparedPlan.transactionRoot)]),
-    );
-  });
+  return combineFailures([
+    markerFailure,
+    ...cleanupFailures,
+    createUnfinishedChangeError(transaction.preparedPlan.transactionRoot),
+  ]);
+};
+
+// Keeps the marker and snapshots as recovery evidence: verifies the marker, then drops the prepared copies.
+const keepRecoveryEvidence = async (transaction: Transaction): Promise<void> => {
+  await verifyRecoveryMarker(transaction);
+  await rm(transaction.preparedPlan.preparedDirectory, { recursive: true, force: true });
+};
 
 // After a commit failure every recorded target is restored. If any restore fails, the marker and
 // snapshots stay on disk as recovery evidence and the pending recovery location is reported.
-const recoverCommit = (transaction: Transaction, commitCause: Cause.Cause<unknown>) =>
-  Effect.gen(function* () {
-    const rollbackCauses = yield* restoreTargets(transaction);
-    if (rollbackCauses.length === 0) {
-      const cleanupExit = yield* Effect.exit(cleanupWithMarker(transaction));
-      return yield* Effect.failCause(combineCauses([commitCause, ...failureCauses([cleanupExit])]));
-    }
+const createFailureAfterCommit = async (transaction: Transaction, commitFailure: unknown): Promise<unknown> => {
+  const rollbackFailures = await restoreTargets(transaction);
+  const isRollbackClean = rollbackFailures.length === 0;
+  if (isRollbackClean) {
+    const cleanupFailures = await collectFailures([() => cleanupWithMarker(transaction)]);
 
-    const fileSystem = yield* FileSystem.FileSystem;
-    const retainExit = yield* Effect.exit(
-      Effect.zipRight(
-        verifyRecoveryMarker(transaction),
-        fileSystem.remove(transaction.preparedPlan.preparedDirectory, { recursive: true, force: true }),
-      ),
-    );
+    return combineFailures([commitFailure, ...cleanupFailures]);
+  }
 
-    return yield* Effect.failCause(
-      combineCauses([
-        commitCause,
-        combineCauses(rollbackCauses),
-        unfinishedChange(transaction.preparedPlan.receipt.recoveryPath),
-        ...failureCauses([retainExit]),
-      ]),
-    );
-  });
+  const retainFailures = await collectFailures([() => keepRecoveryEvidence(transaction)]);
+
+  return combineFailures([
+    commitFailure,
+    combineFailures(rollbackFailures),
+    createUnfinishedChangeError(transaction.preparedPlan.receipt.recoveryPath),
+    ...retainFailures,
+  ]);
+};
 
 // Applies one checked plan as a transaction: capture every target, prepare, commit files, then the receipt.
 // A receipt is deletion authority, so it is committed only after every file change has succeeded.
-export const applyPlan = (plan: Plan) =>
-  Effect.uninterruptibleMask((restore) =>
-    Effect.gen(function* () {
-      const root = yield* restore(checkPlanRoot(plan.root));
-      const preparedPlan = yield* preparePlan(plan, root);
-      yield* restore(preflightTargets(preparedPlan));
-      yield* restore(ensureRecoveryAbsent(preparedPlan.receipt.recoveryPath));
-      const snapshots = yield* captureTargets(preparedPlan);
-      const transaction: Transaction = {
-        preparedPlan,
-        snapshots,
-        mutations: yield* Ref.make<ReadonlyArray<Mutation>>([]),
-        createdDirectories: yield* Ref.make<ReadonlyArray<string>>([]),
-      };
+export const applyPlan = async (plan: Plan, signal: AbortSignal): Promise<void> => {
+  const root = await validatePlanRoot(plan.root);
+  const preparedPlan = preparePlan(plan, root);
+  await preflightTargets(preparedPlan);
+  await ensureRecoveryAbsent(preparedPlan.receipt.recoveryPath);
+  const snapshots = await captureTargets(preparedPlan);
+  const transaction: Transaction = { preparedPlan, snapshots, mutations: [], createdDirectories: [], signal };
 
-      // Stale planning evidence or a preparation failure leaves every destination untouched.
-      const preparationExit = yield* Effect.exit(
-        restore(Effect.zipRight(validatePlanPreconditions(transaction), prepareTargets(preparedPlan))),
-      );
-      if (Exit.isFailure(preparationExit)) {
-        return yield* failAfter(preparationExit.cause, removeTransaction(preparedPlan));
-      }
+  // Stale planning evidence or a preparation failure leaves every destination untouched.
+  try {
+    await validatePlanPreconditions(transaction);
+    await prepareTargets(preparedPlan);
+  } catch (preparationFailure) {
+    const failureAfterCleanUp = await createFailureAfterCleanUp(preparationFailure, () =>
+      removeTransaction(preparedPlan),
+    );
+    throw failureAfterCleanUp;
+  }
 
-      const markerExit = yield* Effect.exit(publishRecoveryMarker(transaction));
-      if (Exit.isFailure(markerExit)) {
-        return yield* failAfterMarkerAttempt(transaction, markerExit.cause);
-      }
+  const isMarkerPublished = await claimRecoveryMarker(transaction);
+  const isMarkerHeldByAnother = !isMarkerPublished;
+  if (isMarkerHeldByAnother) {
+    const unfinishedChangeError = createUnfinishedChangeError(preparedPlan.receipt.recoveryPath);
+    const failureAfterCleanUp = await createFailureAfterCleanUp(unfinishedChangeError, () =>
+      cleanupWithoutMarker(transaction),
+    );
+    throw failureAfterCleanUp;
+  }
 
-      if (!markerExit.value) {
-        return yield* failAfter(unfinishedChange(preparedPlan.receipt.recoveryPath), cleanupWithoutMarker(transaction));
-      }
+  try {
+    transaction.signal.throwIfAborted();
+    await commitFiles(transaction);
+    await commitReceipt(transaction);
+  } catch (commitFailure) {
+    const failureAfterRecovery = await createFailureAfterCommit(transaction, commitFailure);
+    throw failureAfterRecovery;
+  }
 
-      const commitExit = yield* Effect.exit(
-        restore(Effect.zipRight(commitFiles(transaction), commitReceipt(transaction))),
-      );
-      if (Exit.isFailure(commitExit)) {
-        return yield* recoverCommit(transaction, commitExit.cause);
-      }
-
-      yield* releaseMarker(transaction);
-      yield* removeEmptiedDirectories(preparedPlan);
-    }),
-  );
+  await releaseMarker(transaction);
+  await removeEmptiedDirectories(preparedPlan);
+};
