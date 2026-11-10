@@ -67,10 +67,13 @@ const preconditionSchema = z.strictObject({
 
 export type Precondition = z.infer<typeof preconditionSchema>;
 
+// Typed as plain Uint8Array: z.instanceof alone infers Uint8Array<ArrayBuffer>, which rejects other buffers.
+const fileBytesSchema: z.ZodType<Uint8Array> = z.instanceof(Uint8Array);
+
 export const writeOperationSchema = z.strictObject({
   _tag: z.literal("write"),
   file: plannedFileSchema.describe("Complete next-owned file and its exact ownership metadata."),
-  bytes: z.instanceof(Uint8Array).describe("Exact desired file bytes prepared by the transactional writer."),
+  bytes: fileBytesSchema.describe("Exact desired file bytes prepared by the transactional writer."),
 });
 
 export type WriteOperation = z.infer<typeof writeOperationSchema>;
@@ -78,7 +81,7 @@ export type WriteOperation = z.infer<typeof writeOperationSchema>;
 const restoreFieldsSchema = z.strictObject({
   _tag: z.literal("restore"),
   file: plannedFileSchema.describe("Previously receipted file whose final unowned bytes are restored."),
-  bytes: z.instanceof(Uint8Array).describe("Exact final bytes computed by the file format handler."),
+  bytes: fileBytesSchema.describe("Exact final bytes computed by the file format handler."),
 });
 
 type RestoreFields = z.infer<typeof restoreFieldsSchema>;

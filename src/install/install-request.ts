@@ -70,6 +70,8 @@ export const preparedPackageSchema = z
   })
   .describe("Verified prepared package consumed by installation.");
 
+export type PreparedPackage = z.infer<typeof preparedPackageSchema>;
+
 export const installRequestSchema = installationLocationSchema
   .extend({
     preparedPackage: preparedPackageSchema,

@@ -288,7 +288,7 @@ const uninstallRequestSchema = z
 
 type UninstallPlanRequest = z.infer<typeof uninstallRequestSchema>;
 
-const preservedContainers = (previous: JsonPointerOwnership, desired: JsonPointerOwnership): ReadonlyArray<string> => {
+const preservedContainers = (previous: JsonPointerOwnership, desired: JsonPointerOwnership): Array<string> => {
   const desiredPointers = ownedJsonPointers(desired);
 
   return [
