@@ -3,24 +3,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import pixelmatch from "pixelmatch";
-/**
- * Render a build with Playwright, screenshot it, and pixel-diff against a target PNG.
- * Exit code: 0 if pass (ratio < max-ratio), 1 if fail, 2 on usage/IO error.
- */
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
-import { argBool, argString, parseArgs } from "#src/argv.js";
+import { parseArgumentList, readBooleanArgument, readStringArgument } from "#src/argv.js";
 import type { DiffReport, HotspotCell } from "#src/types.js";
 
-function fail(message: string): never {
-  console.error(`pixel-diff: ${message}`);
-  process.exit(2);
-}
+const PERCENT_SCALE = 100;
 
-const args = parseArgs(process.argv.slice(2));
-const targetArg = argString(args, "target");
-const inputArg = argString(args, "input");
-if (!targetArg || !inputArg) {
+const fail: (message: string) => never = (message: string) => {
+  console.error(`pixel-diff: ${message}`);
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
+};
+
+const firstArgumentIndex = 2;
+
+const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+const targetArg = readStringArgument(argumentList, "target");
+
+const actualArg = readStringArgument(argumentList, "input");
+
+const isTargetOrActualMissing = !targetArg || !actualArg;
+if (isTargetOrActualMissing) {
   fail(
     "usage: tsx src/bin/pixel-diff.ts --target <design.png> --input <build.html|url> " +
       "[--out diff.png] [--threshold 0.1] [--max-ratio 0.001] [--width W] [--height H] [--no-freeze]",
@@ -28,17 +33,32 @@ if (!targetArg || !inputArg) {
 }
 
 const targetPath = path.resolve(targetArg);
-if (!fs.existsSync(targetPath)) fail(`target not found: ${targetPath}`);
+
+const isTargetFileMissing = !fs.existsSync(targetPath);
+if (isTargetFileMissing) fail(`target not found: ${targetPath}`);
 
 const target = PNG.sync.read(fs.readFileSync(targetPath));
-const width = args.width ? Number(args.width) : target.width;
-const height = args.height ? Number(args.height) : target.height;
-const colorThreshold = args.threshold ? Number(args.threshold) : 0.1;
-const maxRatio = args["max-ratio"] ? Number(args["max-ratio"]) : 0.001;
-const outPath = path.resolve(argString(args, "out") || "diff.png");
-const freeze = !argBool(args, "no-freeze");
 
-const url = /^(https?|file):\/\//.test(inputArg) ? inputArg : pathToFileURL(path.resolve(inputArg)).href;
+const hasWidthOption = argumentList.width;
+const width = hasWidthOption ? Number(argumentList.width) : target.width;
+
+const hasHeightOption = argumentList.height;
+const height = hasHeightOption ? Number(argumentList.height) : target.height;
+
+const hasThresholdOption = argumentList.threshold;
+const defaultColorThreshold = 0.1;
+
+const colorThreshold = hasThresholdOption ? Number(argumentList.threshold) : defaultColorThreshold;
+
+const hasMaxRatioOption = argumentList["max-ratio"];
+const defaultMaxRatio = 0.001;
+
+const maxRatio = hasMaxRatioOption ? Number(argumentList["max-ratio"]) : defaultMaxRatio;
+const outPath = path.resolve(readStringArgument(argumentList, "out") || "diff.png");
+const isFreezeRequested = !readBooleanArgument(argumentList, "no-freeze");
+
+const isActualUrl = /^(https?|file):\/\//.test(actualArg);
+const url = isActualUrl ? actualArg : pathToFileURL(path.resolve(actualArg)).href;
 
 let actual: PNG;
 const browser = await chromium.launch();
@@ -46,20 +66,24 @@ try {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: "networkidle" });
   await page.evaluate(async () => {
-    if (document.fonts) await document.fonts.ready;
+    const hasFontsApi = document.fonts;
+    if (hasFontsApi) await document.fonts.ready;
   });
-  if (freeze) {
+
+  if (isFreezeRequested) {
     await page.addStyleTag({
       content: "*,*::before,*::after{animation:none!important;transition:none!important;}",
     });
   }
+
   const shot = await page.screenshot({ clip: { x: 0, y: 0, width, height } });
   actual = PNG.sync.read(shot);
 } finally {
   await browser.close();
 }
 
-if (actual.width !== target.width || actual.height !== target.height) {
+const isSizeDifferent = actual.width !== target.width || actual.height !== target.height;
+if (isSizeDifferent) {
   fail(
     `screenshot ${actual.width}x${actual.height} != target ${target.width}x${target.height}; ` +
       `set --width/--height to the target's pixel size`,
@@ -67,7 +91,9 @@ if (actual.width !== target.width || actual.height !== target.height) {
 }
 
 const diff = new PNG({ width, height });
-const diffColor: [number, number, number] = [255, 0, 0];
+const redDiffChannelLevel = 255;
+
+const diffColor: [number, number, number] = [redDiffChannelLevel, 0, 0];
 const diffPixels = pixelmatch(target.data, actual.data, diff.data, width, height, {
   threshold: colorThreshold,
   includeAA: false,
@@ -76,21 +102,33 @@ const diffPixels = pixelmatch(target.data, actual.data, diff.data, width, height
 fs.writeFileSync(outPath, PNG.sync.write(diff));
 
 const cols = 8;
-const rows = Math.max(1, Math.min(16, Math.round((cols * height) / width)));
+const maximumGridRows = 16;
+
+const gridHeightCells = Math.max(1, Math.min(maximumGridRows, Math.round((cols * height) / width)));
 const cellW = width / cols;
-const cellH = height / rows;
-const cellCounts = new Array<number>(rows * cols).fill(0);
+const cellH = height / gridHeightCells;
+const cellCounts = new Array<number>(gridHeightCells * cols).fill(0);
 for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    const p = (y * width + x) * 4;
-    const isDiff =
-      diff.data[p] === diffColor[0] && diff.data[p + 1] === diffColor[1] && diff.data[p + 2] === diffColor[2];
-    if (!isDiff) continue;
-    const c = Math.min(cols - 1, Math.floor(x / cellW));
-    const r = Math.min(rows - 1, Math.floor(y / cellH));
+  for (let column = 0; column < width; column++) {
+    const bytesPerPixel = 4;
+
+    const p = (y * width + column) * bytesPerPixel;
+
+    const blueChannelOffset = 2;
+
+    const isNotDiff =
+      diff.data[p] !== diffColor[0] ||
+      diff.data[p + 1] !== diffColor[1] ||
+      diff.data[p + blueChannelOffset] !== diffColor[2];
+    if (isNotDiff) continue;
+
+    const c = Math.min(cols - 1, Math.floor(column / cellW));
+    const r = Math.min(gridHeightCells - 1, Math.floor(y / cellH));
     cellCounts[r * cols + c]++;
   }
 }
+const topDiffRegionCount = 5;
+
 const hotspots: HotspotCell[] = cellCounts
   .map((count, i) => {
     const r = Math.floor(i / cols);
@@ -99,25 +137,39 @@ const hotspots: HotspotCell[] = cellCounts
     const y0 = Math.round(r * cellH);
     const w = Math.round((c + 1) * cellW) - x0;
     const h = Math.round((r + 1) * cellH) - y0;
-    return { count, pct: +((count / (w * h)) * 100).toFixed(2), bbox: { x: x0, y: y0, w, h } };
+    const pixelPercentDecimals = 2;
+
+    return {
+      count,
+      pct: +((count / (w * h)) * PERCENT_SCALE).toFixed(pixelPercentDecimals),
+      bbox: { x: x0, y: y0, w, h },
+    };
   })
   .filter((cell) => cell.count > 0)
   .sort((a, b) => b.count - a.count)
-  .slice(0, 5);
+  .slice(0, topDiffRegionCount);
 
 const ratio = diffPixels / (width * height);
+const ratioPercentDecimals = 3;
+
+const ratioDecimals = 5;
+
 const report: DiffReport = {
   target: targetPath,
   input: url,
   dimensions: { width, height },
   diffPixels,
-  ratio: +ratio.toFixed(5),
-  ratioPct: +(ratio * 100).toFixed(3),
+  ratio: +ratio.toFixed(ratioDecimals),
+  ratioPct: +(ratio * PERCENT_SCALE).toFixed(ratioPercentDecimals),
   maxRatio,
   pass: ratio < maxRatio,
   threshold: colorThreshold,
   diffImage: outPath,
   hotspots,
 };
-console.log(JSON.stringify(report, null, 2));
-process.exit(report.pass ? 0 : 1);
+const indentSpaceCount = 2;
+
+console.log(JSON.stringify(report, null, indentSpaceCount));
+
+const isReportPassing = report.pass;
+process.exit(isReportPassing ? 0 : 1);

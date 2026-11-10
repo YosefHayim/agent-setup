@@ -1,59 +1,62 @@
 #!/usr/bin/env node
-/**
- * Derive platform cuts from the 9:16 master with a blurred-fill reframe (the
- * scaled video centered over a blurred, cover-cropped copy of itself) — so a
- * vertical master becomes a clean 16:9 / 1:1 / 4:5 without hard letterbox bars.
- *
- * Usage:
- *   node reframe.mjs --in master-9x16.mp4 --aspect 16:9 --out out.mp4
- *   node reframe.mjs --in master-9x16.mp4 --all --outdir build   # 16:9 + 1:1 + 4:5
- */
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-/** Output pixel sizes per target aspect (1080-based, even dimensions for h264). */
-const SIZES = {
-  "16:9": [1920, 1080],
-  "1:1": [1080, 1080],
-  "4:5": [1080, 1350],
-  "9:16": [1080, 1920],
-};
+const FLAG_PREFIX = "--";
 
-/** filter_complex for a blurred-fill reframe to WxH. */
-export function reframeFilter(w, h) {
+const FFMPEG_MAP_FLAG = "-map";
+
+const STDIO_INHERIT = "inherit";
+
+const FULL_HD_LONG_EDGE_PIXELS = 1920;
+
+const FULL_HD_SHORT_EDGE_PIXELS = 1080;
+
+const SIZES = {
+  "16:9": [FULL_HD_LONG_EDGE_PIXELS, FULL_HD_SHORT_EDGE_PIXELS],
+  "1:1": [FULL_HD_SHORT_EDGE_PIXELS, FULL_HD_SHORT_EDGE_PIXELS],
+  "4:5": [FULL_HD_SHORT_EDGE_PIXELS, 1350],
+  "9:16": [FULL_HD_SHORT_EDGE_PIXELS, FULL_HD_LONG_EDGE_PIXELS],
+};
+const VIDEO_EXPORT_PAD = "[v]";
+
+const createReframeFilter = (width, height) => {
+  const blurSigma = 24;
   return (
     `[0:v]split=2[bg][fg];` +
-    `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},gblur=sigma=24[bgb];` +
-    `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs];` +
-    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1[v]`
+    `[bg]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=${blurSigma}[bgb];` +
+    `[fg]scale=${width}:${height}:force_original_aspect_ratio=decrease[fgs];` +
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1${VIDEO_EXPORT_PAD}`
   );
-}
+};
 
-// --- IO layer ---
+const runFfmpeg = (argumentList) => {
+  const ffmpegProcess = spawnSync("ffmpeg", argumentList, { stdio: ["ignore", STDIO_INHERIT, STDIO_INHERIT] });
+  const isFfmpegFailed = ffmpegProcess.status !== 0;
+  if (isFfmpegFailed) throw new Error(`ffmpeg exited ${ffmpegProcess.status}`);
+};
 
-function run(args) {
-  const res = spawnSync("ffmpeg", args, { stdio: ["ignore", "inherit", "inherit"] });
-  if (res.status !== 0) throw new Error(`ffmpeg exited ${res.status}`);
-}
-
-function reframeTo(input, aspect, out) {
+const writeAspectVideo = (masterPath, aspect, exportPath) => {
   const size = SIZES[aspect];
-  if (!size) throw new Error(`Unknown aspect '${aspect}' (use ${Object.keys(SIZES).join(", ")})`);
-  const [w, h] = size;
-  run([
+  const isAspectUnknown = size == null;
+  if (isAspectUnknown) throw new Error(`Unknown aspect '${aspect}' (use ${Object.keys(SIZES).join(", ")})`);
+
+  const [width, height] = size;
+  const reframeFilter = createReframeFilter(width, height);
+  runFfmpeg([
     "-hide_banner",
     "-loglevel",
     "error",
     "-y",
     "-i",
-    input,
+    masterPath,
     "-filter_complex",
-    reframeFilter(w, h),
-    "-map",
-    "[v]",
-    "-map",
+    reframeFilter,
+    FFMPEG_MAP_FLAG,
+    VIDEO_EXPORT_PAD,
+    FFMPEG_MAP_FLAG,
     "0:a?",
     "-c:v",
     "libx264",
@@ -69,48 +72,66 @@ function reframeTo(input, aspect, out) {
     "192k",
     "-movflags",
     "+faststart",
-    out,
+    exportPath,
   ]);
-  process.stdout.write(`Wrote ${out} (${aspect} ${w}x${h})\n`);
-}
+  process.stdout.write(`Wrote ${exportPath} (${aspect} ${width}x${height})\n`);
+};
 
-function parseFlags(argv) {
-  const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (!a.startsWith("--")) continue;
-    // e.g. "--ratio" → "ratio"
-    const key = a.replace(/^--/, "");
-    const next = argv[i + 1];
-    if (!next || next.startsWith("--")) out[key] = true;
-    else {
-      out[key] = next;
-      i++;
+const readFlags = (argumentList) => {
+  const flags = {};
+  for (let index = 0; index < argumentList.length; index++) {
+    const argument = argumentList[index];
+    const isNotFlag = !argument.startsWith(FLAG_PREFIX);
+    if (isNotFlag) continue;
+
+    const flagName = argument.replace(/^--/, "");
+    const nextArgument = argumentList[index + 1];
+    const isFlagArgumentMissing = !nextArgument || nextArgument.startsWith(FLAG_PREFIX);
+    if (isFlagArgumentMissing) {
+      flags[flagName] = true;
+      continue;
     }
+
+    flags[flagName] = nextArgument;
+    index++;
   }
-  return out;
-}
+  return flags;
+};
 
-function main() {
-  const f = parseFlags(process.argv.slice(2));
-  if (!f.in || !existsSync(f.in)) throw new Error("Pass an existing --in <master.mp4>");
-  if (f.all) {
-    const outdir = f.outdir || ".";
-    mkdirSync(outdir, { recursive: true });
-    for (const aspect of ["16:9", "1:1", "4:5"]) {
-      reframeTo(f.in, aspect, join(outdir, `variant-${aspect.replace(":", "x")}.mp4`));
-    }
+const writeAllAspectVideos = (flags) => {
+  const exportFolder = flags.outdir || ".";
+  mkdirSync(exportFolder, { recursive: true });
+  for (const aspect of ["16:9", "1:1", "4:5"]) {
+    const variantPath = join(exportFolder, `variant-${aspect.replace(":", "x")}.mp4`);
+    writeAspectVideo(flags.in, aspect, variantPath);
+  }
+};
+
+const runReframeCli = () => {
+  const firstArgumentIndex = 2;
+
+  const flags = readFlags(process.argv.slice(firstArgumentIndex));
+  const isMasterMissing = !flags.in || !existsSync(flags.in);
+  if (isMasterMissing) throw new Error("Pass an existing --in <master.mp4>");
+
+  const isAllRequested = Boolean(flags.all);
+  if (isAllRequested) {
+    writeAllAspectVideos(flags);
     return;
   }
-  if (!f.aspect || !f.out) throw new Error("Pass --aspect <16:9|1:1|4:5> and --out <file>, or --all --outdir <dir>");
-  reframeTo(f.in, f.aspect, f.out);
-}
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+  const isTargetMissing = !flags.aspect || !flags.out;
+  if (isTargetMissing) throw new Error("Pass --aspect <16:9|1:1|4:5> and --out <file>, or --all --outdir <dir>");
+
+  writeAspectVideo(flags.in, flags.aspect, flags.out);
+};
+
+const isRunAsScript = import.meta.url === `file://${process.argv[1]}`;
+if (isRunAsScript) {
   try {
-    main();
-  } catch (err) {
-    process.stderr.write(`${err.message}\n`);
+    runReframeCli();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
     process.exit(1);
   }
 }

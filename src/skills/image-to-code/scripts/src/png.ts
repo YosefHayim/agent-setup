@@ -1,35 +1,63 @@
 import type { PNG } from "pngjs";
 
-export function toHex(r: number, g: number, b: number): string {
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-}
+const HEX_RADIX = 16;
 
-export function clamp(v: number, max: number): number {
-  return Math.max(0, Math.min(max, v));
-}
+export const readHexByte = (r: number, g: number, b: number): string => {
+  const hexDigitsPerByte = 2;
 
-export function colorAt(png: PNG, x: number, y: number) {
-  const cx = clamp(x, png.width - 1);
-  const cy = clamp(y, png.height - 1);
-  const idx = (cy * png.width + cx) * 4;
+  return `#${[r, g, b].map((position) => position.toString(HEX_RADIX).padStart(hexDigitsPerByte, "0")).join("")}`;
+};
+
+export const clamp = (position: number, maxPosition: number): number => {
+  return Math.max(0, Math.min(maxPosition, position));
+};
+
+export const readColorAt = (png: PNG, column: number, y: number) => {
+  const clampedColumn = clamp(column, png.width - 1);
+  const clampedY = clamp(y, png.height - 1);
+  const bytesPerPixel = 4;
+
+  const pixelIndex = (clampedY * png.width + clampedColumn) * bytesPerPixel;
+  const alphaChannelOffset = 3;
+
+  const blueOffsetInRgba = 2;
+
+  const blueChannelOffset = 2;
+
   return {
-    x: cx,
-    y: cy,
-    hex: toHex(png.data[idx], png.data[idx + 1], png.data[idx + 2]),
-    rgba: [png.data[idx], png.data[idx + 1], png.data[idx + 2], png.data[idx + 3]] as const,
+    x: clampedColumn,
+    y: clampedY,
+    hex: readHexByte(png.data[pixelIndex], png.data[pixelIndex + 1], png.data[pixelIndex + blueChannelOffset]),
+    rgba: [
+      png.data[pixelIndex],
+      png.data[pixelIndex + 1],
+      png.data[pixelIndex + blueOffsetInRgba],
+      png.data[pixelIndex + alphaChannelOffset],
+    ] as const,
   };
-}
+};
 
-export function inPoly(px: number, py: number, poly: [number, number][]): boolean {
+export const isPointInPolygon = (px: number, py: number, poly: [number, number][]): boolean => {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const [xi, yi] = poly[i];
+
     const [xj, yj] = poly[j];
-    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+
+    const isEdgeCrossingRay = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (isEdgeCrossingRay) inside = !inside;
   }
   return inside;
-}
+};
 
-export function hexToRgb(h: string): [number, number, number] {
-  return [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)) as [number, number, number];
-}
+export const readRgbFromHex = (hex: string): [number, number, number] => {
+  const hexByteLength = 2;
+
+  const thirdHexByteStart = 5;
+
+  const secondHexByteStart = 3;
+
+  return [1, secondHexByteStart, thirdHexByteStart].map((k) =>
+    parseInt(hex.slice(k, k + hexByteLength), HEX_RADIX),
+  ) as [number, number, number];
+};

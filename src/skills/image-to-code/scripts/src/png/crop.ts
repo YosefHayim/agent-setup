@@ -1,36 +1,60 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-/** Crop a bbox from a PNG and nearest-neighbor upscale. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "#src/argv.js";
+import { parseArgumentList, readStringArgument } from "#src/argv.js";
 
-const args = parseArgs(process.argv.slice(2));
-const x = Number(argString(args, "x"));
-const y = Number(argString(args, "y"));
-const w = Number(argString(args, "w"));
-const h = Number(argString(args, "h"));
-const s = Number(argString(args, "scale") || 3);
-const out = argString(args, "out");
-const input = argString(args, "input") || "target.png";
+const BYTES_PER_PIXEL = 4;
+const GREEN_OFFSET = 1;
+const BLUE_OFFSET = 2;
+const ALPHA_OFFSET = 3;
+const OPAQUE_ALPHA_LEVEL = 255;
 
-if (!Number.isFinite(x) || !out) {
+const firstArgumentIndex = 2;
+
+const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+
+// A missing flag becomes NaN, as it did before readStringArgument returned null.
+const cropLeftText = readStringArgument(argumentList, "x");
+const cropLeft = Number(cropLeftText ?? Number.NaN);
+const cropTopText = readStringArgument(argumentList, "y");
+const cropTop = Number(cropTopText ?? Number.NaN);
+const cropWidthText = readStringArgument(argumentList, "w");
+const cropWidth = Number(cropWidthText ?? Number.NaN);
+const cropHeightText = readStringArgument(argumentList, "h");
+const cropHeight = Number(cropHeightText ?? Number.NaN);
+
+const defaultScaleFactor = 3;
+const scaleFactorText = readStringArgument(argumentList, "scale");
+const scaleFactor = Number(scaleFactorText || defaultScaleFactor);
+
+const outPath = readStringArgument(argumentList, "out");
+const inputPath = readStringArgument(argumentList, "input") || "target.png";
+
+const isCropArgumentMissing = !Number.isFinite(cropLeft) || !outPath;
+if (isCropArgumentMissing) {
   console.error("usage: tsx src/png/crop.ts --x N --y N --w N --h N [--scale 3] --out out.png [--input target.png]");
-  process.exit(2);
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
 }
 
-const src = PNG.sync.read(fs.readFileSync(input));
-const outPng = new PNG({ width: w * s, height: h * s });
-for (let oy = 0; oy < h * s; oy++) {
-  for (let ox = 0; ox < w * s; ox++) {
-    const sx = x + Math.floor(ox / s);
-    const sy = y + Math.floor(oy / s);
-    const si = (sy * src.width + sx) * 4;
-    const oi = (oy * outPng.width + ox) * 4;
-    outPng.data[oi] = src.data[si];
-    outPng.data[oi + 1] = src.data[si + 1];
-    outPng.data[oi + 2] = src.data[si + 2];
-    outPng.data[oi + 3] = 255;
+const sourcePng = PNG.sync.read(fs.readFileSync(inputPath));
+const scaledCropPng = new PNG({ width: cropWidth * scaleFactor, height: cropHeight * scaleFactor });
+
+for (let outRow = 0; outRow < cropHeight * scaleFactor; outRow++) {
+  for (let outColumn = 0; outColumn < cropWidth * scaleFactor; outColumn++) {
+    const originalColumn = cropLeft + Math.floor(outColumn / scaleFactor);
+    const originalRow = cropTop + Math.floor(outRow / scaleFactor);
+
+    const originalByteIndex = (originalRow * sourcePng.width + originalColumn) * BYTES_PER_PIXEL;
+    const outByteIndex = (outRow * scaledCropPng.width + outColumn) * BYTES_PER_PIXEL;
+
+    scaledCropPng.data[outByteIndex] = sourcePng.data[originalByteIndex];
+    scaledCropPng.data[outByteIndex + GREEN_OFFSET] = sourcePng.data[originalByteIndex + GREEN_OFFSET];
+    scaledCropPng.data[outByteIndex + BLUE_OFFSET] = sourcePng.data[originalByteIndex + BLUE_OFFSET];
+    scaledCropPng.data[outByteIndex + ALPHA_OFFSET] = OPAQUE_ALPHA_LEVEL;
   }
 }
-fs.writeFileSync(out, PNG.sync.write(outPng));
-console.log(`wrote ${out} (${w * s}x${h * s})`);
+
+fs.writeFileSync(outPath, PNG.sync.write(scaledCropPng));
+console.log(`wrote ${outPath} (${cropWidth * scaleFactor}x${cropHeight * scaleFactor})`);

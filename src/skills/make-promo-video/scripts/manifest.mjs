@@ -1,159 +1,206 @@
 #!/usr/bin/env node
-/**
- * Generation manifest — the resumable source of truth for one trailer build.
- *
- * Pure transformers up top, an IO + CLI shell at the bottom (see the divider).
- * Zero dependencies; Node >= 20. The agent patches this file as jobs land, so a
- * dead render resumes by re-running a phase and only regenerating pending scenes.
- *
- * Usage:
- *   node manifest.mjs init  --dir <dir> --project <name> [--seconds 24] [--mode hybrid|cinematic]
- *   node manifest.mjs show  --dir <dir>
- *   node manifest.mjs pending-stills --dir <dir>
- *   node manifest.mjs pending-clips  --dir <dir>
- *   node manifest.mjs add-scene --dir <dir> --json '<scene fields>'
- *   node manifest.mjs set   --dir <dir> --id s01 --key stillStatus --value done
- */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Build an empty manifest for a new trailer version. */
-export function emptyManifest(meta = {}) {
+const STATUS_DONE = "done";
+
+const STATUS_PENDING = "pending";
+
+const SCENE_ORIGIN_AI = "ai";
+
+const createEmptyManifest = (manifestFields = {}) => {
+  const defaultTargetSeconds = 24;
+
+  const defaultVideoHeight = 1920;
+
+  const defaultVideoWidth = 1080;
+
+  const defaultFramesPerSecond = 30;
+
   return {
     version: 1,
-    project: meta.project || "",
-    createdAt: meta.createdAt || new Date().toISOString(),
+    project: manifestFields.project || "",
+    createdAt: manifestFields.createdAt || new Date().toISOString(),
     format: {
       aspect: "9:16",
-      fps: 30,
-      width: 1080,
-      height: 1920,
-      targetSeconds: meta.targetSeconds || 24,
+      fps: defaultFramesPerSecond,
+      width: defaultVideoWidth,
+      height: defaultVideoHeight,
+      targetSeconds: manifestFields.targetSeconds || defaultTargetSeconds,
     },
-    creativeMode: meta.creativeMode || "hybrid",
+    creativeMode: manifestFields.creativeMode || "hybrid",
     conversation: null,
     style: { bibleImage: null, refs: [] },
     audio: { voPath: null, musicPath: null, voice: null, voProvider: null, musicProvider: null },
     scenes: [],
     variants: [],
   };
-}
+};
 
-/** A blank scene at position `order` (1-based), with every field the pipeline reads. */
-export function sceneTemplate(order) {
+const createSceneTemplate = (order) => {
+  const defaultSceneSeconds = 3;
+
+  const sceneNumberDigits = 2;
+
   return {
-    id: `s${String(order).padStart(2, "0")}`,
+    id: `s${String(order).padStart(sceneNumberDigits, "0")}`,
     order,
     beat: "",
-    durationSec: 3,
+    durationSec: defaultSceneSeconds,
     shot: "",
     voLine: "",
     caption: "",
     musicCue: "",
-    source: "ai",
+    source: SCENE_ORIGIN_AI,
     screenshot: null,
     motion: "kenburns",
     motionEngine: null,
     stillPath: null,
-    stillStatus: "pending",
+    stillStatus: STATUS_PENDING,
     clipPath: null,
     clipJobId: null,
-    clipStatus: "pending",
+    clipStatus: STATUS_PENDING,
   };
-}
+};
 
-/** Scenes whose AI keyframe still needs generating. */
-export function pendingStills(m) {
-  return m.scenes.filter((s) => s.source === "ai" && s.stillStatus !== "done");
-}
+const listPendingStills = (manifest) => {
+  return manifest.scenes.filter((scene) => scene.source === SCENE_ORIGIN_AI && scene.stillStatus !== STATUS_DONE);
+};
 
-/** Scenes whose motion clip still needs rendering. */
-export function pendingClips(m) {
-  return m.scenes.filter((s) => s.motion === "clip" && s.clipStatus !== "done");
-}
+const listPendingClips = (manifest) => {
+  return manifest.scenes.filter((scene) => scene.motion === "clip" && scene.clipStatus !== STATUS_DONE);
+};
 
-/** Return a copy of `m` with scene `id` shallow-merged with `patch`. */
-export function patchScene(m, id, patch) {
-  return { ...m, scenes: m.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) };
-}
+const applyScenePatch = (manifest, sceneId, scenePatch) => {
+  const scenes = manifest.scenes.map((scene) => {
+    const isPatchedScene = scene.id === sceneId;
+    return isPatchedScene ? { ...scene, ...scenePatch } : scene;
+  });
+  return { ...manifest, scenes };
+};
 
-/** Append a scene, deriving its id/order from the current count. */
-export function addScene(m, fields = {}) {
-  const scene = { ...sceneTemplate(m.scenes.length + 1), ...fields };
-  return { ...m, scenes: [...m.scenes, scene] };
-}
+const addScene = (manifest, sceneFields = {}) => {
+  const nextOrder = manifest.scenes.length + 1;
+  const scene = { ...createSceneTemplate(nextOrder), ...sceneFields };
+  return { ...manifest, scenes: [...manifest.scenes, scene] };
+};
 
-// --- IO layer ---
+const createManifestFilePath = (directory) => join(directory, "manifest.json");
 
-const manifestPath = (dir) => join(dir, "manifest.json");
+const loadManifest = (directory) => {
+  const manifestFilePath = createManifestFilePath(directory);
+  const isManifestMissing = !existsSync(manifestFilePath);
+  if (isManifestMissing) throw new Error(`No manifest at ${manifestFilePath} — run 'init' first.`);
 
-function load(dir) {
-  const p = manifestPath(dir);
-  if (!existsSync(p)) throw new Error(`No manifest at ${p} — run 'init' first.`);
-  return JSON.parse(readFileSync(p, "utf8"));
-}
+  return JSON.parse(readFileSync(manifestFilePath, "utf8"));
+};
 
-function save(dir, m) {
-  mkdirSync(dir, { recursive: true });
-  mkdirSync(join(dir, "build"), { recursive: true });
-  writeFileSync(manifestPath(dir), `${JSON.stringify(m, null, 2)}\n`);
-}
+const saveManifest = (directory, manifest) => {
+  mkdirSync(directory, { recursive: true });
+  mkdirSync(join(directory, "build"), { recursive: true });
+  const indentSpaceCount = 2;
 
-function parseFlags(argv) {
-  const out = {};
-  // e.g. "--manifest" → "manifest"
-  for (let i = 0; i < argv.length; i += 2) out[argv[i].replace(/^--/, "")] = argv[i + 1];
-  return out;
-}
+  writeFileSync(createManifestFilePath(directory), `${JSON.stringify(manifest, null, indentSpaceCount)}\n`);
+};
 
-function coerce(value) {
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value !== "" && !Number.isNaN(Number(value))) return Number(value);
-  return value;
-}
+const readFlags = (argumentList) => {
+  const flagPairs = [];
+  const argumentPairStride = 2;
 
-function main() {
-  const [cmd, ...rest] = process.argv.slice(2);
-  const f = parseFlags(rest);
-  const dir = f.dir;
-  if (!cmd || !dir) throw new Error("Usage: manifest.mjs <cmd> --dir <dir> [...]");
+  for (let index = 0; index < argumentList.length; index += argumentPairStride) {
+    const flagName = argumentList[index].replace(/^--/, "");
+    flagPairs.push([flagName, argumentList[index + 1]]);
+  }
+  return Object.fromEntries(flagPairs);
+};
 
-  if (cmd === "init") {
-    const m = emptyManifest({ project: f.project, targetSeconds: coerce(f.seconds), creativeMode: f.mode });
-    save(dir, m);
-    process.stdout.write(`Initialized ${manifestPath(dir)}\n`);
+const readFlag = (flagString) => {
+  const isTrueFlag = flagString === "true";
+  if (isTrueFlag) return true;
+
+  const isFalseFlag = flagString === "false";
+  if (isFalseFlag) return false;
+
+  const isNumberFlag = flagString !== "" && !Number.isNaN(Number(flagString));
+  if (isNumberFlag) return Number(flagString);
+
+  return flagString;
+};
+
+const writeSceneIds = (scenes) => {
+  process.stdout.write(`${scenes.map((scene) => scene.id).join(" ")}\n`);
+};
+
+const initManifest = (directory, flags) => {
+  const manifest = createEmptyManifest({
+    project: flags.project,
+    targetSeconds: readFlag(flags.seconds),
+    creativeMode: flags.mode,
+  });
+  saveManifest(directory, manifest);
+  process.stdout.write(`Initialized ${createManifestFilePath(directory)}\n`);
+};
+
+const setSceneField = (directory, manifest, flags) => {
+  const isSetArgumentMissing = !flags.id || !flags.key;
+  if (isSetArgumentMissing) throw new Error("set needs --id and --key (and --value)");
+
+  const newField = readFlag(flags.value || "");
+  saveManifest(directory, applyScenePatch(manifest, flags.id, { [flags.key]: newField }));
+  process.stdout.write(`Set ${flags.id}.${flags.key} = ${flags.value}\n`);
+};
+
+const runManifestCommand = (command, directory, flags) => {
+  const manifest = loadManifest(directory);
+  switch (command) {
+    case "show": {
+      const stdoutIndentSpaceCount = 2;
+
+      process.stdout.write(`${JSON.stringify(manifest, null, stdoutIndentSpaceCount)}\n`);
+      return;
+    }
+    case "pending-stills":
+      writeSceneIds(listPendingStills(manifest));
+      return;
+    case "pending-clips":
+      writeSceneIds(listPendingClips(manifest));
+      return;
+    case "add-scene":
+      saveManifest(directory, addScene(manifest, JSON.parse(flags.json || "{}")));
+      return;
+    case "set":
+      setSceneField(directory, manifest, flags);
+      return;
+    default:
+      throw new Error(`Unknown command: ${command}`);
+  }
+};
+
+const runManifestCli = () => {
+  const firstArgumentIndex = 2;
+
+  const [command, ...commandArguments] = process.argv.slice(firstArgumentIndex);
+  const flags = readFlags(commandArguments);
+  const directory = flags.dir;
+  const isUsageMissing = !command || !directory;
+  if (isUsageMissing) throw new Error("Usage: manifest.mjs <cmd> --dir <dir> [...]");
+
+  const isInitCommand = command === "init";
+  if (isInitCommand) {
+    initManifest(directory, flags);
     return;
   }
 
-  const m = load(dir);
-  if (cmd === "show") process.stdout.write(`${JSON.stringify(m, null, 2)}\n`);
-  else if (cmd === "pending-stills")
-    process.stdout.write(
-      `${pendingStills(m)
-        .map((s) => s.id)
-        .join(" ")}\n`,
-    );
-  else if (cmd === "pending-clips")
-    process.stdout.write(
-      `${pendingClips(m)
-        .map((s) => s.id)
-        .join(" ")}\n`,
-    );
-  else if (cmd === "add-scene") save(dir, addScene(m, JSON.parse(f.json || "{}")));
-  else if (cmd === "set") {
-    if (!f.id || !f.key) throw new Error("set needs --id and --key (and --value)");
-    save(dir, patchScene(m, f.id, { [f.key]: coerce(f.value || "") }));
-    process.stdout.write(`Set ${f.id}.${f.key} = ${f.value}\n`);
-  } else throw new Error(`Unknown command: ${cmd}`);
-}
+  runManifestCommand(command, directory, flags);
+};
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isRunAsScript = import.meta.url === `file://${process.argv[1]}`;
+if (isRunAsScript) {
   try {
-    main();
-  } catch (err) {
-    process.stderr.write(`${err.message}\n`);
+    runManifestCli();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
     process.exit(1);
   }
 }

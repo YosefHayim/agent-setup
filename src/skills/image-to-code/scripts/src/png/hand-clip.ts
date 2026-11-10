@@ -1,28 +1,51 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-/** Build a clip path for the waving hand silhouette from a hand PNG. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "#src/argv.js";
+import { parseArgumentList, readStringArgument } from "#src/argv.js";
 
-const args = parseArgs(process.argv.slice(2));
-const input = argString(args, "input") || "out/hand.png";
-const output = argString(args, "output") || "out/hand-clip.svg";
+const NEIGHBOR_DIRECTION_COUNT = 8;
 
-const { width: W, height: H, data: pixelBytes } = PNG.sync.read(fs.readFileSync(input));
+const firstArgumentIndex = 2;
+
+const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+const pngPath = readStringArgument(argumentList, "input") || "out/hand.png";
+const svgPath = readStringArgument(argumentList, "output") || "out/hand-clip.svg";
+
+const { width: W, height: H, data: pixelBytes } = PNG.sync.read(fs.readFileSync(pngPath));
 
 const wall = new Uint8Array(W * H);
 for (let p = 0; p < W * H; p++) {
-  const i = p * 4;
-  if (0.299 * pixelBytes[i] + 0.587 * pixelBytes[i + 1] + 0.114 * pixelBytes[i + 2] < 120) wall[p] = 1;
+  const bytesPerPixel = 4;
+
+  const i = p * bytesPerPixel;
+
+  const darkPixelLumaLimit = 120;
+
+  const blueChannelOffset = 2;
+
+  const blueLumaWeight = 0.114;
+
+  const greenLumaWeight = 0.587;
+
+  const redLumaWeight = 0.299;
+
+  const isDarkPixel =
+    redLumaWeight * pixelBytes[i] +
+      greenLumaWeight * pixelBytes[i + 1] +
+      blueLumaWeight * pixelBytes[i + blueChannelOffset] <
+    darkPixelLumaLimit;
+  if (isDarkPixel) wall[p] = 1;
 }
 
-const stamp = (mask: Uint8Array, x: number, y: number, r: number) => {
-  for (let dy = -r; dy <= r; dy++)
-    for (let dx = -r; dx <= r; dx++) {
-      const nx = x + dx,
+const stampWall = (column: number, y: number, radius: number) => {
+  for (let dy = -radius; dy <= radius; dy++)
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = column + dx,
         ny = y + dy;
-      if (nx >= 0 && ny >= 0 && nx < W && ny < H) mask[ny * W + nx] = 1;
+
+      const isInsideImage = nx >= 0 && ny >= 0 && nx < W && ny < H;
+      if (isInsideImage) wall[ny * W + nx] = 1;
     }
 };
 
@@ -39,27 +62,37 @@ for (let k = 0; k + 1 < WRIST_ARC.length; k++) {
   const [ax, ay] = WRIST_ARC[k],
     [bx, by] = WRIST_ARC[k + 1];
   const n = Math.ceil(Math.hypot(bx - ax, by - ay));
+  const wallStrokeRadius = 3;
+
   for (let s = 0; s <= n; s++)
-    stamp(wall, Math.round(ax + ((bx - ax) * s) / n), Math.round(ay + ((by - ay) * s) / n), 3);
+    stampWall(Math.round(ax + ((bx - ax) * s) / n), Math.round(ay + ((by - ay) * s) / n), wallStrokeRadius);
 }
 
 const ring = new Uint8Array(W * H);
 for (let y = 0; y < H; y++)
-  for (let x = 0; x < W; x++) {
-    if (!wall[y * W + x]) continue;
-    for (let dy = -2; dy <= 2; dy++)
-      for (let dx = -2; dx <= 2; dx++) {
-        const nx = x + dx,
+  for (let column = 0; column < W; column++) {
+    const isOpenPixel = !wall[y * W + column];
+    if (isOpenPixel) continue;
+
+    const stampColumnMaximumOffset = 2;
+
+    const stampMaximumVerticalOffset = 2;
+
+    for (let dy = -2; dy <= stampMaximumVerticalOffset; dy++)
+      for (let dx = -2; dx <= stampColumnMaximumOffset; dx++) {
+        const nx = column + dx,
           ny = y + dy;
-        if (nx >= 0 && ny >= 0 && nx < W && ny < H) ring[ny * W + nx] = 1;
+
+        const isNeighborInsideImage = nx >= 0 && ny >= 0 && nx < W && ny < H;
+        if (isNeighborInsideImage) ring[ny * W + nx] = 1;
       }
   }
 
 const ext = new Uint8Array(W * H);
 const stack: number[] = [];
-for (let x = 0; x < W; x++) {
-  stack.push(x);
-  stack.push((H - 1) * W + x);
+for (let column = 0; column < W; column++) {
+  stack.push(column);
+  stack.push((H - 1) * W + column);
 }
 for (let y = 0; y < H; y++) {
   stack.push(y * W);
@@ -67,24 +100,43 @@ for (let y = 0; y < H; y++) {
 }
 while (stack.length) {
   const p = stack.pop()!;
-  if (ext[p] || ring[p]) continue;
+
+  const isEdgeOrRingPixel = ext[p] || ring[p];
+  if (isEdgeOrRingPixel) continue;
+
   ext[p] = 1;
-  const x = p % W,
+
+  const column = p % W,
     y = (p / W) | 0;
-  if (x > 0) stack.push(p - 1);
-  if (x < W - 1) stack.push(p + 1);
-  if (y > 0) stack.push(p - W);
-  if (y < H - 1) stack.push(p + W);
+
+  const hasLeftNeighbor = column > 0;
+  if (hasLeftNeighbor) stack.push(p - 1);
+
+  const hasRightNeighbor = column < W - 1;
+  if (hasRightNeighbor) stack.push(p + 1);
+
+  const hasUpNeighbor = y > 0;
+  if (hasUpNeighbor) stack.push(p - W);
+
+  const hasDownNeighbor = y < H - 1;
+  if (hasDownNeighbor) stack.push(p + W);
 }
 const sil = new Uint8Array(W * H);
-for (let p = 0; p < W * H; p++) sil[p] = ext[p] ? 0 : 1;
+for (let p = 0; p < W * H; p++) {
+  const isExtendedPixel = ext[p] === 1;
+  sil[p] = isExtendedPixel ? 0 : 1;
+}
 
 const traceContour = () => {
   let start = -1;
-  for (let p = 0; p < sil.length && start < 0; p++) if (sil[p]) start = p;
+  for (let p = 0; p < sil.length && start < 0; p++) {
+    const isSilhouettePixel = sil[p] === 1;
+    if (isSilhouettePixel) start = p;
+  }
   const sx = start % W,
     sy = (start / W) | 0;
-  const on = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && sil[y * W + x] === 1;
+  const isSilhouetteAt = (column: number, y: number) =>
+    column >= 0 && y >= 0 && column < W && y < H && sil[y * W + column] === 1;
   const dirs = [
     [1, 0],
     [1, 1],
@@ -99,30 +151,45 @@ const traceContour = () => {
   let cx = sx,
     cy = sy,
     dir = 6;
-  const maxSteps = sil.length * 8;
+  const maxSteps = sil.length * NEIGHBOR_DIRECTION_COUNT;
   for (let step = 0; step < maxSteps; step++) {
     let found = false;
-    for (let k = 0; k < 8; k++) {
-      const nd = (dir + k) % 8;
+    for (let k = 0; k < NEIGHBOR_DIRECTION_COUNT; k++) {
+      const nd = (dir + k) % NEIGHBOR_DIRECTION_COUNT;
+
       const nx = cx + dirs[nd][0],
         ny = cy + dirs[nd][1];
-      if (on(nx, ny)) {
+
+      const isNeighborOn = isSilhouetteAt(nx, ny);
+      if (isNeighborOn) {
         cx = nx;
         cy = ny;
         pts.push([cx, cy]);
-        dir = (nd + 5) % 8;
+        const backtrackDirectionOffset = 5;
+
+        dir = (nd + backtrackDirectionOffset) % NEIGHBOR_DIRECTION_COUNT;
         found = true;
         break;
       }
     }
-    if (!found) break;
-    if (cx === sx && cy === sy && pts.length > 2) break;
+
+    const isNoNextStepFound = !found;
+    if (isNoNextStepFound) break;
+
+    const minimumClosedPointCount = 2;
+
+    const isBackAtStart = cx === sx && cy === sy && pts.length > minimumClosedPointCount;
+    if (isBackAtStart) break;
   }
   return pts;
 };
 
 const simplify = (pts: [number, number][], eps: number): [number, number][] => {
-  if (pts.length < 3) return pts;
+  const minimumContourPointCount = 3;
+
+  const isTooFewPoints = pts.length < minimumContourPointCount;
+  if (isTooFewPoints) return pts;
+
   const keep = new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;
   const segs: [number, number][] = [[0, pts.length - 1]];
@@ -137,13 +204,18 @@ const simplify = (pts: [number, number][], eps: number): [number, number][] => {
     const len = Math.hypot(dx, dy) || 1;
     for (let i = a + 1; i < b; i++) {
       const [px, py] = pts[i];
+
       const d = Math.abs((px - ax) * dy - (py - ay) * dx) / len;
-      if (d > maxD) {
+
+      const isFarthestSoFar = d > maxD;
+      if (isFarthestSoFar) {
         maxD = d;
         idx = i;
       }
     }
-    if (maxD > eps && idx > 0) {
+
+    const isFarEnoughToSplit = maxD > eps && idx > 0;
+    if (isFarEnoughToSplit) {
       keep[idx] = 1;
       segs.push([a, idx], [idx, b]);
     }
@@ -153,13 +225,22 @@ const simplify = (pts: [number, number][], eps: number): [number, number][] => {
 
 const simplifyClosed = (pts: [number, number][], eps: number): [number, number][] => {
   const last = pts[pts.length - 1];
-  const ring = pts.length > 1 && pts[0][0] === last[0] && pts[0][1] === last[1] ? pts.slice(0, -1) : pts;
-  if (ring.length < 4) return ring;
+
+  const isRingAlreadyClosed = pts.length > 1 && pts[0][0] === last[0] && pts[0][1] === last[1];
+  const ring = isRingAlreadyClosed ? pts.slice(0, -1) : pts;
+
+  const minimumRingPointCount = 4;
+
+  const isTooSmallRing = ring.length < minimumRingPointCount;
+  if (isTooSmallRing) return ring;
+
   let far = 0,
     fd = -1;
   for (let i = 1; i < ring.length; i++) {
     const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
-    if (d > fd) {
+
+    const isFartherThanCurrentBest = d > fd;
+    if (isFartherThanCurrentBest) {
       fd = d;
       far = i;
     }
@@ -169,11 +250,17 @@ const simplifyClosed = (pts: [number, number][], eps: number): [number, number][
   return first.concat(second.slice(1, -1));
 };
 
-const contour = simplifyClosed(traceContour(), 1.5);
-const d = `${contour.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x},${y}`).join(" ")} Z`;
-fs.mkdirSync(path.dirname(output), { recursive: true });
-fs.writeFileSync(output, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">\n<path d="${d}"/>\n</svg>`);
+const simplifyToleranceDistance = 1.5;
+
+const contour = simplifyClosed(traceContour(), simplifyToleranceDistance);
+const pathSegments = contour.map(([column, y], i) => {
+  const isFirstPoint = i === 0;
+  return `${isFirstPoint ? "M" : "L"}${column},${y}`;
+});
+const d = `${pathSegments.join(" ")} Z`;
+fs.mkdirSync(path.dirname(svgPath), { recursive: true });
+fs.writeFileSync(svgPath, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">\n<path d="${d}"/>\n</svg>`);
 
 let area = 0;
 for (let p = 0; p < W * H; p++) area += sil[p];
-console.log(`silhouette ${area}px | contour points ${contour.length} | wrote ${output}`);
+console.log(`silhouette ${area}px | contour points ${contour.length} | wrote ${svgPath}`);

@@ -1,55 +1,73 @@
 #!/usr/bin/env node
 
-/**
- * run-pagespeed.mjs — zero-dep PageSpeed Insights v5 field + lab checker.
- *
- * Calls the public runPagespeed endpoint for a URL, reads the lab score
- * (lighthouseResult) and the real-user CrUX field data (loadingExperience),
- * classifies each Core Web Vital against the budget, prints a report, and
- * exits non-zero when a real-user vital is "poor" or the lab score is below
- * budget. No dependencies — Node 18+ global fetch only.
- *
- * Usage:
- *   node run-pagespeed.mjs <url> [--strategy=mobile|desktop] [--key=KEY]
- *                                [--budgets=FILE] [--json] [--strict]
- */
-
 import { readFile } from "node:fs/promises";
+
+const NEWLINE_CHARACTER = "\n";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+const PASS_LABEL = "PASS";
+
+const FAIL_LABEL = "FAIL";
+
+const NOT_AVAILABLE_LABEL = "n/a";
+
+const PERCENT_SCALE = 100;
+
+const NUMBER_TYPE_NAME = "number";
+
+const ORIGIN_READING_KIND = "origin";
+
+const RATING_NEEDS_IMPROVEMENT = "needs-improvement";
+
+const RATING_POOR = "poor";
+
+const RATING_GOOD = "good";
+
+const BUDGETS_FLAG_PREFIX = "--budgets=";
+
+const KEY_FLAG_PREFIX = "--key=";
+
+const STRATEGY_FLAG_PREFIX = "--strategy=";
+
+const MOBILE_STRATEGY = "mobile";
+
+const INP_METRIC_ID = "INP";
 
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 
-/** Good-line budget (the "good" upper bound per vital). Override with --budgets. */
+const LCP_GOOD_MILLISECONDS = 2500;
+const INP_GOOD_MILLISECONDS = 200;
+const CLS_GOOD_SCORE = 0.1;
+const ONE_POINT_EIGHT_SECONDS_MILLISECONDS = 1800;
+const TTFB_GOOD_MILLISECONDS = 800;
+
 const DEFAULT_BUDGETS = {
-  lcpMs: 2500,
-  inpMs: 200,
-  clsScore: 0.1,
-  fcpMs: 1800,
-  ttfbMs: 800,
+  lcpMs: LCP_GOOD_MILLISECONDS,
+  inpMs: INP_GOOD_MILLISECONDS,
+  clsScore: CLS_GOOD_SCORE,
+  fcpMs: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
+  ttfbMs: TTFB_GOOD_MILLISECONDS,
   performanceScore: 0.9,
 };
 
-/**
- * The five vitals we read, each mapped to its CrUX field key, its Lighthouse
- * lab audit id, its budget key, and the standard [good, poor] rating bounds
- * used when CrUX gives no category. `cls` metrics are unitless (÷100 in CrUX).
- */
 const METRICS = [
   {
     id: "LCP",
     field: "LARGEST_CONTENTFUL_PAINT_MS",
     audit: "largest-contentful-paint",
     budget: "lcpMs",
-    good: 2500,
+    good: LCP_GOOD_MILLISECONDS,
     poor: 4000,
     cls: false,
     core: true,
   },
   {
-    id: "INP",
+    id: INP_METRIC_ID,
     field: "INTERACTION_TO_NEXT_PAINT",
     audit: "total-blocking-time",
     budget: "inpMs",
-    good: 200,
+    good: INP_GOOD_MILLISECONDS,
     poor: 500,
     cls: false,
     core: true,
@@ -59,7 +77,7 @@ const METRICS = [
     field: "CUMULATIVE_LAYOUT_SHIFT_SCORE",
     audit: "cumulative-layout-shift",
     budget: "clsScore",
-    good: 0.1,
+    good: CLS_GOOD_SCORE,
     poor: 0.25,
     cls: true,
     core: true,
@@ -69,7 +87,7 @@ const METRICS = [
     field: "FIRST_CONTENTFUL_PAINT_MS",
     audit: "first-contentful-paint",
     budget: "fcpMs",
-    good: 1800,
+    good: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
     poor: 3000,
     cls: false,
     core: false,
@@ -79,14 +97,14 @@ const METRICS = [
     field: "EXPERIMENTAL_TIME_TO_FIRST_BYTE",
     audit: "server-response-time",
     budget: "ttfbMs",
-    good: 800,
-    poor: 1800,
+    good: TTFB_GOOD_MILLISECONDS,
+    poor: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
     cls: false,
     core: false,
   },
 ];
 
-function usage() {
+const createUsageMessage = () => {
   return [
     "PageSpeed Insights v5 field + lab checker.",
     "",
@@ -95,173 +113,289 @@ function usage() {
     "                              [--budgets=FILE] [--json] [--strict]",
     "",
     "The key may also come from the PSI_API_KEY environment variable.",
-    "Exit 0 = within budget, 1 = budget breached, 2 = usage/request error.",
-  ].join("\n");
-}
+    "Exit 0 = within budget, 1 = budget breached, 2 = createUsageMessage/request error.",
+  ].join(NEWLINE_CHARACTER);
+};
 
-function parseArgs(argv) {
-  const args = { strategy: "mobile", key: process.env.PSI_API_KEY, json: false, strict: false };
-  for (const arg of argv) {
-    if (arg === "--help" || arg === "-h") return { ...args, help: true };
-    if (arg === "--json") args.json = true;
-    else if (arg === "--strict") args.strict = true;
-    else if (arg.startsWith("--strategy=")) args.strategy = arg.slice("--strategy=".length);
-    else if (arg.startsWith("--key=")) args.key = arg.slice("--key=".length);
-    else if (arg.startsWith("--budgets=")) args.budgets = arg.slice("--budgets=".length);
-    else if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
-    else if (!args.url) args.url = arg;
-    else throw new Error(`Unexpected argument: ${arg}`);
-  }
-  if (!args.help && !args.url) throw new Error("A URL is required. Try --help.");
-  if (args.strategy !== "mobile" && args.strategy !== "desktop")
-    throw new Error("--strategy must be mobile or desktop");
-  return args;
-}
-
-/** Map a CrUX bucket (FAST/AVERAGE/SLOW) to a rating, or null if absent. */
-function ratingFromCategory(category) {
-  if (category === "FAST") return "good";
-  if (category === "AVERAGE") return "needs-improvement";
-  if (category === "SLOW") return "poor";
-  return null;
-}
-
-/** Classify a raw value against [good, poor] bounds. */
-function ratingFromValue(value, good, poor) {
-  if (value <= good) return "good";
-  if (value > poor) return "poor";
-  return "needs-improvement";
-}
-
-/**
- * Resolve one metric from the PSI payload: prefer this-URL field data, then
- * origin field data, then the lab audit. Returns value, rating, and source.
- */
-function resolveMetric(metric, urlField, originField, labAudits) {
-  const fromField = (experience, source) => {
-    const entry = experience?.metrics?.[metric.field];
-    if (!entry || typeof entry.percentile !== "number") return null;
-    const value = metric.cls ? entry.percentile / 100 : entry.percentile;
-    const rating = ratingFromCategory(entry.category) || ratingFromValue(value, metric.good, metric.poor);
-    return { value, rating, source };
+const parseArgumentList = (argv) => {
+  const argumentList = {
+    strategy: MOBILE_STRATEGY,
+    key: process.env.PSI_API_KEY,
+    isMachineReadable: false,
+    strict: false,
   };
-  const field = fromField(urlField, "field") || fromField(originField, "origin");
-  if (field) return field;
+  for (const arg of argv) {
+    const isHelpFlag = arg === "--help" || arg === "-h";
+    if (isHelpFlag) return { ...argumentList, help: true };
+
+    const isMachineReadableFlag = arg === "--json";
+    if (isMachineReadableFlag) {
+      argumentList.isMachineReadable = true;
+      continue;
+    }
+
+    const isStrictFlag = arg === "--strict";
+    if (isStrictFlag) {
+      argumentList.strict = true;
+      continue;
+    }
+
+    const isStrategyFlag = arg.startsWith(STRATEGY_FLAG_PREFIX);
+    if (isStrategyFlag) {
+      argumentList.strategy = arg.slice(STRATEGY_FLAG_PREFIX.length);
+      continue;
+    }
+
+    const isKeyFlag = arg.startsWith(KEY_FLAG_PREFIX);
+    if (isKeyFlag) {
+      argumentList.key = arg.slice(KEY_FLAG_PREFIX.length);
+      continue;
+    }
+
+    const isBudgetsFlag = arg.startsWith(BUDGETS_FLAG_PREFIX);
+    if (isBudgetsFlag) {
+      argumentList.budgets = arg.slice(BUDGETS_FLAG_PREFIX.length);
+      continue;
+    }
+
+    const isUnknownFlag = arg.startsWith("--");
+    if (isUnknownFlag) throw new Error(`Unknown argument: ${arg}`);
+
+    const isUrlAlreadyGiven = Boolean(argumentList.url);
+    if (isUrlAlreadyGiven) throw new Error(`Unexpected argument: ${arg}`);
+
+    argumentList.url = arg;
+  }
+
+  const isUrlMissing = !argumentList.url;
+  if (isUrlMissing) throw new Error("A URL is required. Try --help.");
+
+  const isStrategyInvalid = argumentList.strategy !== MOBILE_STRATEGY && argumentList.strategy !== "desktop";
+  if (isStrategyInvalid) throw new Error("--strategy must be mobile or desktop");
+
+  return argumentList;
+};
+
+const readRatingFromCategory = (category) => {
+  const isCategoryFAST = category === "FAST";
+  if (isCategoryFAST) return RATING_GOOD;
+
+  const isCategoryAVERAGE = category === "AVERAGE";
+  if (isCategoryAVERAGE) return RATING_NEEDS_IMPROVEMENT;
+
+  const isCategorySLOW = category === "SLOW";
+  if (isCategorySLOW) return RATING_POOR;
+
+  return null;
+};
+
+const readRatingFromField = (field, good, poor) => {
+  const isFieldGood = field <= good;
+  if (isFieldGood) return RATING_GOOD;
+
+  const isFieldPoor = field > poor;
+  if (isFieldPoor) return RATING_POOR;
+
+  return RATING_NEEDS_IMPROVEMENT;
+};
+
+const readFieldOrigin = (urlField, originField) => {
+  const hasUrlField = Boolean(urlField);
+  if (hasUrlField) return "this-url";
+
+  const hasOriginField = Boolean(originField);
+  if (hasOriginField) return ORIGIN_READING_KIND;
+
+  return "lab-only";
+};
+
+const readMetric = (metric, measurements) => {
+  const { urlField, originField, labAudits } = measurements;
+  const isCumulativeLayoutShift = metric.cls === true;
+
+  const readFieldReading = (experience, readingOrigin) => {
+    const fieldMetric = experience?.metrics?.[metric.field];
+    const isFieldMetricMissing = !fieldMetric || typeof fieldMetric.percentile !== NUMBER_TYPE_NAME;
+    if (isFieldMetricMissing) return null;
+
+    const fieldPercentile = isCumulativeLayoutShift ? fieldMetric.percentile / PERCENT_SCALE : fieldMetric.percentile;
+    const rating =
+      readRatingFromCategory(fieldMetric.category) || readRatingFromField(fieldPercentile, metric.good, metric.poor);
+    return { value: fieldPercentile, rating, source: readingOrigin };
+  };
+
+  const fieldReading = readFieldReading(urlField, "field") || readFieldReading(originField, ORIGIN_READING_KIND);
+  const isFieldReadingFound = fieldReading != null;
+  if (isFieldReadingFound) return fieldReading;
 
   const audit = labAudits?.[metric.audit];
-  if (audit && typeof audit.numericValue === "number") {
-    const value = metric.cls ? audit.numericValue : Math.round(audit.numericValue);
+  const isAuditNumeric = audit != null && typeof audit.numericValue === NUMBER_TYPE_NAME;
+
+  if (isAuditNumeric) {
+    const labReading = isCumulativeLayoutShift ? audit.numericValue : Math.round(audit.numericValue);
     // INP has no lab equivalent — total-blocking-time is only a proxy, so we
     // report it but never hard-fail on it.
     return {
-      value,
-      rating: ratingFromValue(value, metric.good, metric.poor),
+      value: labReading,
+      rating: readRatingFromField(labReading, metric.good, metric.poor),
       source: "lab",
-      proxy: metric.id === "INP",
+      proxy: metric.id === INP_METRIC_ID,
     };
   }
-  return { value: null, rating: "n/a", source: "none" };
-}
 
-function formatValue(metric, value) {
-  if (value === null) return "—";
-  if (metric.cls) return value.toFixed(2);
-  return value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${Math.round(value)} ms`;
-}
+  return { value: null, rating: NOT_AVAILABLE_LABEL, source: "none" };
+};
 
-/** Build the full evaluation object from a PSI response. Pure. */
-function evaluate(psiDocument, budgets, strict) {
-  const scoreCandidate = psiDocument?.lighthouseResult?.categories?.performance?.score;
-  const labScore = scoreCandidate === undefined ? null : scoreCandidate;
+const createMetricLabel = (metric, metricNumber) => {
+  const isReadingMissing = metricNumber === null;
+  if (isReadingMissing) return "—";
+
+  const isCumulativeLayoutShift = metric.cls === true;
+  const clsDecimals = 2;
+
+  if (isCumulativeLayoutShift) return metricNumber.toFixed(clsDecimals);
+
+  const isOverOneSecond = metricNumber >= MILLISECONDS_PER_SECOND;
+  return isOverOneSecond
+    ? `${(metricNumber / MILLISECONDS_PER_SECOND).toFixed(1)} s`
+    : `${Math.round(metricNumber)} ms`;
+};
+
+const evaluate = (psiDocument, budgets, strict) => {
+  const labScore = psiDocument?.lighthouseResult?.categories?.performance?.score ?? null;
   const labAudits = psiDocument?.lighthouseResult?.audits;
   const urlField = psiDocument?.loadingExperience;
   const originField = psiDocument?.originLoadingExperience;
 
-  const rows = METRICS.map((metric) => {
-    const resolved = resolveMetric(metric, urlField, originField, labAudits);
+  const metricChecks = METRICS.map((metric) => {
+    const metricReading = readMetric(metric, { urlField, originField, labAudits });
     const budget = budgets[metric.budget];
-    const overBudget = resolved.value !== null && resolved.value > budget;
-    const coreFail = metric.core && resolved.rating === "poor" && !resolved.proxy;
-    const strictFail = strict && metric.core && (resolved.rating !== "good" || overBudget) && !resolved.proxy;
-    return { ...metric, ...resolved, budget, overBudget, failed: coreFail || strictFail };
+    const overBudget = metricReading.value !== null && metricReading.value > budget;
+    const coreFail = metric.core && metricReading.rating === RATING_POOR && !metricReading.proxy;
+    const strictFail =
+      strict && metric.core && (metricReading.rating !== RATING_GOOD || overBudget) && !metricReading.proxy;
+    return { ...metric, ...metricReading, budget, overBudget, failed: coreFail || strictFail };
   });
 
   const scoreFailed = labScore !== null && labScore < budgets.performanceScore;
-  const passed = !scoreFailed && !rows.some((row) => row.failed);
-  let fieldOrigin = "lab-only";
-  if (urlField) fieldOrigin = "this-url";
-  else if (originField) fieldOrigin = "origin";
-  return {
-    labScore,
-    rows,
-    scoreFailed,
-    passed,
-    fieldOrigin,
-  };
-}
+  const passed = !scoreFailed && !metricChecks.some((metricCheck) => metricCheck.failed);
+  const fieldOrigin = readFieldOrigin(urlField, originField);
 
-function renderReport(assessment, meta) {
+  return { labScore, rows: metricChecks, scoreFailed, passed, fieldOrigin };
+};
+
+const readMetricFlag = (metricCheck) => {
+  const isMetricFailed = metricCheck.failed;
+  if (isMetricFailed) return "  ✗ FAIL";
+
+  const isMetricNeedingImprovement = metricCheck.rating === RATING_NEEDS_IMPROVEMENT;
+  if (isMetricNeedingImprovement) return "  ! warn";
+
+  return "";
+};
+
+const createReport = (assessment, meta) => {
   const lines = [`PageSpeed Insights — ${meta.url} (${meta.strategy})`, ""];
-  const score = assessment.labScore === null ? "n/a" : Math.round(assessment.labScore * 100);
-  const scoreMark = assessment.scoreFailed ? "FAIL" : "PASS";
+  const hasLabScore = assessment.labScore !== null;
+  const score = hasLabScore ? Math.round(assessment.labScore * PERCENT_SCALE) : NOT_AVAILABLE_LABEL;
+  const isScoreFailed = assessment.scoreFailed;
+  const scoreMark = isScoreFailed ? FAIL_LABEL : PASS_LABEL;
   lines.push(
-    `Lab performance score: ${score}  (budget ≥ ${Math.round(meta.budgets.performanceScore * 100)})  ${scoreMark}`,
+    `Lab performance score: ${score}  (budget ≥ ${Math.round(meta.budgets.performanceScore * PERCENT_SCALE)})  ${scoreMark}`,
     "",
   );
   lines.push(`Real-user Core Web Vitals (source: ${assessment.fieldOrigin}):`);
-  for (const row of assessment.rows) {
-    let flag = "";
-    if (row.failed) flag = "  ✗ FAIL";
-    else if (row.rating === "needs-improvement") flag = "  ! warn";
-    const proxy = row.proxy ? " [lab TBT proxy]" : "";
-    const budget = `budget ${row.cls ? "≤ " : "≤ "}${formatValue(row, row.budget)}`;
+
+  for (const metricCheck of assessment.rows) {
+    const flag = readMetricFlag(metricCheck);
+    const isProxyMetric = Boolean(metricCheck.proxy);
+    const proxy = isProxyMetric ? " [lab TBT proxy]" : "";
+    const budget = `budget ≤ ${createMetricLabel(metricCheck, metricCheck.budget)}`;
+    const metricRatingColumnWidth = 18;
+
+    const metricLabelColumnWidth = 9;
+
+    const metricIdColumnWidth = 5;
+
     lines.push(
-      `  ${row.id.padEnd(5)} ${formatValue(row, row.value).padEnd(9)} ${row.rating.padEnd(18)} (${budget})${proxy}${flag}`,
+      `  ${metricCheck.id.padEnd(metricIdColumnWidth)} ${createMetricLabel(metricCheck, metricCheck.value).padEnd(metricLabelColumnWidth)} ${metricCheck.rating.padEnd(metricRatingColumnWidth)} (${budget})${proxy}${flag}`,
     );
   }
-  lines.push("", `Verdict: ${assessment.passed ? "PASS" : "FAIL"}`);
-  return lines.join("\n");
-}
 
-// --- IO layer ---------------------------------------------------------------
+  const isPassed = assessment.passed;
+  lines.push("", `Verdict: ${isPassed ? PASS_LABEL : FAIL_LABEL}`);
+  return lines.join(NEWLINE_CHARACTER);
+};
 
-async function loadBudgets(file) {
-  if (!file) return DEFAULT_BUDGETS;
-  const budgetText = await readFile(file, "utf8");
-  return { ...DEFAULT_BUDGETS, ...JSON.parse(budgetText) };
-}
+const loadBudgets = async (budgetsFile) => {
+  const isBudgetsFileMissing = !budgetsFile;
+  if (isBudgetsFileMissing) return DEFAULT_BUDGETS;
 
-async function fetchPsi(url, strategy, key) {
-  const params = new URLSearchParams({ url, strategy, category: "performance" });
-  if (key) params.set("key", key);
-  const httpReply = await fetch(`${PSI_ENDPOINT}?${params.toString()}`);
-  const psiDocument = await httpReply.json().catch(() => null);
-  if (!httpReply.ok) {
-    const message = psiDocument?.error?.message || `${httpReply.status} ${httpReply.statusText}`;
-    throw new Error(`PageSpeed request failed: ${message}`);
+  const budgetsDocument = await readFile(budgetsFile, "utf8");
+  return { ...DEFAULT_BUDGETS, ...JSON.parse(budgetsDocument) };
+};
+
+const readPsiErrorMessage = async (httpReply) => {
+  const statusMessage = `${httpReply.status} ${httpReply.statusText}`;
+  const replyDocument = await httpReply.text();
+
+  try {
+    const errorDocument = JSON.parse(replyDocument);
+    return errorDocument?.error?.message || statusMessage;
+  } catch {
+    // A reply that is not JSON still reports the HTTP status.
+    return statusMessage;
   }
-  return psiDocument;
-}
+};
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    console.log(usage());
+const fetchPsi = async (url, strategy, key) => {
+  const parameters = new URLSearchParams({ url, strategy, category: "performance" });
+  const isKeyGiven = Boolean(key);
+  if (isKeyGiven) parameters.set("key", key);
+
+  const httpReply = await fetch(`${PSI_ENDPOINT}?${parameters.toString()}`);
+  const isReplyOk = httpReply.ok;
+  if (isReplyOk) return httpReply.json();
+
+  const errorMessage = await readPsiErrorMessage(httpReply);
+  throw new Error(`PageSpeed request failed: ${errorMessage}`);
+};
+
+const runPagespeedCommand = async () => {
+  const firstArgumentIndex = 2;
+
+  const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+  const isHelpRequested = Boolean(argumentList.help);
+  if (isHelpRequested) {
+    console.log(createUsageMessage());
     return;
   }
-  const budgets = await loadBudgets(args.budgets);
-  const psiDocument = await fetchPsi(args.url, args.strategy, args.key);
-  const assessment = evaluate(psiDocument, budgets, args.strict);
 
-  if (args.json) {
-    console.log(JSON.stringify({ url: args.url, strategy: args.strategy, ...assessment }, null, 2));
+  const budgets = await loadBudgets(argumentList.budgets);
+  const psiDocument = await fetchPsi(argumentList.url, argumentList.strategy, argumentList.key);
+  const assessment = evaluate(psiDocument, budgets, argumentList.strict);
+
+  const isMachineReadable = argumentList.isMachineReadable;
+  if (isMachineReadable) {
+    const indentSpaceCount = 2;
+
+    console.log(
+      JSON.stringify({ url: argumentList.url, strategy: argumentList.strategy, ...assessment }, null, indentSpaceCount),
+    );
   } else {
-    console.log(renderReport(assessment, { url: args.url, strategy: args.strategy, budgets }));
+    console.log(createReport(assessment, { url: argumentList.url, strategy: argumentList.strategy, budgets }));
   }
-  if (!assessment.passed) process.exitCode = 1;
-}
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(2);
-});
+  const isAssessmentFailed = !assessment.passed;
+  if (isAssessmentFailed) process.exitCode = 1;
+};
+
+try {
+  await runPagespeedCommand();
+} catch (error) {
+  const isErrorObject = error instanceof Error;
+  console.error(isErrorObject ? error.message : String(error));
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
+}

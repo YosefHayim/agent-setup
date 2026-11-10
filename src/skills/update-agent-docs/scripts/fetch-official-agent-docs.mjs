@@ -5,83 +5,109 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const FETCH_TIMEOUT_MS = 20000;
-const SOURCE_FILE_SUFFIX = ".source";
-const REQUEST_HEADERS = {
-  accept: "text/html, text/markdown, text/plain;q=0.9, */*;q=0.8",
-  "user-agent": "agent-setup-update-agent-docs/1.0",
-};
-const SOURCE_FILE = "sources.json";
+const NO_ENTRIES_MARKDOWN = "- None";
 
+const UTF8_ENCODING = "utf8";
+
+const PLAIN_FILE_EXTENSION = "txt";
+
+const HTML_FORMAT = "html";
+
+const MARKDOWN_EXTENSION = "md";
+
+const MARKDOWN_FORMAT = "markdown";
+
+const ORIGIN_FILE_SUFFIX = ".source";
 const USAGE = "Usage: node scripts/fetch-official-agent-docs.mjs --save-to <folder>";
 
-const readSaveToFolder = (argv) => {
-  const { values } = parseArgs({ args: argv, options: { "save-to": { type: "string" } }, strict: true });
-  return values["save-to"];
+const readSaveToFolder = (argumentList) => {
+  const { values: parsedFlags } = parseArgs({
+    args: argumentList,
+    options: { "save-to": { type: "string" } },
+    strict: true,
+  });
+  return parsedFlags["save-to"];
 };
 
-function formatError(error) {
-  if (error instanceof Error) return error.message;
+const describeError = (error) => {
+  const isErrorObject = error instanceof Error;
+  if (isErrorObject) return error.message;
+
   return String(error);
-}
+};
 
-function extensionFor(source, contentType) {
-  if (source.format === "markdown") return "md";
-  if (source.format === "html") return "html";
-  if (source.format === "text") return "txt";
-  if (contentType.includes("markdown")) return "md";
-  if (contentType.includes("html")) return "html";
-  return "txt";
-}
+const pickFileExtension = (origin, mediaType) => {
+  const isMarkdownFormat = origin.format === MARKDOWN_FORMAT;
+  if (isMarkdownFormat) return MARKDOWN_EXTENSION;
 
-async function readJson(filePath) {
-  const jsonText = await readFile(filePath, "utf8");
-  return JSON.parse(jsonText);
-}
+  const isHtmlFormat = origin.format === HTML_FORMAT;
+  if (isHtmlFormat) return HTML_FORMAT;
 
-async function fetchSource(source) {
+  const isPlainFormat = origin.format === "text";
+  if (isPlainFormat) return PLAIN_FILE_EXTENSION;
+
+  const isMarkdownMediaType = mediaType.includes(MARKDOWN_FORMAT);
+  if (isMarkdownMediaType) return MARKDOWN_EXTENSION;
+
+  const isHtmlMediaType = mediaType.includes(HTML_FORMAT);
+  if (isHtmlMediaType) return HTML_FORMAT;
+
+  return PLAIN_FILE_EXTENSION;
+};
+
+const readDocumentFile = async (filePath) => {
+  const documentString = await readFile(filePath, UTF8_ENCODING);
+  return JSON.parse(documentString);
+};
+
+const fetchOrigin = async (origin) => {
+  const fetchTimeoutMilliseconds = 20000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), fetchTimeoutMilliseconds);
 
   try {
-    const httpReply = await fetch(source.url, {
-      headers: REQUEST_HEADERS,
+    const httpReply = await fetch(origin.url, {
+      headers: {
+        accept: "text/html, text/markdown, text/plain;q=0.9, */*;q=0.8",
+        "user-agent": "agent-setup-update-agent-docs/1.0",
+      },
       redirect: "follow",
       signal: controller.signal,
     });
 
-    if (!httpReply.ok) {
+    const isReplyNotOk = !httpReply.ok;
+    if (isReplyNotOk) {
       return {
         ok: false,
-        source,
+        source: origin,
         status: httpReply.status,
         error: `${httpReply.status} ${httpReply.statusText}`,
       };
     }
 
-    const pageText = await httpReply.text();
-    const contentType = httpReply.headers.get("content-type") || "";
+    const pageDocument = await httpReply.text();
+    const mediaType = httpReply.headers.get("content-type") || "";
 
     return {
       ok: true,
-      pageText,
-      contentType,
+      pageDocument,
+      contentType: mediaType,
       finalUrl: httpReply.url,
-      source,
+      source: origin,
       status: httpReply.status,
     };
   } catch (error) {
     return {
       ok: false,
-      error: formatError(error),
-      source,
+      error: describeError(error),
+      source: origin,
     };
   } finally {
     clearTimeout(timeout);
   }
-}
+};
 
-function buildSummary({ failures, manifest, outDir, successes }) {
+const createSummary = ({ failures, manifest, outDir, successes }) => {
   const lines = [
     "# Update Agent Docs Sources",
     "",
@@ -92,66 +118,74 @@ function buildSummary({ failures, manifest, outDir, successes }) {
     "",
   ];
 
-  if (successes.length === 0) {
-    lines.push("- None");
+  const isSuccessesEmpty = successes.length === 0;
+  if (isSuccessesEmpty) {
+    lines.push(NO_ENTRIES_MARKDOWN);
   } else {
-    for (const item of successes) {
-      lines.push(`- ${item.id}: ${item.name} (${item.bytes} bytes)`);
-      lines.push(`  - Source: ${item.url}`);
-      if (item.finalUrl !== item.url) lines.push(`  - Final URL: ${item.finalUrl}`);
-      lines.push(`  - File: ${item.file}`);
+    for (const fetchedPage of successes) {
+      lines.push(`- ${fetchedPage.id}: ${fetchedPage.name} (${fetchedPage.bytes} bytes)`);
+      lines.push(`  - Source: ${fetchedPage.url}`);
+
+      const hasRedirected = fetchedPage.finalUrl !== fetchedPage.url;
+      if (hasRedirected) lines.push(`  - Final URL: ${fetchedPage.finalUrl}`);
+
+      lines.push(`  - File: ${fetchedPage.file}`);
     }
   }
 
   lines.push("", "## Failed", "");
 
-  if (failures.length === 0) {
-    lines.push("- None");
+  const isFailuresEmpty = failures.length === 0;
+  if (isFailuresEmpty) {
+    lines.push(NO_ENTRIES_MARKDOWN);
   } else {
-    for (const item of failures) {
-      lines.push(`- ${item.source.id}: ${item.source.name}`);
-      lines.push(`  - Source: ${item.source.url}`);
-      lines.push(`  - Error: ${item.error}`);
+    for (const failure of failures) {
+      lines.push(`- ${failure.source.id}: ${failure.source.name}`);
+      lines.push(`  - Source: ${failure.source.url}`);
+      lines.push(`  - Error: ${failure.error}`);
     }
   }
 
   lines.push("");
   return lines.join("\n");
-}
+};
 
-async function main() {
-  const saveToFolder = readSaveToFolder(process.argv.slice(2));
-  const hasSaveToFolder = Boolean(saveToFolder);
+const runFetchCommand = async () => {
+  const firstArgumentIndex = 2;
 
-  if (!hasSaveToFolder) {
+  const saveToFolder = readSaveToFolder(process.argv.slice(firstArgumentIndex));
+
+  const hasNoSaveToFolder = !saveToFolder;
+  if (hasNoSaveToFolder) {
     console.error(USAGE);
     process.exit(1);
   }
 
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const skillDir = path.resolve(scriptDir, "..");
-  const sourcePath = path.join(skillDir, SOURCE_FILE);
-  const sources = await readJson(sourcePath);
+  const originPath = path.join(skillDir, "sources.json");
+  const origins = await readDocumentFile(originPath);
   const outDir = path.resolve(saveToFolder);
 
   await mkdir(outDir, { recursive: true });
 
-  const fetched = await Promise.all(sources.map((source) => fetchSource(source)));
+  const fetched = await Promise.all(origins.map((origin) => fetchOrigin(origin)));
   const successes = [];
   const failures = [];
 
   for (const fetchAttempt of fetched) {
-    if (!fetchAttempt.ok) {
+    const isFetchFailed = !fetchAttempt.ok;
+    if (isFetchFailed) {
       failures.push(fetchAttempt);
       continue;
     }
 
-    const extension = extensionFor(fetchAttempt.source, fetchAttempt.contentType);
-    const fileName = `${fetchAttempt.source.id}${SOURCE_FILE_SUFFIX}.${extension}`;
-    await writeFile(path.join(outDir, fileName), fetchAttempt.pageText);
+    const extension = pickFileExtension(fetchAttempt.source, fetchAttempt.contentType);
+    const fileName = `${fetchAttempt.source.id}${ORIGIN_FILE_SUFFIX}.${extension}`;
+    await writeFile(path.join(outDir, fileName), fetchAttempt.pageDocument);
 
     successes.push({
-      bytes: Buffer.byteLength(fetchAttempt.pageText, "utf8"),
+      bytes: Buffer.byteLength(fetchAttempt.pageDocument, UTF8_ENCODING),
       contentType: fetchAttempt.contentType,
       file: fileName,
       finalUrl: fetchAttempt.finalUrl,
@@ -165,36 +199,42 @@ async function main() {
   }
 
   const manifest = {
-    failed: failures.map((item) => ({
-      error: item.error,
-      id: item.source.id,
-      name: item.source.name,
-      url: item.source.url,
+    failed: failures.map((failure) => ({
+      error: failure.error,
+      id: failure.source.id,
+      name: failure.source.name,
+      url: failure.source.url,
     })),
     fetched: successes,
     generatedAt: new Date().toISOString(),
-    sourceFile: sourcePath,
+    sourceFile: originPath,
   };
 
-  await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(path.join(outDir, "summary.md"), buildSummary({ failures, manifest, outDir, successes }));
+  const indentSpaceCount = 2;
 
-  console.log(`Fetched ${successes.length}/${sources.length} official sources.`);
+  await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, indentSpaceCount)}\n`);
+  await writeFile(path.join(outDir, "summary.md"), createSummary({ failures, manifest, outDir, successes }));
+
+  console.log(`Fetched ${successes.length}/${origins.length} official sources.`);
   console.log(`Cache: ${outDir}`);
 
-  if (failures.length > 0) {
-    for (const item of failures) {
-      console.error(`Failed ${item.source.id}: ${item.error}`);
+  const hasFailures = failures.length > 0;
+  if (hasFailures) {
+    for (const failure of failures) {
+      console.error(`Failed ${failure.source.id}: ${failure.error}`);
     }
   }
 
-  if (successes.length === 0) {
+  const isSuccessesEmpty = successes.length === 0;
+  if (isSuccessesEmpty) {
     process.exitCode = 1;
   }
-}
+};
 
-main().catch((error) => {
-  console.error(formatError(error));
+try {
+  await runFetchCommand();
+} catch (error) {
+  console.error(describeError(error));
   console.error(USAGE);
   process.exit(1);
-});
+}

@@ -4,27 +4,51 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-const usage =
-  "Usage: node capture-template.mjs --url <preview url> --out-folder <folder> [--width 1440] [--height 900] [--chrome-path <path>]";
-const macChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const motionFrameDelays = [350, 500, 700, 1200];
-const settleDelay = 5000;
-const scrollSettleDelay = 1800;
+const NONE_CSS_KEYWORD = "none";
+
+const HEADING_ONE_TAG = "h1";
+
+const LIST_SEPARATOR = ",";
+
+const ZERO_PIXEL_LENGTH = "0px";
+
+const TRANSPARENT_COLOR = "rgba(0, 0, 0, 0)";
+
+const EVERY_PAGE_ELEMENT_SELECTOR = "body *";
+
+const STRING_TYPE_NAME = "string";
+
+const lastMotionFrameDelay = 1200;
+
+const thirdMotionFrameDelay = 700;
+
+const secondMotionFrameDelay = 500;
+
+const firstMotionFrameDelay = 350;
+
+const motionFrameDelays = [firstMotionFrameDelay, secondMotionFrameDelay, thirdMotionFrameDelay, lastMotionFrameDelay];
 
 const { values: flags } = parseArgs({
   options: {
-    url: { type: "string" },
-    "out-folder": { type: "string" },
-    width: { type: "string", default: "1440" },
-    height: { type: "string", default: "900" },
-    "chrome-path": { type: "string", default: process.env.CHROME_PATH || macChromePath },
+    url: { type: STRING_TYPE_NAME },
+    "out-folder": { type: STRING_TYPE_NAME },
+    width: { type: STRING_TYPE_NAME, default: "1440" },
+    height: { type: STRING_TYPE_NAME, default: "900" },
+    "chrome-path": {
+      type: STRING_TYPE_NAME,
+      default: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    },
   },
 });
 
 const isMissingFlag = !flags.url || !flags["out-folder"];
 if (isMissingFlag) {
-  console.error(usage);
-  process.exit(2);
+  console.error(
+    "Usage: node capture-template.mjs --url <preview url> --out-folder <folder> [--width 1440] [--height 900] [--chrome-path <path>]",
+  );
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
 }
 
 const width = Number(flags.width);
@@ -32,20 +56,28 @@ const height = Number(flags.height);
 const outFolder = path.resolve(flags["out-folder"]);
 const profileFolder = path.join(outFolder, "chrome-profile");
 
-const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds) => new Promise((fulfill) => setTimeout(fulfill, milliseconds));
 
 const readPortLine = (portFile) => {
-  if (!existsSync(portFile)) return "";
-  const portText = readFileSync(portFile, "utf8");
-  return portText.split("\n")[0];
+  const isPortFileMissing = !existsSync(portFile);
+  if (isPortFileMissing) return "";
+
+  const portFileLines = readFileSync(portFile, "utf8");
+  return portFileLines.split("\n")[0];
 };
 
 const waitForDebugPort = async () => {
   const portFile = path.join(profileFolder, "DevToolsActivePort");
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const maximumWaitAttempts = 100;
+
+  for (let attempt = 0; attempt < maximumWaitAttempts; attempt += 1) {
     const portLine = readPortLine(portFile);
-    if (portLine) return portLine;
-    await sleep(100);
+    const isPortLineReady = portLine !== "";
+    if (isPortLineReady) return portLine;
+
+    const waitBetweenAttemptsMilliseconds = 100;
+
+    await sleep(waitBetweenAttemptsMilliseconds);
   }
   throw new Error("Chrome did not open a debug port");
 };
@@ -59,25 +91,31 @@ const findPageSocketUrl = async (port) => {
 
 const connectDevtools = async (socketUrl) => {
   const socket = new WebSocket(socketUrl);
-  await new Promise((resolve) => socket.addEventListener("open", resolve));
+  await new Promise((fulfill) => socket.addEventListener("open", fulfill));
   const waiting = new Map();
-  let lastId = 0;
+  let lastMessageId = 0;
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
-    const pending = waiting.get(message.id);
-    if (!pending) return;
+
+    const pendingCall = waiting.get(message.id);
+    const isUnknownReply = pendingCall == null;
+    if (isUnknownReply) return;
+
     waiting.delete(message.id);
-    if (message.error) {
-      pending.reject(new Error(message.error.message));
+
+    const isErrorReply = Boolean(message.error);
+    if (isErrorReply) {
+      pendingCall.reject(new Error(message.error.message));
       return;
     }
-    pending.resolve(message.result);
+
+    pendingCall.fulfill(message.result);
   });
-  const send = (method, params = {}) =>
-    new Promise((resolve, reject) => {
-      lastId += 1;
-      waiting.set(lastId, { resolve, reject });
-      socket.send(JSON.stringify({ id: lastId, method, params }));
+  const send = (method, parameters = {}) =>
+    new Promise((fulfill, reject) => {
+      lastMessageId += 1;
+      waiting.set(lastMessageId, { fulfill, reject });
+      socket.send(JSON.stringify({ id: lastMessageId, method, params: parameters }));
     });
   return { send, close: () => socket.close() };
 };
@@ -88,33 +126,44 @@ const evaluate = async (devtools, expression) => {
 };
 
 const saveScreenshot = async (devtools, fileName) => {
-  const screenshot = await devtools.send("Page.captureScreenshot", { format: "jpeg", quality: 75 });
+  const screenshotJpegQuality = 75;
+
+  const screenshot = await devtools.send("Page.captureScreenshot", { format: "jpeg", quality: screenshotJpegQuality });
   const imageBytes = Buffer.from(screenshot.data, "base64");
   const filePath = path.join(outFolder, fileName);
   writeFileSync(filePath, imageBytes);
 };
 
-const studyPage = () => {
-  const topCounts = (values) => {
+// Runs inside the browser through evaluate, so it must not use anything from this file.
+const readPageStudy = () => {
+  const countMostCommon = (styleSamples) => {
     const counts = new Map();
-    for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+    for (const styleSample of styleSamples) counts.set(styleSample, (counts.get(styleSample) || 0) + 1);
     const sorted = [...counts.entries()].sort((first, second) => second[1] - first[1]);
-    return sorted.slice(0, 12);
+    const mostCommonCount = 12;
+
+    return sorted.slice(0, mostCommonCount);
   };
-  const hasOwnText = (element) =>
+  const hasOwnString = (element) =>
     [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
-  const textElements = [...document.querySelectorAll("body *")].filter(hasOwnText);
-  const textStyles = textElements.map((element) => getComputedStyle(element));
-  const allStyles = [...document.querySelectorAll("body *")].map((element) => getComputedStyle(element));
+  const stringElements = [...document.querySelectorAll(EVERY_PAGE_ELEMENT_SELECTOR)].filter(hasOwnString);
+  const stringStyles = stringElements.map((element) => getComputedStyle(element));
+  const allStyles = [...document.querySelectorAll(EVERY_PAGE_ELEMENT_SELECTOR)].map((element) =>
+    getComputedStyle(element),
+  );
   const isShown = (element) => {
     const box = element.getBoundingClientRect();
     return box.width > 0 && box.height > 0;
   };
   const describeType = (selector) => {
     const element = document.querySelector(selector);
-    if (!element) return null;
+    const isElementMissing = element == null;
+    if (isElementMissing) return null;
+
     const style = getComputedStyle(element);
-    const sample = element.textContent.trim().slice(0, 80);
+    const maximumSampleCharacterCount = 80;
+
+    const sample = element.textContent.trim().slice(0, maximumSampleCharacterCount);
     return {
       sample,
       family: style.fontFamily,
@@ -127,18 +176,21 @@ const studyPage = () => {
   const pieceTags = ["a", "button", "img", "svg", "input"];
   const isPiece = (element) => {
     const style = getComputedStyle(element);
-    const isFilled = style.backgroundColor !== "rgba(0, 0, 0, 0)" || style.borderRadius !== "0px";
+    const isFilled = style.backgroundColor !== TRANSPARENT_COLOR || style.borderRadius !== ZERO_PIXEL_LENGTH;
     const tag = element.tagName.toLowerCase();
-    return hasOwnText(element) || pieceTags.includes(tag) || isFilled;
+    return hasOwnString(element) || pieceTags.includes(tag) || isFilled;
   };
   const describePiece = (element, sectionBox) => {
     const style = getComputedStyle(element);
     const box = element.getBoundingClientRect();
-    const family = style.fontFamily.split(",")[0];
-    const text = hasOwnText(element) ? element.textContent.trim().slice(0, 40) : "";
+    const family = style.fontFamily.split(LIST_SEPARATOR)[0];
+    const hasOwnLabel = hasOwnString(element);
+    const maximumOwnLabelLength = 40;
+
+    const ownLabel = hasOwnLabel ? element.textContent.trim().slice(0, maximumOwnLabelLength) : "";
     return {
       tag: element.tagName.toLowerCase(),
-      text,
+      text: ownLabel,
       box: [
         Math.round(box.left - sectionBox.left),
         Math.round(box.top - sectionBox.top),
@@ -154,21 +206,26 @@ const studyPage = () => {
   };
   const describeSection = (element) => {
     const heading = element.querySelector("h1, h2, h3");
-    const headingText = heading ? heading.textContent.trim().slice(0, 90) : "";
+    const hasHeading = heading != null;
+    const maximumHeadingLabelLength = 90;
+
+    const headingLabel = hasHeading ? heading.textContent.trim().slice(0, maximumHeadingLabelLength) : "";
     const box = element.getBoundingClientRect();
     const shownPieces = [...element.querySelectorAll("*")].filter(isShown).filter(isPiece);
+    const maximumDescribedPieces = 80;
+
     return {
       name: element.dataset.framerName || element.id || element.tagName.toLowerCase(),
-      heading: headingText,
+      heading: headingLabel,
       top: Math.round(box.top + window.scrollY),
       height: Math.round(box.height),
-      pieces: shownPieces.slice(0, 80).map((piece) => describePiece(piece, box)),
+      pieces: shownPieces.slice(0, maximumDescribedPieces).map((piece) => describePiece(piece, box)),
     };
   };
   const sections = [...document.querySelectorAll("section, footer")].filter(isShown).map(describeSection);
-  const describeVariant = (variant) => {
-    const initial = variant.initial || {};
-    const transition = variant.animate?.transition || {};
+  const describeVariant = (appearVariant) => {
+    const initial = appearVariant.initial || {};
+    const transition = appearVariant.animate?.transition || {};
     return JSON.stringify({
       from: { opacity: initial.opacity, x: initial.x, y: initial.y, scale: initial.scale, filter: initial.filter },
       type: transition.type,
@@ -179,61 +236,82 @@ const studyPage = () => {
     });
   };
   const appearScript = document.getElementById("__framer__appearAnimationsContent");
-  const appearEntries = appearScript ? Object.values(JSON.parse(appearScript.textContent)) : [];
-  const appearVariants = appearEntries.map((entry) => entry?.default).filter(Boolean);
-  const headline = document.querySelector("h1");
-  const headlineParts = headline ? headline.querySelectorAll("span[style*='inline-block']").length : 0;
+  const hasAppearScript = appearScript != null;
+  const appearModules = hasAppearScript ? Object.values(JSON.parse(appearScript.textContent)) : [];
+  const appearVariants = appearModules.map((appearModule) => appearModule?.default).filter(Boolean);
+  const headline = document.querySelector(HEADING_ONE_TAG);
+  const hasHeadline = headline != null;
+  const headlineParts = hasHeadline ? headline.querySelectorAll("span[style*='inline-block']").length : 0;
   return {
     title: document.title,
     pageHeight: document.documentElement.scrollHeight,
-    type: { h1: describeType("h1"), h2: describeType("h2"), h3: describeType("h3"), body: describeType("p") },
-    fonts: topCounts(textStyles.map((style) => style.fontFamily.split(",")[0])),
-    textColors: topCounts(textStyles.map((style) => style.color)),
-    backgrounds: topCounts(
-      allStyles.map((style) => style.backgroundColor).filter((color) => color !== "rgba(0, 0, 0, 0)"),
+    type: {
+      h1: describeType(HEADING_ONE_TAG),
+      h2: describeType("h2"),
+      h3: describeType("h3"),
+      body: describeType("p"),
+    },
+    fonts: countMostCommon(stringStyles.map((style) => style.fontFamily.split(LIST_SEPARATOR)[0])),
+    textColors: countMostCommon(stringStyles.map((style) => style.color)),
+    backgrounds: countMostCommon(
+      allStyles.map((style) => style.backgroundColor).filter((color) => color !== TRANSPARENT_COLOR),
     ),
-    radii: topCounts(allStyles.map((style) => style.borderRadius).filter((radius) => radius !== "0px")),
-    shadows: topCounts(allStyles.map((style) => style.boxShadow).filter((shadow) => shadow !== "none")),
+    radii: countMostCommon(
+      allStyles.map((style) => style.borderRadius).filter((radius) => radius !== ZERO_PIXEL_LENGTH),
+    ),
+    shadows: countMostCommon(allStyles.map((style) => style.boxShadow).filter((shadow) => shadow !== NONE_CSS_KEYWORD)),
     sections,
     motion: {
-      loadAnimations: topCounts(appearVariants.map(describeVariant)),
+      loadAnimations: countMostCommon(appearVariants.map(describeVariant)),
       headlineSplitParts: headlineParts,
-      cssAnimations: topCounts(allStyles.map((style) => style.animationName).filter((name) => name !== "none")),
-      backdropBlurs: topCounts(allStyles.map((style) => style.backdropFilter).filter((filter) => filter !== "none")),
+      cssAnimations: countMostCommon(
+        allStyles.map((style) => style.animationName).filter((name) => name !== NONE_CSS_KEYWORD),
+      ),
+      backdropBlurs: countMostCommon(
+        allStyles.map((style) => style.backdropFilter).filter((filter) => filter !== NONE_CSS_KEYWORD),
+      ),
     },
   };
 };
 
 const capture = async () => {
+  const settleDelayMilliseconds = 5000;
+  const scrollSettleDelayMilliseconds = 1800;
   const port = await waitForDebugPort();
   const socketUrl = await findPageSocketUrl(port);
   const devtools = await connectDevtools(socketUrl);
   await devtools.send("Page.enable");
+  const mobileBreakpointWidth = 600;
+
   await devtools.send("Emulation.setDeviceMetricsOverride", {
     width,
     height,
     deviceScaleFactor: 1,
-    mobile: width < 600,
+    mobile: width < mobileBreakpointWidth,
   });
   await devtools.send("Page.navigate", { url: flags.url });
   for (const [index, delay] of motionFrameDelays.entries()) {
     await sleep(delay);
     await saveScreenshot(devtools, `motion-${index}.jpg`);
   }
-  await sleep(settleDelay);
+  await sleep(settleDelayMilliseconds);
   const pageHeight = await evaluate(devtools, "document.documentElement.scrollHeight");
   const screenCount = Math.ceil(pageHeight / height);
   const screenTops = Array.from({ length: screenCount }, (_, index) => index * height);
-  for (const [index, top] of screenTops.entries()) {
-    await evaluate(devtools, `window.scrollTo(0, ${top})`);
-    await sleep(scrollSettleDelay);
-    const screenNumber = String(index).padStart(2, "0");
+  for (const [index, screenTop] of screenTops.entries()) {
+    await evaluate(devtools, `window.scrollTo(0, ${screenTop})`);
+    await sleep(scrollSettleDelayMilliseconds);
+    const screenNumberDigits = 2;
+
+    const screenNumber = String(index).padStart(screenNumberDigits, "0");
     await saveScreenshot(devtools, `screen-${screenNumber}.jpg`);
   }
-  const study = await evaluate(devtools, `(${studyPage})()`);
+  const pageStudy = await evaluate(devtools, `(${readPageStudy})()`);
   const studyPath = path.join(outFolder, "study.json");
-  const studyText = JSON.stringify(study, null, 2);
-  writeFileSync(studyPath, studyText);
+  const indentSpaceCount = 2;
+
+  const studyDocument = JSON.stringify(pageStudy, null, indentSpaceCount);
+  writeFileSync(studyPath, studyDocument);
   devtools.close();
   return screenCount;
 };
@@ -252,7 +330,7 @@ const chrome = spawn(
   ],
   { stdio: "ignore" },
 );
-const chromeExit = new Promise((resolve) => chrome.once("exit", resolve));
+const chromeExit = new Promise((fulfill) => chrome.once("exit", fulfill));
 
 try {
   const screenCount = await capture();

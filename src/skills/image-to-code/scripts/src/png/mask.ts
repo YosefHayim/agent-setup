@@ -1,49 +1,77 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-/** Mask a PNG by region for isolating animatable layers before tracing. */
 import { PNG } from "pngjs";
-import { hexToRgb, inPoly } from "#src/png.js";
-import type { MaskBox, MaskConfig } from "#src/types.js";
+import { isPointInPolygon, readRgbFromHex } from "#src/png.js";
+import type { MaskSettings } from "#src/types.js";
 
-const configPath = process.argv[2];
-if (!configPath) {
+const MAX_CHANNEL_LEVEL = 255;
+
+const WHITE_RGB: [number, number, number] = [MAX_CHANNEL_LEVEL, MAX_CHANNEL_LEVEL, MAX_CHANNEL_LEVEL];
+
+const GREEN_OFFSET = 1;
+const BLUE_OFFSET = 2;
+const ALPHA_OFFSET = 3;
+const BYTES_PER_PIXEL = 4;
+
+const settingsPath = process.argv[2];
+
+const isSettingsPathMissing = !settingsPath;
+if (isSettingsPathMissing) {
   console.error("usage: tsx src/png/mask.ts <config.json>");
-  process.exit(2);
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
 }
 
-const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as MaskConfig;
-const png = PNG.sync.read(fs.readFileSync(cfg.input));
-const { width: W, height: H, data: pixelBytes } = png;
+const maskSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as MaskSettings;
+const sourcePng = PNG.sync.read(fs.readFileSync(maskSettings.input));
+const { width: imageWidth, height: imageHeight, data: pixelBytes } = sourcePng;
 
-const boxFill = (px: number, py: number): [number, number, number] | null => {
-  for (const box of cfg.boxes || []) {
-    const [x, y, w, h, hex] = box as MaskBox;
-    if (px >= x && px < x + w && py >= y && py < y + h) return hex ? hexToRgb(hex) : [255, 255, 255];
+const polygon = maskSettings.polygon;
+const isKeepMode = maskSettings.mode === "keep";
+
+const isPolygonGiven = (polygonPoints: [number, number][] | undefined): polygonPoints is [number, number][] =>
+  polygonPoints != null;
+const isColorGiven = (color: string | undefined): color is string => color != null && color !== "";
+
+const readOutsideRgb = (outsideColor: string | undefined): [number, number, number] =>
+  isColorGiven(outsideColor) ? readRgbFromHex(outsideColor) : WHITE_RGB;
+
+const readBoxRgb = (pointX: number, pointY: number): [number, number, number] | null => {
+  for (const box of maskSettings.boxes ?? []) {
+    const [left, top, width, height, color] = box;
+
+    const isPointInsideBox = pointX >= left && pointX < left + width && pointY >= top && pointY < top + height;
+    if (isPointInsideBox) return isColorGiven(color) ? readRgbFromHex(color) : WHITE_RGB;
   }
   return null;
 };
 
-const paint = (i: number, rgb: [number, number, number]) => {
-  pixelBytes[i] = rgb[0];
-  pixelBytes[i + 1] = rgb[1];
-  pixelBytes[i + 2] = rgb[2];
-  pixelBytes[i + 3] = 255;
+const readPaintRgb = (pointX: number, pointY: number, isInsidePolygon: boolean): [number, number, number] | null => {
+  if (isKeepMode) return isInsidePolygon ? null : readOutsideRgb(maskSettings.outsideColor);
+
+  if (isInsidePolygon) return WHITE_RGB;
+  return readBoxRgb(pointX, pointY);
 };
 
-for (let y = 0; y < H; y++) {
-  for (let x = 0; x < W; x++) {
-    const i = (y * W + x) * 4;
-    const insidePoly = cfg.polygon ? inPoly(x, y, cfg.polygon) : false;
-    if (cfg.mode === "keep") {
-      if (!insidePoly) paint(i, cfg.outsideColor ? hexToRgb(cfg.outsideColor) : [255, 255, 255]);
-    } else {
-      if (insidePoly) paint(i, [255, 255, 255]);
-      else {
-        const fill = boxFill(x, y);
-        if (fill) paint(i, fill);
-      }
-    }
+const paint = (pixelStart: number, rgb: [number, number, number]) => {
+  pixelBytes[pixelStart] = rgb[0];
+  pixelBytes[pixelStart + GREEN_OFFSET] = rgb[1];
+  pixelBytes[pixelStart + BLUE_OFFSET] = rgb[2];
+  pixelBytes[pixelStart + ALPHA_OFFSET] = MAX_CHANNEL_LEVEL;
+};
+
+for (let pointY = 0; pointY < imageHeight; pointY++) {
+  for (let pointX = 0; pointX < imageWidth; pointX++) {
+    const pixelStart = (pointY * imageWidth + pointX) * BYTES_PER_PIXEL;
+
+    const isInsidePolygon = isPolygonGiven(polygon) && isPointInPolygon(pointX, pointY, polygon);
+    const paintRgb = readPaintRgb(pointX, pointY, isInsidePolygon);
+
+    const hasPaintRgb = paintRgb != null;
+    if (hasPaintRgb) paint(pixelStart, paintRgb);
   }
 }
-fs.writeFileSync(cfg.output, PNG.sync.write(png));
-console.log(`wrote ${cfg.output} (${cfg.mode})`);
+
+fs.writeFileSync(maskSettings.output, PNG.sync.write(sourcePng));
+console.log(`wrote ${maskSettings.output} (${maskSettings.mode})`);
