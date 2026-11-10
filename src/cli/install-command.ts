@@ -17,10 +17,21 @@ export const showInstallation = (installation: {
 }) =>
   Effect.gen(function* () {
     const features = `${installation.features.join(", ")} (${installation.scope})`;
-    yield* TerminalUI.success(
-      installation._tag === "installed" ? `Installed ${features}` : `Already current: ${features}`,
-    );
-    if (installation.agents.length > 0) yield* TerminalUI.detail(`Agents: ${installation.agents.join(", ")}`);
+    yield* Effect.tryPromise({
+      try: () =>
+        TerminalUI.success(
+          installation._tag === "installed" ? `Installed ${features}` : `Already current: ${features}`,
+        ),
+      catch: (error) => error,
+    });
+
+    const hasAgents = installation.agents.length > 0;
+    if (hasAgents) {
+      yield* Effect.tryPromise({
+        try: () => TerminalUI.detail(`Agents: ${installation.agents.join(", ")}`),
+        catch: (error) => error,
+      });
+    }
   });
 
 export const installCommand = Command.make(
@@ -32,7 +43,10 @@ export const installCommand = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      if (args.format === "text") yield* TerminalUI.intro("install");
+      const isTextFormat = args.format === "text";
+      if (isTextFormat) {
+        yield* Effect.tryPromise({ try: () => TerminalUI.intro("install"), catch: (error) => error });
+      }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
       const installation = yield* install({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
@@ -44,11 +58,11 @@ export const installCommand = Command.make(
         configuration: { _tag: "automatic" },
       });
       if (args.format === "json") {
-        yield* TerminalUI.json(installation);
+        yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(installation), catch: (error) => error });
         return;
       }
 
       yield* showInstallation(installation);
-      yield* TerminalUI.outro("Done.");
+      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
     }),
 ).pipe(Command.withDescription("Add catalog defaults or the named features; installed features are kept"));

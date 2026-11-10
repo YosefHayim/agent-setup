@@ -7,33 +7,44 @@ import { featureCatalog } from "../catalog/feature-catalog.js";
 import { formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const showFeatureList = TerminalUI.note(
-  featureCatalog
-    .map(
-      (feature) =>
-        `${feature.id.padEnd(24)} ${feature.title}${feature.selectedByDefault ? " · default" : ""}\n${"".padEnd(26)}${feature.summary}`,
-    )
-    .join("\n"),
-  "Features",
-);
+export const showFeatureList = Effect.tryPromise({
+  try: () =>
+    TerminalUI.note(
+      featureCatalog
+        .map(
+          (feature) =>
+            `${feature.id.padEnd(24)} ${feature.title}${feature.selectedByDefault ? " · default" : ""}\n${"".padEnd(26)}${feature.summary}`,
+        )
+        .join("\n"),
+      "Features",
+    ),
+  catch: (error) => error,
+});
 
 export const catalogCommand = Command.make("catalog", { format: formatOption }, (args) =>
   Effect.gen(function* () {
     if (args.format === "json") {
-      yield* TerminalUI.json({
-        features: featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
-          id,
-          title,
-          summary,
-          selectedByDefault,
-          platform,
-        })),
+      yield* Effect.tryPromise({
+        try: () =>
+          TerminalUI.showDocument({
+            features: featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
+              id,
+              title,
+              summary,
+              selectedByDefault,
+              platform,
+            })),
+          }),
+        catch: (error) => error,
       });
       return;
     }
 
-    yield* TerminalUI.intro("catalog");
+    yield* Effect.tryPromise({ try: () => TerminalUI.intro("catalog"), catch: (error) => error });
     yield* showFeatureList;
-    yield* TerminalUI.outro("Install with `agent-setup install <feature-id>...`.");
+    yield* Effect.tryPromise({
+      try: () => TerminalUI.outro("Install with `agent-setup install <feature-id>...`."),
+      catch: (error) => error,
+    });
   }),
 ).pipe(Command.withDescription("List installable feature IDs and catalog defaults"));

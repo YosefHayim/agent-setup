@@ -34,15 +34,19 @@ const agentSummary = (host: HostScan): string => {
 const featureList = (ids: ReadonlyArray<string>) => (ids.length > 0 ? ids.join(", ") : "(none)");
 
 const pickFeatures = (initial: ReadonlyArray<string>) =>
-  TerminalUI.multiSelect({
-    message: "Select features (space toggles, enter confirms)",
-    choices: featureCatalog.map((feature) => ({
-      title: feature.title,
-      value: feature.id,
-      description: `${feature.id} · ${feature.summary}`,
-      selected: initial.includes(feature.id),
-    })),
-    initial,
+  Effect.tryPromise({
+    try: () =>
+      TerminalUI.multiSelect({
+        message: "Select features (space toggles, enter confirms)",
+        choices: featureCatalog.map((feature) => ({
+          title: feature.title,
+          value: feature.id,
+          description: `${feature.id} · ${feature.summary}`,
+          selected: initial.includes(feature.id),
+        })),
+        initial,
+      }),
+    catch: (error) => error,
   });
 
 const pickDestination = (verb: string) =>
@@ -84,13 +88,17 @@ const runInstall = Effect.gen(function* () {
 
 const runUpdate = Effect.gen(function* () {
   const { scope, host, destination } = yield* pickDestination("Update");
-  const mode = yield* TerminalUI.selectOne<"preserve" | "selected">({
-    message: "Feature selection",
-    choices: [
-      { title: "Preserve installed set", value: "preserve", description: "refresh payload only" },
-      { title: "Choose features", value: "selected", description: "unticked installed features are removed" },
-    ],
-    initial: "preserve",
+  const mode = yield* Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne<"preserve" | "selected">({
+        message: "Feature selection",
+        choices: [
+          { title: "Preserve installed set", value: "preserve", description: "refresh payload only" },
+          { title: "Choose features", value: "selected", description: "unticked installed features are removed" },
+        ],
+        initial: "preserve",
+      }),
+    catch: (error) => error,
   });
   const path = yield* Path.Path;
   const receiptSnapshot = yield* Effect.tryPromise({
@@ -149,12 +157,19 @@ const runUninstall = Effect.gen(function* () {
 
 const runWorkflow = Effect.gen(function* () {
   const path = yield* Path.Path;
-  const workspace = yield* TerminalUI.optionalText({
-    message: "Target workspace (repository root)",
-    fallback: path.resolve(process.cwd()),
+  const workspace = yield* Effect.tryPromise({
+    try: () =>
+      TerminalUI.optionalText({
+        message: "Target workspace (repository root)",
+        fallback: path.resolve(process.cwd()),
+      }),
+    catch: (error) => error,
   });
   const targetRoot = path.resolve(workspace);
-  const overwrite = yield* TerminalUI.confirm({ message: "Overwrite existing workflow files?", initialValue: false });
+  const overwrite = yield* Effect.tryPromise({
+    try: () => TerminalUI.confirm({ message: "Overwrite existing workflow files?", initialValue: false }),
+    catch: (error) => error,
+  });
   const templateDirectory = yield* workflowTemplateDirectory;
   yield* applyIfApproved({
     title: "Workflow scaffold plan",
@@ -178,34 +193,40 @@ const screens = {
   uninstall: runUninstall,
   config: runConfig,
   doctor: checkBothScopes.pipe(Effect.flatMap((scopes) => Effect.forEach(scopes, showScopeHealth))),
-  catalog: TerminalUI.intro("catalog").pipe(Effect.zipRight(showFeatureList)),
+  catalog: Effect.tryPromise({ try: () => TerminalUI.intro("catalog"), catch: (error) => error }).pipe(
+    Effect.zipRight(showFeatureList),
+  ),
   workflow: runWorkflow,
 };
 
 export const menuCommand = Command.make("menu", {}, () =>
   Effect.gen(function* () {
-    yield* TerminalUI.intro("menu");
-    const action = yield* TerminalUI.selectOne<keyof typeof screens | "exit">({
-      message: "What would you like to do?",
-      choices: [
-        { title: "Install", value: "install", description: "features + hooks (plan → approve)" },
-        { title: "Update", value: "update", description: "refresh installation" },
-        { title: "Uninstall", value: "uninstall", description: "remove receipt-owned install" },
-        { title: "Configure", value: "config", description: "show / set / reset" },
-        { title: "Doctor", value: "doctor", description: "read-only health check" },
-        { title: "Catalog", value: "catalog", description: "list feature IDs" },
-        { title: "Workflow scaffold", value: "workflow", description: "CI + publish templates" },
-        { title: "Exit", value: "exit", description: "close the menu" },
-      ],
-      initial: "install",
+    yield* Effect.tryPromise({ try: () => TerminalUI.intro("menu"), catch: (error) => error });
+    const action = yield* Effect.tryPromise({
+      try: () =>
+        TerminalUI.selectOne<keyof typeof screens | "exit">({
+          message: "What would you like to do?",
+          choices: [
+            { title: "Install", value: "install", description: "features + hooks (plan → approve)" },
+            { title: "Update", value: "update", description: "refresh installation" },
+            { title: "Uninstall", value: "uninstall", description: "remove receipt-owned install" },
+            { title: "Configure", value: "config", description: "show / set / reset" },
+            { title: "Doctor", value: "doctor", description: "read-only health check" },
+            { title: "Catalog", value: "catalog", description: "list feature IDs" },
+            { title: "Workflow scaffold", value: "workflow", description: "CI + publish templates" },
+            { title: "Exit", value: "exit", description: "close the menu" },
+          ],
+          initial: "install",
+        }),
+      catch: (error) => error,
     });
     if (action === "exit") {
-      yield* TerminalUI.outro("Closed.");
+      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Closed."), catch: (error) => error });
       return;
     }
 
     yield* screens[action];
-    yield* TerminalUI.outro("Done.");
+    yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
   }),
 ).pipe(
   Command.withDescription("Interactive TUI: same options as CLI args, ordered plan preview, approve before apply"),

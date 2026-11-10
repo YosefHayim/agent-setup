@@ -15,7 +15,11 @@ export const showUpdate = (updateSummary: {
   readonly features: ReadonlyArray<string>;
 }) => {
   const features = `${updateSummary.features.join(", ")} (${updateSummary.scope})`;
-  return TerminalUI.success(updateSummary._tag === "updated" ? `Updated ${features}` : `Already current: ${features}`);
+  return Effect.tryPromise({
+    try: () =>
+      TerminalUI.success(updateSummary._tag === "updated" ? `Updated ${features}` : `Already current: ${features}`),
+    catch: (error) => error,
+  });
 };
 
 export const updateCommand = Command.make(
@@ -27,7 +31,10 @@ export const updateCommand = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      if (args.format === "text") yield* TerminalUI.intro("update");
+      const isTextFormat = args.format === "text";
+      if (isTextFormat) {
+        yield* Effect.tryPromise({ try: () => TerminalUI.intro("update"), catch: (error) => error });
+      }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
       const updateSummary = yield* update({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
@@ -39,11 +46,11 @@ export const updateCommand = Command.make(
         configuration: { _tag: "automatic" },
       });
       if (args.format === "json") {
-        yield* TerminalUI.json(updateSummary);
+        yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(updateSummary), catch: (error) => error });
         return;
       }
 
       yield* showUpdate(updateSummary);
-      yield* TerminalUI.outro("Done.");
+      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
     }),
 ).pipe(Command.withDescription("Refresh every installed feature and keep the receipt selection"));
