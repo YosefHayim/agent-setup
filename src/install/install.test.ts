@@ -84,8 +84,8 @@ const readReceipt = async (root: string) => {
 
 // e.g. {"hooks":{"Stop":[{"hooks":[{"command":"node \\"/x.js\\""}]}]}} → ['node "/x.js"']
 const hookCommands = (settingsText: string): ReadonlyArray<string> =>
-  [...settingsText.matchAll(/"command"\s*:\s*("(?:[^"\\]|\\.)*")/g)].flatMap((match) =>
-    match[1] === undefined ? [] : [String(JSON.parse(match[1]))],
+  [...settingsText.matchAll(/"command"\s*:\s*("(?:[^"\\]|\\.)*")/g)].flatMap((commandMatch) =>
+    commandMatch[1] == null ? [] : [String(JSON.parse(commandMatch[1]))],
   );
 
 const installRequest = (input: { root: string; preparedRoot: string }) => ({
