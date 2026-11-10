@@ -29,12 +29,13 @@ const isFilePresent = async (filePath: string): Promise<boolean> => {
 };
 
 const findPackageRootAbove = async (directory: string, moduleDirectory: string): Promise<string> => {
-  const isPackageJsonHere = await isFilePresent(path.join(directory, "package.json"));
-  if (isPackageJsonHere) {
+  const isPackageDocumentHere = await isFilePresent(path.join(directory, "package.json"));
+  if (isPackageDocumentHere) {
     return directory;
   }
 
   const parentDirectory = path.dirname(directory);
+
   const isTopOfFileSystem = parentDirectory === directory;
   if (isTopOfFileSystem) {
     throw createPackageError(`no package.json above ${moduleDirectory}.`);
@@ -50,31 +51,32 @@ export const findPackageRoot = async (): Promise<string> => {
   return findPackageRootAbove(moduleDirectory, moduleDirectory);
 };
 
-const readManifestSource = async (packageJsonPath: string): Promise<string> => {
+const readManifestOrigin = async (packageDocumentPath: string): Promise<string> => {
   try {
-    return await readFile(packageJsonPath, "utf8");
+    return await readFile(packageDocumentPath, "utf8");
   } catch (error) {
-    throw createPackageError(`${packageJsonPath}: ${String(error)}`, error);
+    throw createPackageError(`${packageDocumentPath}: ${String(error)}`, error);
   }
 };
 
-const parseManifestJson = (packageJsonPath: string, manifestSource: string): unknown => {
+const parseManifestDocument = (packageDocumentPath: string, manifestOrigin: string): unknown => {
   try {
-    return JSON.parse(manifestSource);
+    return JSON.parse(manifestOrigin);
   } catch (error) {
-    throw createPackageError(`${packageJsonPath} is not valid JSON: ${String(error)}`, error);
+    throw createPackageError(`${packageDocumentPath} is not valid JSON: ${String(error)}`, error);
   }
 };
 
 export const readPackageVersion = async (): Promise<string> => {
-  const packageJsonPath = path.join(await findPackageRoot(), "package.json");
-  const manifestSource = await readManifestSource(packageJsonPath);
-  const manifestJson = parseManifestJson(packageJsonPath, manifestSource);
-  const manifestCheck = packageManifestSchema.safeParse(manifestJson);
+  const packageDocumentPath = path.join(await findPackageRoot(), "package.json");
+  const manifestOrigin = await readManifestOrigin(packageDocumentPath);
+  const manifestDocument = parseManifestDocument(packageDocumentPath, manifestOrigin);
+  const manifestCheck = packageManifestSchema.safeParse(manifestDocument);
+
   const isManifestValid = manifestCheck.success;
   if (isManifestValid) {
     return manifestCheck.data.version;
   }
 
-  throw createPackageError(`${packageJsonPath} has no valid version: ${joinZodIssueMessages(manifestCheck.error)}`);
+  throw createPackageError(`${packageDocumentPath} has no valid version: ${joinZodIssueMessages(manifestCheck.error)}`);
 };

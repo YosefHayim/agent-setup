@@ -4,9 +4,9 @@ import { z } from "zod";
 
 import { addDependencies, featureIdSchema, retiredFeatureIds } from "#src/catalog/feature-catalog.js";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
-import { decodeStrictText, isNotFound, replaceBytesWithBase64 } from "./file-bytes.js";
+import { decodeStrictString, isNotFound, replaceBytesWithBase64 } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
-import { type OwnedFile, ownedFileSchema, pathsConflict } from "./ownership.js";
+import { isPathsConflict, type OwnedFile, ownedFileSchema } from "./ownership.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
 export const scopeSchema = z.enum(["global", "project"]).describe("Installation scope that owns the receipt.");
@@ -19,10 +19,10 @@ export const versionSchema = nonEmptyTrimmedTextSchema.regex(
   "Receipt versions must use semantic version syntax.",
 );
 
-const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>): Array<ZodIssueDetail> => [
+const listOwnedFileListIssues = (files: ReadonlyArray<OwnedFile>): Array<ZodIssueDetail> => [
   ...files.flatMap((file, index) =>
     files.slice(index + 1).flatMap((candidate, offset) =>
-      pathsConflict(file.path, candidate.path)
+      isPathsConflict(file.path, candidate.path)
         ? [
             {
               path: [index + offset + 1, "path"],
@@ -32,19 +32,19 @@ const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>): Array<ZodIssueDet
         : [],
     ),
   ),
-  ...files.flatMap((file, index) =>
-    file.kind._tag === "receipt"
-      ? [{ path: [index, "kind"], message: "A receipt cannot record ownership of itself." }]
-      : [],
-  ),
+  ...files.flatMap((file, index) => {
+    const isReceiptKind = file.kind._tag === "receipt";
+    return isReceiptKind ? [{ path: [index, "kind"], message: "A receipt cannot record ownership of itself." }] : [];
+  }),
 ];
 
 // The receipt's own features in catalog order. A dependency the receipt does not list stays out of it.
-const listRecordedFeatures = (features: ReadonlyArray<string>, featureIdsWithDependencies: ReadonlyArray<string>) =>
-  featureIdsWithDependencies.filter((featureId) => features.includes(featureId));
+const listRecordedFeatures = (features: ReadonlyArray<string>, featureIdsWithCollaborators: ReadonlyArray<string>) =>
+  featureIdsWithCollaborators.filter((featureId) => features.includes(featureId));
 
-const receiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDetail> => {
+const listReceiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const dependencyCheck = addDependencies(features);
+
   const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
     const featureId = dependencyCheck.featureId;
@@ -54,11 +54,13 @@ const receiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDe
 
   const catalogOrderFeatures = listRecordedFeatures(features, dependencyCheck.featureIds);
   const mismatchIndex = features.findIndex((feature, index) => feature !== catalogOrderFeatures[index]);
+
   const isOrderWrong = mismatchIndex >= 0 || features.length !== catalogOrderFeatures.length;
   if (isOrderWrong) {
+    const hasMismatch = mismatchIndex >= 0;
     return [
       {
-        path: [mismatchIndex >= 0 ? mismatchIndex : features.length],
+        path: [hasMismatch ? mismatchIndex : features.length],
         message: "Receipt features must be unique and in catalog order.",
       },
     ];
@@ -68,7 +70,7 @@ const receiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDe
 };
 
 // A receipt from before a feature merge reads as the feature that replaced the retired ID.
-const withCurrentFeatureIds = (features: string[]): string[] => {
+const listWithCurrentFeatureIds = (features: string[]): string[] => {
   const hasRetiredFeatureId = features.some((feature) => retiredFeatureIds.has(feature));
 
   const isFeatureListCurrent = !hasRetiredFeatureId;
@@ -78,6 +80,7 @@ const withCurrentFeatureIds = (features: string[]): string[] => {
 
   const renamedFeatures = features.map((feature) => retiredFeatureIds.get(feature) || feature);
   const dependencyCheck = addDependencies(renamedFeatures);
+
   const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
     return renamedFeatures;
@@ -88,11 +91,11 @@ const withCurrentFeatureIds = (features: string[]): string[] => {
 
 const featureListSchema = z
   .array(z.string())
-  .transform(withCurrentFeatureIds)
+  .transform(listWithCurrentFeatureIds)
   .pipe(
     z
       .array(featureIdSchema)
-      .superRefine((features, context) => addZodIssueDetails(context, receiptFeatureIssues(features))),
+      .superRefine((features, scope) => addZodIssueDetails(scope, listReceiptFeatureIssues(features))),
   );
 
 export const receiptSchema = z
@@ -102,21 +105,21 @@ export const receiptSchema = z
     features: featureListSchema,
     ownedFiles: z
       .array(ownedFileSchema)
-      .superRefine((files, context) => addZodIssueDetails(context, ownedFileListIssues(files))),
+      .superRefine((files, scope) => addZodIssueDetails(scope, listOwnedFileListIssues(files))),
   })
   .describe("Ownership receipt: everything one installation scope owns.");
 
 export type Receipt = z.infer<typeof receiptSchema>;
 
-export const encodeReceiptJson = (receipt: Receipt): string => {
+export const encodeReceiptDocument = (receipt: Receipt): string => {
   const checkedReceipt = receiptSchema.parse(receipt);
 
   return JSON.stringify(checkedReceipt, replaceBytesWithBase64);
 };
 
-export const decodeReceiptJson = (json: string): Receipt => {
-  const parsedJson: unknown = JSON.parse(json);
-  const receiptReply = receiptSchema.safeParse(parsedJson);
+export const decodeReceiptDocument = (document: string): Receipt => {
+  const parsedDocument: unknown = JSON.parse(document);
+  const receiptReply = receiptSchema.safeParse(parsedDocument);
 
   const isReceiptInvalid = !receiptReply.success;
   if (isReceiptInvalid) {
@@ -127,19 +130,21 @@ export const decodeReceiptJson = (json: string): Receipt => {
 };
 
 const decodeReceiptBytes = (bytes: Uint8Array): Receipt => {
-  const textReply = decodeStrictText(bytes, "receipt.json");
-  const isTextInvalid = textReply._tag === "invalid";
-  if (isTextInvalid) {
-    throw new Error(textReply.message);
+  const stringReply = decodeStrictString(bytes, "receipt.json");
+
+  const isStringInvalid = stringReply._tag === "invalid";
+  if (isStringInvalid) {
+    throw new Error(stringReply.message);
   }
 
-  const duplicateProperty = findDuplicateJsonKey(textReply.fileContents);
-  const isPropertyDuplicated = duplicateProperty !== undefined;
+  const duplicateProperty = findDuplicateJsonKey(stringReply.fileContents);
+
+  const isPropertyDuplicated = duplicateProperty != null;
   if (isPropertyDuplicated) {
     throw new Error(`duplicate JSON property ${JSON.stringify(duplicateProperty)}`);
   }
 
-  return decodeReceiptJson(textReply.fileContents);
+  return decodeReceiptDocument(stringReply.fileContents);
 };
 
 export type ReceiptSnapshot = { _tag: "missing" } | { _tag: "present"; bytes: Uint8Array; receipt: Receipt };
@@ -176,6 +181,7 @@ const readReceiptFromBytes = (receiptPath: string, bytes: Uint8Array): ReceiptSn
 
 export const readReceipt = async (receiptPath: string): Promise<ReceiptSnapshot> => {
   const receiptBytes = await readReceiptBytesOrNull(receiptPath);
+
   const isReceiptMissing = receiptBytes === null;
   if (isReceiptMissing) {
     return missingReceiptSnapshot;

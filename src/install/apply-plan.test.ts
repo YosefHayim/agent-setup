@@ -20,12 +20,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyPlan } from "./apply-plan.js";
 import { checkPlan, type ExpectedCurrent, type Plan } from "./plan.js";
-import { decodeReceiptJson } from "./receipt.js";
-import { decodeRecoveryRecordJson } from "./recovery.js";
+import { decodeReceiptDocument } from "./receipt.js";
+import { decodeRecoveryDocument } from "./recovery.js";
 
 // Every fs/promises call the transaction makes goes through aroundCall, so a test can fail or hold one call.
 const injected = vi.hoisted(() => {
-  const passThroughCall = (_method: string, _args: ReadonlyArray<unknown>, run: () => Promise<unknown>) => run();
+  const passThroughCall = (_method: string, _argumentList: ReadonlyArray<unknown>, run: () => Promise<unknown>) =>
+    run();
 
   return { passThroughCall, aroundCall: passThroughCall };
 });
@@ -35,16 +36,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
   return {
     ...actual,
-    copyFile: (...args: Parameters<typeof actual.copyFile>) =>
-      injected.aroundCall("copyFile", args, () => actual.copyFile(...args)),
-    link: (...args: Parameters<typeof actual.link>) => injected.aroundCall("link", args, () => actual.link(...args)),
-    readFile: (...args: Parameters<typeof actual.readFile>) =>
-      injected.aroundCall("readFile", args, () => actual.readFile(...args)),
-    rename: (...args: Parameters<typeof actual.rename>) =>
-      injected.aroundCall("rename", args, () => actual.rename(...args)),
-    rm: (...args: Parameters<typeof actual.rm>) => injected.aroundCall("rm", args, () => actual.rm(...args)),
-    writeFile: (...args: Parameters<typeof actual.writeFile>) =>
-      injected.aroundCall("writeFile", args, () => actual.writeFile(...args)),
+    copyFile: (...argumentList: Parameters<typeof actual.copyFile>) =>
+      injected.aroundCall("copyFile", argumentList, () => actual.copyFile(...argumentList)),
+    link: (...callArguments: Parameters<typeof actual.link>) =>
+      injected.aroundCall("link", callArguments, () => actual.link(...callArguments)),
+    readFile: (...callArguments: Parameters<typeof actual.readFile>) =>
+      injected.aroundCall("readFile", callArguments, () => actual.readFile(...callArguments)),
+    rename: (...callArguments: Parameters<typeof actual.rename>) =>
+      injected.aroundCall("rename", callArguments, () => actual.rename(...callArguments)),
+    rm: (...callArguments: Parameters<typeof actual.rm>) =>
+      injected.aroundCall("rm", callArguments, () => actual.rm(...callArguments)),
+    writeFile: (...callArguments: Parameters<typeof actual.writeFile>) =>
+      injected.aroundCall("writeFile", callArguments, () => actual.writeFile(...callArguments)),
   };
 });
 
@@ -61,14 +64,14 @@ const receiptFile = ".agent-setup/receipt.json";
 const recoveryFile = ".agent-setup/recovery.json";
 const receiptTarget = { path: receiptFile, kind: { _tag: "receipt" }, owner: applicationOwner };
 
-const withForwardSlashes = (filePath: string): string => filePath.replaceAll("\\", "/");
+const createForwardSlashPath = (filePath: string): string => filePath.replaceAll("\\", "/");
 
 const neverAbortedSignal = new AbortController().signal;
 
 // Runs a plan that nobody aborts. The interrupt test passes its own controller instead.
 const applyPlanUninterrupted = (plan: Plan): Promise<void> => applyPlan(plan, neverAbortedSignal);
 
-const readFileName = (value: unknown): string => basename(String(value));
+const readFileName = (field: unknown): string => basename(String(field));
 
 // Transaction files live at <root>/.agent-setup-transaction-<id>/<prepared|snapshots>/<name>.
 const findRootOfTransactionFile = (filePath: string): string => dirname(dirname(dirname(filePath)));
@@ -78,7 +81,7 @@ const createExpectedFile = (bytes: Uint8Array): ExpectedCurrent => ({
   sha256: createHash("sha256").update(bytes).digest("hex"),
 });
 
-const createConfigFile = (path: string, previous: object = { _tag: "missing" }) => ({
+const createSettingsFile = (path: string, previous: object = { _tag: "missing" }) => ({
   path,
   kind: { _tag: "managedConfig" },
   owner: applicationOwner,
@@ -100,7 +103,7 @@ interface WritePlanRequest {
 
 const createWritePlan = (root: string, { files, receipt = expectedMissing }: WritePlanRequest): Plan => {
   const planned = Object.entries(files).map(([path, expectedCurrent]) => ({
-    file: createConfigFile(path),
+    file: createSettingsFile(path),
     expectedCurrent,
   }));
 
@@ -162,16 +165,19 @@ const expectMissingPaths = (root: string, relatives: ReadonlyArray<string>): voi
 };
 
 const listTransactionDirectories = (root: string): Array<string> =>
-  readdirSync(root).filter((entry) => entry.startsWith(".agent-setup-transaction-"));
+  readdirSync(root).filter((line) => line.startsWith(".agent-setup-transaction-"));
 
-const readPublishedReceipt = (root: string) => decodeReceiptJson(readFileSync(join(root, receiptFile), "utf8"));
+const readPublishedReceipt = (root: string) => decodeReceiptDocument(readFileSync(join(root, receiptFile), "utf8"));
 
-const readRecoveryRecord = (root: string) => decodeRecoveryRecordJson(readFileSync(join(root, recoveryFile), "utf8"));
+const readRecovery = (root: string) => decodeRecoveryDocument(readFileSync(join(root, recoveryFile), "utf8"));
 
 // Collects the message of a failure and of every failure it groups, so a test can find any one of them.
 const describeFailure = (failure: unknown): string => {
-  const ownMessage = failure instanceof Error ? failure.message : String(failure);
-  const groupedMessages = failure instanceof AggregateError ? failure.errors.map(describeFailure) : [];
+  const isPlainError = failure instanceof Error;
+  const ownMessage = isPlainError ? failure.message : String(failure);
+
+  const isAggregateFailure = failure instanceof AggregateError;
+  const groupedMessages = isAggregateFailure ? failure.errors.map(describeFailure) : [];
 
   return [ownMessage, ...groupedMessages].join("\n");
 };
@@ -215,9 +221,9 @@ const createGate = (): Gate => {
 const createInjectedFailure = (method: string): Error => new Error(`Injected ${method} failure.`);
 
 // Makes every call the predicate picks fail with an injected error; other calls run normally.
-const failCallsWhen = (isFailingCall: (method: string, args: ReadonlyArray<unknown>) => boolean): void => {
-  injected.aroundCall = async (method, args, run) => {
-    if (isFailingCall(method, args)) {
+const failCallsWhen = (isFailingCall: (method: string, argumentList: ReadonlyArray<unknown>) => boolean): void => {
+  injected.aroundCall = async (method, callArguments, run) => {
+    if (isFailingCall(method, callArguments)) {
       throw createInjectedFailure(method);
     }
 
@@ -226,13 +232,14 @@ const failCallsWhen = (isFailingCall: (method: string, args: ReadonlyArray<unkno
 };
 
 // Runs the race against the installation root right after the receipt is prepared, before any commit.
-const raceAfterReceiptPrepared = (race: (root: string) => void): void => {
-  injected.aroundCall = async (method, args, run) => {
+const createRaceAfterReceiptPrepared = (race: (root: string) => void): void => {
+  injected.aroundCall = async (method, argumentList, run) => {
     const callReply = await run();
-    const preparedReceiptPath = withForwardSlashes(String(args[0]));
+    const preparedReceiptPath = createForwardSlashPath(String(argumentList[0]));
+
     const isPreparedReceiptWrite = method === "writeFile" && preparedReceiptPath.endsWith("/prepared/receipt");
     if (isPreparedReceiptWrite) {
-      race(findRootOfTransactionFile(String(args[0])));
+      race(findRootOfTransactionFile(String(argumentList[0])));
     }
 
     return callReply;
@@ -241,10 +248,10 @@ const raceAfterReceiptPrepared = (race: (root: string) => void): void => {
 
 // Fails the commit rename of fail.txt, optionally after changing the workspace first.
 const failCommitOfFailFile = (beforeFailure?: (root: string) => void): void => {
-  injected.aroundCall = async (method, args, run) => {
-    const isFailingCommit = method === "rename" && readFileName(args[1]) === "fail.txt";
+  injected.aroundCall = async (method, argumentList, run) => {
+    const isFailingCommit = method === "rename" && readFileName(argumentList[1]) === "fail.txt";
     if (isFailingCommit) {
-      beforeFailure?.(dirname(String(args[1])));
+      beforeFailure?.(dirname(String(argumentList[1])));
       throw createInjectedFailure("rename");
     }
 
@@ -253,34 +260,34 @@ const failCommitOfFailFile = (beforeFailure?: (root: string) => void): void => {
 };
 
 // Logs each commit and each restore in order, and fails the commit of fail.txt.
-const recordTransactionOrder = (): void => {
+const saveTransactionOrder = (): void => {
   const appendOrder = (filePath: string, event: string) =>
     appendFileSync(join(findRootOfTransactionFile(filePath), ".transaction-order.log"), `${event}\n`);
 
-  const recordCommit = async (args: ReadonlyArray<unknown>, run: () => Promise<unknown>): Promise<unknown> => {
-    const isFailingCommit = readFileName(args[1]) === "fail.txt";
+  const saveCommit = async (argumentList: ReadonlyArray<unknown>, run: () => Promise<unknown>): Promise<unknown> => {
+    const isFailingCommit = readFileName(argumentList[1]) === "fail.txt";
     if (isFailingCommit) {
       throw createInjectedFailure("rename");
     }
 
     const commitReply = await run();
-    appendOrder(String(args[0]), `commit:${readFileName(args[1])}`);
+    appendOrder(String(argumentList[0]), `commit:${readFileName(argumentList[1])}`);
 
     return commitReply;
   };
 
-  injected.aroundCall = async (method, args, run) => {
-    const isRestore = method === "copyFile" && withForwardSlashes(String(args[0])).includes("/snapshots/");
+  injected.aroundCall = async (method, callArguments, run) => {
+    const isRestore = method === "copyFile" && createForwardSlashPath(String(callArguments[0])).includes("/snapshots/");
     if (isRestore) {
       const restoreReply = await run();
-      appendOrder(String(args[0]), `restore:${readFileName(args[1])}`);
+      appendOrder(String(callArguments[0]), `restore:${readFileName(callArguments[1])}`);
 
       return restoreReply;
     }
 
     const isCommit = method === "rename";
     if (isCommit) {
-      return recordCommit(args, run);
+      return saveCommit(callArguments, run);
     }
 
     return run();
@@ -290,14 +297,14 @@ const recordTransactionOrder = (): void => {
 const readTransactionOrder = (root: string): Array<string> =>
   readFileSync(join(root, ".transaction-order.log"), "utf8").trim().split("\n");
 
-const failedRollbackPlan = (root: string): Plan =>
+const createFailedRollbackPlan = (root: string): Plan =>
   createWritePlan(root, { files: { "existing.txt": createExpectedFile(originalBytes), "fail.txt": expectedMissing } });
 
 const failRollbackOfExistingFile = (): void => {
   failCallsWhen(
-    (method, args) =>
-      (method === "copyFile" && readFileName(args[1]) === "existing.txt") ||
-      (method === "rename" && readFileName(args[1]) === "fail.txt"),
+    (method, argumentList) =>
+      (method === "copyFile" && readFileName(argumentList[1]) === "existing.txt") ||
+      (method === "rename" && readFileName(argumentList[1]) === "fail.txt"),
   );
 };
 
@@ -414,8 +421,8 @@ describe("applyPlan", () => {
 
   it("guards unchanged owned targets before committing another file", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
-    const stableFile = createConfigFile("stable.txt");
-    const changedFile = createConfigFile("changed.txt");
+    const stableFile = createSettingsFile("stable.txt");
+    const changedFile = createSettingsFile("changed.txt");
     const plan = checkPlan({
       scope: "project",
       root,
@@ -466,7 +473,7 @@ describe("applyPlan", () => {
 
   it("applies write, restore, and remove operations before publishing ownership", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
-    const writtenFile = createConfigFile("write.txt");
+    const writtenFile = createSettingsFile("write.txt");
     const plan = checkPlan({
       scope: "project",
       root,
@@ -474,13 +481,13 @@ describe("applyPlan", () => {
         { _tag: "write", file: writtenFile, bytes: installedBytes, expectedCurrent: expectedMissing },
         {
           _tag: "restore",
-          file: createConfigFile("restore.txt", { _tag: "priorFile", bytes: originalBytes }),
+          file: createSettingsFile("restore.txt", { _tag: "priorFile", bytes: originalBytes }),
           bytes: originalBytes,
           expectedCurrent: createExpectedFile(installedBytes),
         },
         {
           _tag: "remove",
-          file: createConfigFile("remove.txt"),
+          file: createSettingsFile("remove.txt"),
           unownedBytes: new Uint8Array(),
           expectedCurrent: createExpectedFile(installedBytes),
         },
@@ -522,8 +529,8 @@ describe("applyPlan under injected filesystem faults", () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
     const pausedAfterRename = createGate();
     const releasePausedRename = createGate();
-    injected.aroundCall = async (method, args, run) => {
-      const isPausedRename = method === "rename" && readFileName(args[1]) === pausedAt;
+    injected.aroundCall = async (method, argumentList, run) => {
+      const isPausedRename = method === "rename" && readFileName(argumentList[1]) === pausedAt;
       if (isPausedRename) {
         const renameReply = await run();
         pausedAfterRename.open();
@@ -551,7 +558,7 @@ describe("applyPlan under injected filesystem faults", () => {
 
   it("commits the ownership receipt after every file", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
-    recordTransactionOrder();
+    saveTransactionOrder();
 
     await applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["first.txt", "second.txt"]) }));
 
@@ -565,7 +572,7 @@ describe("applyPlan under injected filesystem faults", () => {
     const files = Object.fromEntries(
       Object.entries(seeded).map(([relative, bytes]) => [relative, createExpectedFile(bytes)]),
     );
-    recordTransactionOrder();
+    saveTransactionOrder();
 
     await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files })));
 
@@ -584,7 +591,7 @@ describe("applyPlan under injected filesystem faults", () => {
     mkdirSync(join(root, "safe"));
     mkdirSync(outside);
     temporaryDirectories.push(outside);
-    raceAfterReceiptPrepared((raceRoot) => {
+    createRaceAfterReceiptPrepared((raceRoot) => {
       renameSync(join(raceRoot, "safe"), join(raceRoot, "safe-before-swap"));
       symlinkSync(`${raceRoot}-outside`, join(raceRoot, "safe"));
     });
@@ -603,7 +610,7 @@ describe("applyPlan under injected filesystem faults", () => {
     mkdirSync(join(root, ".agent-setup"));
     mkdirSync(outside);
     temporaryDirectories.push(outside);
-    raceAfterReceiptPrepared((raceRoot) => {
+    createRaceAfterReceiptPrepared((raceRoot) => {
       renameSync(join(raceRoot, ".agent-setup"), join(raceRoot, ".agent-setup-before-swap"));
       symlinkSync(`${raceRoot}-recovery-outside`, join(raceRoot, ".agent-setup"));
     });
@@ -630,8 +637,9 @@ describe("applyPlan under injected filesystem faults", () => {
     "cleans up without mutating destinations when recovery marker publication $name",
     async ({ failsMarkerLink, cause }) => {
       const root = createTemporaryDirectory("agent-setup-apply-");
-      injected.aroundCall = async (method, args, run) => {
-        const isMarkerLink = method === "link" && readFileName(args[1]) === "recovery.json";
+      injected.aroundCall = async (method, callArguments, run) => {
+        const isMarkerLink = method === "link" && readFileName(callArguments[1]) === "recovery.json";
+
         const isMarkerLinkThatThrowsAfterLinking = isMarkerLink && failsMarkerLink;
         if (isMarkerLinkThatThrowsAfterLinking) {
           await run();
@@ -664,8 +672,9 @@ describe("applyPlan under injected filesystem faults", () => {
     const releaseWinner = createGate();
     const markerLinkArrivals = { count: 0 };
     // Both writers reach the marker link together; the winner then holds the marker until released.
-    const arriveAtMarkerLink = async (): Promise<void> => {
+    const createStopAtMarkerLink = async (): Promise<void> => {
       markerLinkArrivals.count += 1;
+
       const isSecondArrival = markerLinkArrivals.count === 2;
       if (isSecondArrival) {
         bothWritersArrived.open();
@@ -674,10 +683,10 @@ describe("applyPlan under injected filesystem faults", () => {
       await bothWritersArrived.wait;
     };
 
-    injected.aroundCall = async (method, args, run) => {
-      const isMarkerLink = method === "link" && readFileName(args[1]) === "recovery.json";
+    injected.aroundCall = async (method, callArguments, run) => {
+      const isMarkerLink = method === "link" && readFileName(callArguments[1]) === "recovery.json";
       if (isMarkerLink) {
-        await arriveAtMarkerLink();
+        await createStopAtMarkerLink();
         const linkReply = await run();
         await releaseWinner.wait;
 
@@ -699,10 +708,10 @@ describe("applyPlan under injected filesystem faults", () => {
       releaseWinner.open();
     }
 
-    const writerOutcomes = await Promise.all([firstWriter, secondWriter]);
+    const writerVerdicts = await Promise.all([firstWriter, secondWriter]);
 
-    expect(writerOutcomes.filter((outcome) => outcome._tag === "fulfilled")).toHaveLength(1);
-    expect(writerOutcomes.filter((outcome) => outcome._tag === "rejected")).toHaveLength(1);
+    expect(writerVerdicts.filter((verdict) => verdict._tag === "fulfilled")).toHaveLength(1);
+    expect(writerVerdicts.filter((writerVerdict) => writerVerdict._tag === "rejected")).toHaveLength(1);
     expectFileBytes(root, "settings.json", installedBytes);
     expect(readPublishedReceipt(root)).toEqual(plan.receipt.receipt);
     expectMissingPaths(root, [recoveryFile]);
@@ -712,7 +721,7 @@ describe("applyPlan under injected filesystem faults", () => {
   it("preserves bytes changed after capture instead of overwriting them", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
     seedFiles(root, { "changed.txt": originalBytes });
-    raceAfterReceiptPrepared((raceRoot) => {
+    createRaceAfterReceiptPrepared((raceRoot) => {
       writeFileSync(join(raceRoot, "changed.txt"), externallyChangedBytes);
     });
 
@@ -774,14 +783,14 @@ describe("applyPlan under injected filesystem faults", () => {
 
     expectFileBytes(root, "first.txt", externallyChangedBytes);
     expectMissingPaths(root, [receiptFile]);
-    expect(existsSync(readRecoveryRecord(root).transactionRoot)).toBe(true);
+    expect(existsSync(readRecovery(root).transactionRoot)).toBe(true);
   });
 
   it("rolls files back and restores the prior receipt bytes after the receipt commit fails", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
     const priorReceiptBytes = new Uint8Array([255, 0, 1, 128]);
     seedFiles(root, { "existing.txt": originalBytes, [receiptFile]: priorReceiptBytes });
-    failCallsWhen((method, args) => method === "rename" && readFileName(args[1]) === "receipt.json");
+    failCallsWhen((method, callArguments) => method === "rename" && readFileName(callArguments[1]) === "receipt.json");
 
     const failure = await catchFailure(
       applyPlanUninterrupted(
@@ -802,14 +811,14 @@ describe("applyPlan under injected filesystem faults", () => {
     {
       name: "preparing",
       failed: "second.txt",
-      isFailingCall: (method: string, args: ReadonlyArray<unknown>) =>
-        method === "writeFile" && withForwardSlashes(String(args[0])).includes("/prepared/1"),
+      isFailingCall: (method: string, callArguments: ReadonlyArray<unknown>) =>
+        method === "writeFile" && createForwardSlashPath(String(callArguments[0])).includes("/prepared/1"),
     },
     {
       name: "capturing a snapshot",
       failed: "snapshot-fail.txt",
-      isFailingCall: (method: string, args: ReadonlyArray<unknown>) =>
-        method === "readFile" && readFileName(args[0]) === "snapshot-fail.txt",
+      isFailingCall: (method: string, callArguments: ReadonlyArray<unknown>) =>
+        method === "readFile" && readFileName(callArguments[0]) === "snapshot-fail.txt",
     },
   ])(
     "leaves every destination unchanged and removes transaction state when $name fails",
@@ -834,7 +843,8 @@ describe("applyPlan under injected filesystem faults", () => {
   it("surfaces cleanup failure without rolling back the committed receipt", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
     failCallsWhen(
-      (method, args) => method === "rm" && withForwardSlashes(String(args[0])).includes("/.agent-setup-transaction-"),
+      (method, callArguments) =>
+        method === "rm" && createForwardSlashPath(String(callArguments[0])).includes("/.agent-setup-transaction-"),
     );
 
     await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
@@ -847,22 +857,23 @@ describe("applyPlan under injected filesystem faults", () => {
 
   it("retains the recovery marker and snapshots after committed cleanup fails", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
-    failCallsWhen((method, args) => method === "rm" && readFileName(args[0]) === "recovery.json");
+    failCallsWhen((method, callArguments) => method === "rm" && readFileName(callArguments[0]) === "recovery.json");
 
     await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
 
     expectFileBytes(root, "settings.json", installedBytes);
     expect(existsSync(join(root, receiptFile))).toBe(true);
-    expect(existsSync(readRecoveryRecord(root).transactionRoot)).toBe(true);
+    expect(existsSync(readRecovery(root).transactionRoot)).toBe(true);
   });
 
   it("never unlinks a marker that changed before committed cleanup", async () => {
     const root = createTemporaryDirectory("agent-setup-apply-");
-    injected.aroundCall = async (method, args, run) => {
+    injected.aroundCall = async (method, callArguments, run) => {
       const callReply = await run();
-      const isReceiptCommit = method === "rename" && readFileName(args[1]) === "receipt.json";
+
+      const isReceiptCommit = method === "rename" && readFileName(callArguments[1]) === "receipt.json";
       if (isReceiptCommit) {
-        writeFileSync(join(dirname(String(args[1])), "recovery.json"), "changed marker");
+        writeFileSync(join(dirname(String(callArguments[1])), "recovery.json"), "changed marker");
       }
 
       return callReply;
@@ -880,14 +891,14 @@ describe("applyPlan under injected filesystem faults", () => {
     seedFiles(root, { "existing.txt": originalBytes });
     failRollbackOfExistingFile();
 
-    const failure = await catchFailure(applyPlanUninterrupted(failedRollbackPlan(root)));
+    const failure = await catchFailure(applyPlanUninterrupted(createFailedRollbackPlan(root)));
 
-    const failureText = describeFailure(failure);
-    expect(failureText).toContain("Injected rename failure");
-    expect(failureText).toContain("Injected copyFile failure");
+    const failureString = describeFailure(failure);
+    expect(failureString).toContain("Injected rename failure");
+    expect(failureString).toContain("Injected copyFile failure");
     expectMissingPaths(root, ["existing.txt", receiptFile]);
 
-    const recovery = readRecoveryRecord(root);
+    const recovery = readRecovery(root);
     const canonicalRoot = realpathSync(root);
     const canonicalOriginalPath = join(canonicalRoot, "existing.txt");
     expect(recovery._tag).toBe("pending");
@@ -900,6 +911,7 @@ describe("applyPlan under injected filesystem faults", () => {
     const snapshotOriginal = snapshot?.original;
     const isFileSnapshot = snapshotOriginal?._tag === "file";
     expect(snapshotOriginal?._tag).toBe("file");
+
     if (isFileSnapshot) {
       expect([...readFileSync(snapshotOriginal.snapshotPath)]).toEqual([...originalBytes]);
     }
@@ -910,18 +922,19 @@ describe("applyPlan under injected filesystem faults", () => {
     writeFileSync(join(root, "existing.txt"), originalBytes, { mode: 0o600 });
     failRollbackOfExistingFile();
 
-    await settleOperation(applyPlanUninterrupted(failedRollbackPlan(root)));
+    await settleOperation(applyPlanUninterrupted(createFailedRollbackPlan(root)));
 
-    const recovery = readRecoveryRecord(root);
+    const recovery = readRecovery(root);
     const snapshot = recovery.snapshots.find((candidate) => candidate.targetPath.endsWith("/existing.txt"));
-    const modeOf = (filePath: string): number => statSync(filePath).mode & 0o777;
-    expect(modeOf(recovery.transactionRoot)).toBe(0o700);
-    expect(modeOf(join(recovery.transactionRoot, "pending.json"))).toBe(0o600);
+    const readFileMode = (filePath: string): number => statSync(filePath).mode & 0o777;
+    expect(readFileMode(recovery.transactionRoot)).toBe(0o700);
+    expect(readFileMode(join(recovery.transactionRoot, "pending.json"))).toBe(0o600);
     const snapshotOriginal = snapshot?.original;
     const isFileSnapshot = snapshotOriginal?._tag === "file";
     expect(snapshotOriginal?._tag).toBe("file");
+
     if (isFileSnapshot) {
-      expect(modeOf(snapshotOriginal.snapshotPath)).toBe(0o600);
+      expect(readFileMode(snapshotOriginal.snapshotPath)).toBe(0o600);
     }
   });
 });

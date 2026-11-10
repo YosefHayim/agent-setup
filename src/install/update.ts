@@ -83,8 +83,9 @@ const wrapAsUpdateError = (error: unknown): Error => {
   return createUpdateError(readErrorMessage(error), error);
 };
 
-const parseUpdateRequest = (input: unknown): UpdateRequest => {
-  const requestCheck = updateRequestSchema.safeParse(input);
+const parseUpdateRequest = (details: unknown): UpdateRequest => {
+  const requestCheck = updateRequestSchema.safeParse(details);
+
   const isRequestInvalid = !requestCheck.success;
   if (isRequestInvalid) {
     throw createUpdateError(joinZodIssueMessages(requestCheck.error));
@@ -93,9 +94,10 @@ const parseUpdateRequest = (input: unknown): UpdateRequest => {
   return requestCheck.data;
 };
 
-const applyUpdate = async (input: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
-  const request = parseUpdateRequest(input);
+const applyUpdate = async (details: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
+  const request = parseUpdateRequest(details);
   const receiptSnapshot = await readReceipt(path.join(request.destination.root, receiptPath));
+
   const isReceiptMissing = receiptSnapshot._tag === "missing";
   if (isReceiptMissing) {
     throw createUpdateError("No ownership receipt exists at the requested scope.");
@@ -104,16 +106,18 @@ const applyUpdate = async (input: unknown, signal: AbortSignal): Promise<UpdateS
   const installedIds = receiptSnapshot.receipt.features;
   // A dependency the receipt does not list yet is added by this update, so it counts as installed here.
   const dependencyCheck = addDependencies(installedIds);
+
   const isInstalledFeatureUnknown = dependencyCheck.status === "unknown";
   if (isInstalledFeatureUnknown) {
     throw createUpdateError(`Unknown feature ${dependencyCheck.featureId}.`);
   }
 
-  const featureIdsWithDependencies = dependencyCheck.featureIds;
+  const featureIdsWithCollaborators = dependencyCheck.featureIds;
   const requestedFeatures = request.features;
   const isRefreshRequest = requestedFeatures._tag === "refresh";
   const refreshedIds = isRefreshRequest ? requestedFeatures.ids : [];
-  const missingId = refreshedIds.find((id) => !featureIdsWithDependencies.includes(id)) ?? null;
+  const missingId = refreshedIds.find((id) => !featureIdsWithCollaborators.includes(id)) ?? null;
+
   const isFeatureMissing = missingId !== null;
   if (isFeatureMissing) {
     throw createUpdateError(`Feature ${missingId} is not installed in this scope; use install to add it.`);
@@ -125,17 +129,18 @@ const applyUpdate = async (input: unknown, signal: AbortSignal): Promise<UpdateS
   const installRequest: InstallRequest = { ...request, features: { _tag: "selected", ids: featureIds } };
   const installSummary = await syncInstall({ request: installRequest, receiptSnapshot }, signal);
 
+  const isInstalledSummary = installSummary._tag === "installed";
   const updateSummary: UpdateSummary = {
     ...installSummary,
-    _tag: installSummary._tag === "installed" ? "updated" : "unchanged",
+    _tag: isInstalledSummary ? "updated" : "unchanged",
   };
 
   return updateSummary;
 };
 
-export const update = async (input: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
+export const update = async (details: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
   try {
-    return await applyUpdate(input, signal);
+    return await applyUpdate(details, signal);
   } catch (error) {
     throw wrapAsUpdateError(error);
   }

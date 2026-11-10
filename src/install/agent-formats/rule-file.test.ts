@@ -6,24 +6,26 @@ import { findAgent } from "#src/catalog/agent-catalog.js";
 import { findFeature } from "#src/catalog/feature-catalog.js";
 import { planRuleFiles, ruleFileRequestSchema } from "./rule-file.js";
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+const stringEncoder = new TextEncoder();
+const stringDecoder = new TextDecoder();
 const cursor = findAgent("cursor")!;
 const missingPrevious = { _tag: "missing" };
-const priorBytes = textEncoder.encode("user-authored rule\n");
+const priorBytes = stringEncoder.encode("user-authored rule\n");
 const priorFile = { _tag: "priorFile", bytes: priorBytes };
 
-const installedSkillFor = (featureId: string) => {
+const createInstalledSkill = (featureId: string) => {
   const feature = findFeature(featureId)!;
-  if (feature.installedSkill._tag !== "skill") {
+
+  const isInstalledSkillNotSkill = feature.installedSkill._tag !== "skill";
+  if (isInstalledSkillNotSkill) {
     throw new Error(`Feature ${featureId} does not install a skill.`);
   }
 
   return feature.installedSkill;
 };
 
-const makeCodeReadableSkill = installedSkillFor("make-code-readable");
-const imageToCodeSkill = installedSkillFor("image-to-code");
+const makeCodeReadableSkill = createInstalledSkill("make-code-readable");
+const imageToCodeSkill = createInstalledSkill("image-to-code");
 
 const ruleFileRequest = {
   agent: cursor,
@@ -47,6 +49,7 @@ const hashBytes = (bytes: Uint8Array): string => createHash("sha256").update(byt
 
 const writeAt = <Write>(plan: { writes: ReadonlyArray<Write> }, index: number): Write => {
   const write = plan.writes.at(index);
+
   const isThereNoWrite = write == null;
   if (isThereNoWrite) {
     throw new Error(`No planned write at index ${index}.`);
@@ -63,7 +66,7 @@ describe("planRuleFiles", () => {
       ".cursor/rules/make-code-readable.mdc",
       ".cursor/rules/image-to-code.mdc",
     ]);
-    expect(plan.writes.map((write) => textDecoder.decode(write.bytes))).toEqual([
+    expect(plan.writes.map((write) => stringDecoder.decode(write.bytes))).toEqual([
       "Start with a plain step.\n",
       "Convert a PNG.\n\n---\nThis divider is body content.\n",
     ]);
@@ -100,7 +103,7 @@ describe("planRuleFiles", () => {
     const plan = planRuleFiles(request);
     const write = writeAt(plan, 0);
 
-    expect(textDecoder.decode(write.bytes)).toBe("\r\n  Run the steps.\r\n");
+    expect(stringDecoder.decode(write.bytes)).toBe("\r\n  Run the steps.\r\n");
   });
 
   it.each([

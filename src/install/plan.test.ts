@@ -7,12 +7,12 @@ const oldHash = "111111111111111111111111111111111111111111111111111111111111111
 const newHash = "2222222222222222222222222222222222222222222222222222222222222222";
 const desiredBytes = new TextEncoder().encode("desired");
 const newSkillBytes = new TextEncoder().encode("new-skill");
-const newConfigBytes = new TextEncoder().encode("new-config");
+const newSettingsBytes = new TextEncoder().encode("new-config");
 const previousSkillBytes = new TextEncoder().encode("previous-skill");
 const previousInstructionBytes = new TextEncoder().encode("previous-instruction");
 
 const applicationOwner = { _tag: "application" };
-const agentOwner = (agentIds: ReadonlyArray<string>) => ({ _tag: "agent", agentIds });
+const createAgentOwner = (agentIds: ReadonlyArray<string>) => ({ _tag: "agent", agentIds });
 const missingPrevious = { _tag: "missing" };
 const expectedMissing = { _tag: "missing" };
 const expectedPresent = { _tag: "file", sha256: oldHash };
@@ -27,21 +27,21 @@ const runtimeFile = {
 const skillFile = {
   path: ".claude/skills/make-code-readable/SKILL.md",
   kind: { _tag: "skill" },
-  owner: agentOwner(["claude-code"]),
+  owner: createAgentOwner(["claude-code"]),
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: { _tag: "priorFile", bytes: previousSkillBytes } },
 };
 
-const ruleFileEntry = {
+const ruleFileLine = {
   path: ".cursor/rules/make-code-readable.mdc",
   kind: { _tag: "rule" },
-  owner: agentOwner(["cursor"]),
+  owner: createAgentOwner(["cursor"]),
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: missingPrevious },
 };
 
-const instructionFileEntry = {
+const instructionFileLine = {
   path: "AGENTS.md",
   kind: { _tag: "instruction" },
-  owner: agentOwner(["cline", "codex"]),
+  owner: createAgentOwner(["cline", "codex"]),
   ownership: {
     _tag: "managedBlock",
     filePreviouslyPresent: true,
@@ -51,10 +51,10 @@ const instructionFileEntry = {
   },
 };
 
-const jsonReferenceFile = {
+const documentReferenceFile = {
   path: ".continue/config.json",
   kind: { _tag: "instructionLink" },
-  owner: agentOwner(["continue"]),
+  owner: createAgentOwner(["continue"]),
   ownership: {
     _tag: "jsonValues",
     filePreviouslyPresent: true,
@@ -72,7 +72,7 @@ const jsonReferenceFile = {
 const yamlReferenceFile = {
   path: ".aider.conf.yml",
   kind: { _tag: "instructionLink" },
-  owner: agentOwner(["aider"]),
+  owner: createAgentOwner(["aider"]),
   ownership: {
     _tag: "yamlSequenceValue",
     filePreviouslyPresent: true,
@@ -108,7 +108,7 @@ const codexHooksFile = {
   },
 };
 
-const managedConfigFile = {
+const managedSettingsFile = {
   path: ".claude/agent-setup/config.json",
   kind: { _tag: "managedConfig" },
   owner: applicationOwner,
@@ -118,13 +118,13 @@ const managedConfigFile = {
 const desiredFiles = [
   runtimeFile,
   skillFile,
-  ruleFileEntry,
-  instructionFileEntry,
-  jsonReferenceFile,
+  ruleFileLine,
+  instructionFileLine,
+  documentReferenceFile,
   yamlReferenceFile,
   settingsFile,
   codexHooksFile,
-  managedConfigFile,
+  managedSettingsFile,
 ];
 
 const receiptTarget = { path: ".claude/agent-setup/receipt.json", kind: { _tag: "receipt" }, owner: applicationOwner };
@@ -157,7 +157,7 @@ const remove = (file: object) => ({
   expectedCurrent: expectedMissing,
 });
 
-const withOwnership = <File extends { readonly ownership: object }>(file: File, ownership: object) => ({
+const attachOwnership = <File extends { readonly ownership: object }>(file: File, ownership: object) => ({
   ...file,
   ownership: { ...file.ownership, ...ownership },
 });
@@ -175,7 +175,7 @@ const publishPlan = (operations: ReadonlyArray<object>, ownedFiles: ReadonlyArra
   },
 });
 
-const removalPlan = (operations: ReadonlyArray<object>) => ({
+const createRemovalPlan = (operations: ReadonlyArray<object>) => ({
   scope: "project",
   root: "/workspace",
   operations,
@@ -201,19 +201,21 @@ const installRequest = ({
   restorations = [],
   desired,
   writes = desired.map((file) => write(file)),
-}: InstallScenario) => ({
-  root: "/workspace",
-  previous:
-    previous === undefined
+}: InstallScenario) => {
+  const isPreviousMissing = previous == null;
+  return {
+    root: "/workspace",
+    previous: isPreviousMissing
       ? { _tag: "missing" }
       : { _tag: "receipt", receipt: { ...desiredReceipt, ownedFiles: previous } },
-  restorations,
-  desired: { receipt: { ...desiredReceipt, ownedFiles: desired }, writes },
-  receiptTarget,
-  receiptExpectedCurrent: previous === undefined ? expectedMissing : expectedPresent,
-});
+    restorations,
+    desired: { receipt: { ...desiredReceipt, ownedFiles: desired }, writes },
+    receiptTarget,
+    receiptExpectedCurrent: isPreviousMissing ? expectedMissing : expectedPresent,
+  };
+};
 
-const uninstallRequest = (ownedFiles: ReadonlyArray<object>, restorations: ReadonlyArray<object>) => ({
+const createUninstallRequest = (ownedFiles: ReadonlyArray<object>, restorations: ReadonlyArray<object>) => ({
   root: "/workspace",
   receipt: { ...desiredReceipt, ownedFiles },
   restorations,
@@ -221,7 +223,7 @@ const uninstallRequest = (ownedFiles: ReadonlyArray<object>, restorations: Reado
   receiptExpectedCurrent: expectedPresent,
 });
 
-const publishedReceipt = (ownedFiles: ReadonlyArray<object>) => ({
+const createPublishedReceipt = (ownedFiles: ReadonlyArray<object>) => ({
   _tag: "receiptPublish",
   target: receiptTarget,
   receipt: { ...desiredReceipt, ownedFiles },
@@ -229,7 +231,7 @@ const publishedReceipt = (ownedFiles: ReadonlyArray<object>) => ({
 });
 
 // Returns the rejection message; fails the test when the plan was accepted instead.
-const rejectionMessage = (checkRejects: () => unknown): string => {
+const readRejectionMessage = (checkRejects: () => unknown): string => {
   try {
     checkRejects();
   } catch (error) {
@@ -250,7 +252,7 @@ describe("checkPlan", () => {
     {
       name: "receipt-removal plan",
       plan: {
-        ...removalPlan([]),
+        ...createRemovalPlan([]),
         receipt: { _tag: "remove", target: receiptTarget, expectedCurrent: expectedPresent },
       },
     },
@@ -325,15 +327,15 @@ describe("checkPlan", () => {
         operations: [{ ...completePlan.operations[0], file: { ...runtimeFile, unexpected: true } }],
       },
     },
-  ])("rejects unknown keys on the $name", ({ input }) => {
-    expect(rejectionMessage(() => checkPlan(input))).toContain("Unrecognized key");
+  ])("rejects unknown keys on the $name", ({ input: details }) => {
+    expect(readRejectionMessage(() => checkPlan(details))).toContain("Unrecognized key");
   });
 
   it.each(["../outside", "/absolute/path", ".claude/../outside", "nested\\windows"])(
     "rejects escaping or non-canonical relative path %s",
     (path) => {
       expect(
-        rejectionMessage(() => checkPlan({ ...completePlan, operations: [write({ ...runtimeFile, path })] })),
+        readRejectionMessage(() => checkPlan({ ...completePlan, operations: [write({ ...runtimeFile, path })] })),
       ).toContain("path");
     },
   );
@@ -348,7 +350,7 @@ describe("checkPlan", () => {
   it.each(["C:workspace", "C:\\workspace", "C://workspace", "/workspace//nested", "C:/workspace/../outside"])(
     "rejects non-canonical absolute root %s",
     (root) => {
-      expect(rejectionMessage(() => checkPlan({ ...completePlan, root }))).toContain("root");
+      expect(readRejectionMessage(() => checkPlan({ ...completePlan, root }))).toContain("root");
     },
   );
 
@@ -361,53 +363,60 @@ describe("checkPlan", () => {
     {
       name: "parent and child targets",
       operations: [
-        write({ ...managedConfigFile, path: ".claude/agent-setup" }),
+        write({ ...managedSettingsFile, path: ".claude/agent-setup" }),
         write({ ...runtimeFile, path: ".claude/agent-setup/hooks/scratch-folder-guard.js" }),
       ],
       message: "conflicts with",
     },
   ])("rejects $name with a property-addressed issue", ({ operations, message }) => {
-    const checked = rejectionMessage(() => checkPlan({ ...completePlan, operations }));
+    const rejectedCheckMessage = readRejectionMessage(() => checkPlan({ ...completePlan, operations }));
 
-    expect(checked).toContain("operations.1.file.path");
-    expect(checked).toContain(message);
+    expect(rejectedCheckMessage).toContain("operations.1.file.path");
+    expect(rejectedCheckMessage).toContain(message);
   });
 
   it("rejects case-folded target collisions on common macOS and Windows filesystems", () => {
     const first = { ...runtimeFile, path: ".agent-setup/Hooks/scratch-folder-guard.js" };
-    const second = { ...managedConfigFile, path: ".agent-setup/hooks/SCRATCH-FOLDER-GUARD.JS" };
+    const second = { ...managedSettingsFile, path: ".agent-setup/hooks/SCRATCH-FOLDER-GUARD.JS" };
 
-    expect(rejectionMessage(() => checkPlan(removalPlan([remove(first), remove(second)])))).toContain(
+    expect(readRejectionMessage(() => checkPlan(createRemovalPlan([remove(first), remove(second)])))).toContain(
       "operations.1.file.path",
     );
   });
 
   it.each([
-    { name: "runtime owned by an agent", file: { ...runtimeFile, owner: agentOwner(["codex"]) } },
+    { name: "runtime owned by an agent", file: { ...runtimeFile, owner: createAgentOwner(["codex"]) } },
     { name: "skill owned by the application", file: { ...skillFile, owner: applicationOwner } },
     {
       name: "instruction with whole-file ownership",
-      file: { ...instructionFileEntry, ownership: skillFile.ownership },
+      file: { ...instructionFileLine, ownership: skillFile.ownership },
     },
     {
       name: "settings with managed-block ownership",
-      file: { ...settingsFile, ownership: instructionFileEntry.ownership },
+      file: { ...settingsFile, ownership: instructionFileLine.ownership },
     },
   ])("rejects invalid ownership-kind combination: $name", ({ file }) => {
-    expect(rejectionMessage(() => checkPlan({ ...completePlan, operations: [write(file)] }))).toContain("incompatible");
+    expect(readRejectionMessage(() => checkPlan({ ...completePlan, operations: [write(file)] }))).toContain(
+      "incompatible",
+    );
   });
 
   it.each([
-    { name: "empty agent ownership", owner: agentOwner([]) },
-    { name: "duplicate agent ownership", owner: agentOwner(["codex", "codex"]) },
+    { name: "empty agent ownership", owner: createAgentOwner([]) },
+    { name: "duplicate agent ownership", owner: createAgentOwner(["codex", "codex"]) },
   ])("rejects $name", ({ owner }) => {
     expect(
-      rejectionMessage(() => checkPlan({ ...completePlan, operations: [write({ ...instructionFileEntry, owner })] })),
+      readRejectionMessage(() =>
+        checkPlan({ ...completePlan, operations: [write({ ...instructionFileLine, owner })] }),
+      ),
     ).toContain("agentIds");
   });
 
   it.each([
-    { name: "owner", receipt: { ...completePlan.receipt, target: { ...receiptTarget, owner: agentOwner(["codex"]) } } },
+    {
+      name: "owner",
+      receipt: { ...completePlan.receipt, target: { ...receiptTarget, owner: createAgentOwner(["codex"]) } },
+    },
     { name: "kind", receipt: { ...completePlan.receipt, target: { ...receiptTarget, kind: { _tag: "runtime" } } } },
     { name: "scope", receipt: { ...completePlan.receipt, receipt: { ...desiredReceipt, scope: "global" } } },
   ])("rejects an inconsistent receipt $name", ({ receipt }) => {
@@ -418,7 +427,7 @@ describe("checkPlan", () => {
     const target = { ...receiptTarget, path: ".claude/agent-setup/manifest.json" };
 
     expect(
-      rejectionMessage(() => checkPlan({ ...completePlan, receipt: { ...completePlan.receipt, target } })),
+      readRejectionMessage(() => checkPlan({ ...completePlan, receipt: { ...completePlan.receipt, target } })),
     ).toContain("receipt.json");
   });
 
@@ -426,24 +435,26 @@ describe("checkPlan", () => {
     { reservedPath: ".claude/agent-setup/receipt.json", label: "receipt" },
     { reservedPath: ".claude/agent-setup/recovery.json", label: "recovery" },
   ])("rejects an operation conflicting with the reserved $label path", ({ reservedPath }) => {
-    const checked = rejectionMessage(() => checkPlan(removalPlan([remove({ ...runtimeFile, path: reservedPath })])));
+    const rejectedCheckMessage = readRejectionMessage(() =>
+      checkPlan(createRemovalPlan([remove({ ...runtimeFile, path: reservedPath })])),
+    );
 
-    expect(checked).toContain("operations.0.file.path");
-    expect(checked).toContain(reservedPath);
+    expect(rejectedCheckMessage).toContain("operations.0.file.path");
+    expect(rejectedCheckMessage).toContain(reservedPath);
   });
 
   it("rejects a published file conflicting with the reserved recovery path", () => {
     const file = { ...runtimeFile, path: ".claude/agent-setup/recovery.json/snapshot" };
-    const checked = rejectionMessage(() => checkPlan(publishPlan([write(file)], [file])));
+    const rejectedCheckMessage = readRejectionMessage(() => checkPlan(publishPlan([write(file)], [file])));
 
-    expect(checked).toContain("receipt.receipt.ownedFiles.0.path");
-    expect(checked).toContain("recovery.json");
+    expect(rejectedCheckMessage).toContain("receipt.receipt.ownedFiles.0.path");
+    expect(rejectedCheckMessage).toContain("recovery.json");
   });
 
   it("reserves receipt and recovery paths case-insensitively", () => {
     const file = { ...runtimeFile, path: ".CLAUDE/AGENT-SETUP/RECOVERY.JSON" };
 
-    expect(rejectionMessage(() => checkPlan(removalPlan([remove(file)])))).toContain("recovery.json");
+    expect(readRejectionMessage(() => checkPlan(createRemovalPlan([remove(file)])))).toContain("recovery.json");
   });
 
   it("represents receipt publication separately and last", () => {
@@ -457,37 +468,42 @@ describe("checkPlan", () => {
   });
 
   it("requires exact recorded prior bytes for a whole-file restoration", () => {
-    expect(rejectionMessage(() => checkPlan(removalPlan([restore(skillFile, desiredBytes)])))).toContain(
+    expect(readRejectionMessage(() => checkPlan(createRemovalPlan([restore(skillFile, desiredBytes)])))).toContain(
       "recorded prior bytes",
     );
-    expect(() => checkPlan(removalPlan([restore(runtimeFile, desiredBytes)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([restore(runtimeFile, desiredBytes)]))).toThrow();
   });
 
   it("allows deletion only when the receipt proves the whole file or partial host file was originally absent", () => {
-    const absentPartialFile = withOwnership(instructionFileEntry, { filePreviouslyPresent: false });
+    const absentPartialFile = attachOwnership(instructionFileLine, { filePreviouslyPresent: false });
 
-    expect(() => checkPlan(removalPlan([remove(runtimeFile), remove(absentPartialFile)]))).not.toThrow();
-    expect(() => checkPlan(removalPlan([remove(skillFile)]))).toThrow();
-    expect(() => checkPlan(removalPlan([remove(instructionFileEntry)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([remove(runtimeFile), remove(absentPartialFile)]))).not.toThrow();
+    expect(() => checkPlan(createRemovalPlan([remove(skillFile)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([remove(instructionFileLine)]))).toThrow();
   });
 
   it.each([
-    { name: "JSON", file: withOwnership(jsonReferenceFile, { filePreviouslyPresent: false }) },
-    { name: "YAML", file: withOwnership(yamlReferenceFile, { filePreviouslyPresent: false, previouslyPresent: true }) },
+    { name: "JSON", file: attachOwnership(documentReferenceFile, { filePreviouslyPresent: false }) },
+    {
+      name: "YAML",
+      file: attachOwnership(yamlReferenceFile, { filePreviouslyPresent: false, previouslyPresent: true }),
+    },
   ])("rejects $name partial-host deletion when receipt history proves unowned content must remain", ({ file }) => {
-    expect(() => checkPlan(removalPlan([remove(file)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([remove(file)]))).toThrow();
   });
 
   it("requires empty unowned bytes before deleting an absent partial host", () => {
-    const absentPartialFile = withOwnership(instructionFileEntry, { filePreviouslyPresent: false });
+    const absentPartialFile = attachOwnership(instructionFileLine, { filePreviouslyPresent: false });
 
     expect(
-      rejectionMessage(() => checkPlan(removalPlan([{ ...remove(absentPartialFile), unownedBytes: desiredBytes }]))),
+      readRejectionMessage(() =>
+        checkPlan(createRemovalPlan([{ ...remove(absentPartialFile), unownedBytes: desiredBytes }])),
+      ),
     ).toContain("no unowned bytes remain");
   });
 
   it("restores an originally present partial file even when its final bytes are empty", () => {
-    expect(() => checkPlan(removalPlan([restore(instructionFileEntry, new Uint8Array())]))).not.toThrow();
+    expect(() => checkPlan(createRemovalPlan([restore(instructionFileLine, new Uint8Array())]))).not.toThrow();
   });
 
   it("requires restore and remove actions to be absent from a published receipt", () => {
@@ -497,58 +513,60 @@ describe("checkPlan", () => {
 
   it("requires written file metadata to exactly match the published receipt", () => {
     expect(
-      rejectionMessage(() =>
-        checkPlan(publishPlan([write(withOwnership(runtimeFile, { installedHash: newHash }))], [runtimeFile])),
+      readRejectionMessage(() =>
+        checkPlan(publishPlan([write(attachOwnership(runtimeFile, { installedHash: newHash }))], [runtimeFile])),
       ),
     ).toContain("exactly match");
   });
 
   it("forbids normal desired writes in a receipt-removal plan", () => {
-    expect(() => checkPlan(removalPlan([write(runtimeFile)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([write(runtimeFile)]))).toThrow();
   });
 });
 
 describe("planInstall", () => {
   it("rejects desired receipt entries that have no one-to-one desired write", () => {
-    const checked = () =>
+    const runCheckWithoutDesiredWrite = () =>
       planInstall(installRequest({ desired: [runtimeFile, skillFile], writes: [write(runtimeFile)] }));
 
-    expect(rejectionMessage(checked)).toContain("Every desired receipt entry must have exactly one desired write");
+    expect(readRejectionMessage(runCheckWithoutDesiredWrite)).toContain(
+      "Every desired receipt entry must have exactly one desired write",
+    );
   });
 
   it.each([
     { name: "duplicate", writes: [write(runtimeFile), write(runtimeFile)] },
     { name: "extra", writes: [write(runtimeFile), write(skillFile)] },
-    { name: "metadata-mismatched", writes: [write(withOwnership(runtimeFile, { installedHash: newHash }))] },
+    { name: "metadata-mismatched", writes: [write(attachOwnership(runtimeFile, { installedHash: newHash }))] },
   ])("rejects $name desired writes", ({ writes }) => {
     expect(() => planInstall(installRequest({ desired: [runtimeFile], writes }))).toThrow();
   });
 
   it("adds, changes, removes only receipt-owned stale entries, omits unchanged state, and preserves restoration metadata", () => {
     const unchanged = runtimeFile;
-    const stale = { ...ruleFileEntry, path: ".cursor/rules/removed.mdc" };
+    const stale = { ...ruleFileLine, path: ".cursor/rules/removed.mdc" };
     const desiredChanged = {
       ...skillFile,
       ownership: { _tag: "wholeFile", installedHash: newHash, previous: missingPrevious },
     };
-    const preservedChanged = withOwnership(desiredChanged, { previous: skillFile.ownership.previous });
-    const added = managedConfigFile;
+    const preservedChanged = attachOwnership(desiredChanged, { previous: skillFile.ownership.previous });
+    const added = managedSettingsFile;
 
     const plan = planInstall(
       installRequest({
         previous: [unchanged, skillFile, stale],
         restorations: [remove(stale)],
         desired: [unchanged, desiredChanged, added],
-        writes: [write(unchanged), write(desiredChanged, newSkillBytes), write(added, newConfigBytes)],
+        writes: [write(unchanged), write(desiredChanged, newSkillBytes), write(added, newSettingsBytes)],
       }),
     );
 
     expect(plan.operations).toEqual([
       remove(stale),
       write(preservedChanged, newSkillBytes),
-      write(added, newConfigBytes),
+      write(added, newSettingsBytes),
     ]);
-    expect(plan.receipt).toEqual(publishedReceipt([unchanged, preservedChanged, added]));
+    expect(plan.receipt).toEqual(createPublishedReceipt([unchanged, preservedChanged, added]));
     expect(plan.preconditions).toEqual([{ path: unchanged.path, expectedCurrent: expectedMissing }]);
   });
 
@@ -561,55 +579,55 @@ describe("planInstall", () => {
   });
 
   it("does not reuse YAML restoration state when the owned key-reference pair changes", () => {
-    const previousYaml = withOwnership(yamlReferenceFile, { previouslyPresent: true });
-    const desiredYaml = withOwnership(yamlReferenceFile, {
+    const previousYaml = attachOwnership(yamlReferenceFile, { previouslyPresent: true });
+    const desiredYaml = attachOwnership(yamlReferenceFile, {
       filePreviouslyPresent: false,
       reference: "AGENT-SETUP.md",
       previouslyPresent: false,
     });
-    const preservedYaml = withOwnership(desiredYaml, { filePreviouslyPresent: true });
+    const preservedYaml = attachOwnership(desiredYaml, { filePreviouslyPresent: true });
     const plan = planInstall(installRequest({ previous: [previousYaml], desired: [desiredYaml] }));
 
     expect(plan.operations).toEqual([write(preservedYaml)]);
-    expect(plan.receipt).toEqual(publishedReceipt([preservedYaml]));
+    expect(plan.receipt).toEqual(createPublishedReceipt([preservedYaml]));
   });
 
   it("preserves original file absence while retaining previous values acquired by later JSON ownership", () => {
-    const previousFile = withOwnership(jsonReferenceFile, {
+    const previousFile = attachOwnership(documentReferenceFile, {
       filePreviouslyPresent: false,
       values: [{ pointer: "/rules/0", installed: { _tag: "value", hash: oldHash }, previous: missingPrevious }],
     });
-    const acquiredValue = {
+    const acquiredField = {
       pointer: "/rules/1",
       installed: { _tag: "value", hash: newHash },
       previous: { _tag: "value", value: "user-rule.md" },
     };
-    const desiredFile = withOwnership(jsonReferenceFile, {
+    const desiredFile = attachOwnership(documentReferenceFile, {
       values: [
         {
           pointer: "/rules/0",
           installed: { _tag: "value", hash: newHash },
           previous: { _tag: "value", value: "installed-rule.md" },
         },
-        acquiredValue,
+        acquiredField,
       ],
     });
-    const expectedFile = withOwnership(jsonReferenceFile, {
+    const expectedFile = attachOwnership(documentReferenceFile, {
       filePreviouslyPresent: false,
       values: [
         { pointer: "/rules/0", installed: { _tag: "value", hash: newHash }, previous: missingPrevious },
-        acquiredValue,
+        acquiredField,
       ],
     });
     const plan = planInstall(installRequest({ previous: [previousFile], desired: [desiredFile] }));
 
     expect(plan.operations).toEqual([write(expectedFile)]);
-    expect(plan.receipt).toEqual(publishedReceipt([expectedFile]));
+    expect(plan.receipt).toEqual(createPublishedReceipt([expectedFile]));
   });
 
   it("preserves prior created JSON containers while adding newly created ancestors", () => {
-    const previousFile = withOwnership(settingsFile, { filePreviouslyPresent: false });
-    const desiredFile = withOwnership(settingsFile, {
+    const previousFile = attachOwnership(settingsFile, { filePreviouslyPresent: false });
+    const desiredFile = attachOwnership(settingsFile, {
       createdContainers: ["/permissions"],
       values: [
         {
@@ -641,13 +659,13 @@ describe("planInstall", () => {
   });
 
   it("rejects acquiring JSON container deletion authority without a new owned pointer", () => {
-    const previousFile = withOwnership(settingsFile, { createdContainers: [] });
+    const previousFile = attachOwnership(settingsFile, { createdContainers: [] });
 
     expect(() => planInstall(installRequest({ previous: [previousFile], desired: [settingsFile] }))).toThrow();
   });
 
   it("migrates a whole-array settings receipt to hook entry ownership with its first-install history", () => {
-    const previousFile = withOwnership(settingsFile, {
+    const previousFile = attachOwnership(settingsFile, {
       createdContainers: [],
       values: [
         {
@@ -666,21 +684,21 @@ describe("planInstall", () => {
         events: [{ pointer: "/hooks/Stop", previouslyPresent: false, entries: [newHash] }],
       },
     };
-    const expectedFile = withOwnership(desiredFile, {
+    const expectedFile = attachOwnership(desiredFile, {
       filePreviouslyPresent: true,
       events: [{ pointer: "/hooks/Stop", previouslyPresent: true, entries: [newHash] }],
     });
     const plan = planInstall(installRequest({ previous: [previousFile], desired: [desiredFile] }));
 
     expect(plan.operations).toEqual([write(expectedFile)]);
-    expect(plan.receipt).toEqual(publishedReceipt([expectedFile]));
+    expect(plan.receipt).toEqual(createPublishedReceipt([expectedFile]));
   });
 
   it("rejects turning hook entry ownership back into whole-array settings values", () => {
     const previousFile = { ...settingsFile, ownership: codexHooksFile.ownership };
 
     expect(
-      rejectionMessage(() => planInstall(installRequest({ previous: [previousFile], desired: [settingsFile] }))),
+      readRejectionMessage(() => planInstall(installRequest({ previous: [previousFile], desired: [settingsFile] }))),
     ).toContain("Cannot change ownership from hookEntries to jsonValues");
   });
 
@@ -692,46 +710,46 @@ describe("planInstall", () => {
   });
 
   it("preserves retained managed-block and YAML restoration history", () => {
-    const desiredInstruction = withOwnership(instructionFileEntry, {
+    const desiredInstruction = attachOwnership(instructionFileLine, {
       filePreviouslyPresent: false,
       installedBodyHash: newHash,
     });
-    const expectedInstruction = withOwnership(desiredInstruction, { filePreviouslyPresent: true });
-    const previousYaml = withOwnership(yamlReferenceFile, { keyPreviouslyPresent: false, insertedPrefix: "\n" });
-    const desiredYaml = withOwnership(yamlReferenceFile, { filePreviouslyPresent: false });
-    const expectedYaml = withOwnership(yamlReferenceFile, { keyPreviouslyPresent: false, insertedPrefix: "\n" });
+    const expectedInstruction = attachOwnership(desiredInstruction, { filePreviouslyPresent: true });
+    const previousYaml = attachOwnership(yamlReferenceFile, { keyPreviouslyPresent: false, insertedPrefix: "\n" });
+    const desiredYaml = attachOwnership(yamlReferenceFile, { filePreviouslyPresent: false });
+    const expectedYaml = attachOwnership(yamlReferenceFile, { keyPreviouslyPresent: false, insertedPrefix: "\n" });
     const plan = planInstall(
       installRequest({
-        previous: [instructionFileEntry, previousYaml],
+        previous: [instructionFileLine, previousYaml],
         desired: [desiredInstruction, desiredYaml],
       }),
     );
 
     expect(plan.operations).toEqual([write(expectedInstruction)]);
-    expect(plan.receipt).toEqual(publishedReceipt([expectedInstruction, expectedYaml]));
+    expect(plan.receipt).toEqual(createPublishedReceipt([expectedInstruction, expectedYaml]));
   });
 
   it.each([
     {
       name: "the ownership tag",
       desiredFile: {
-        ...jsonReferenceFile,
+        ...documentReferenceFile,
         ownership: { ...yamlReferenceFile.ownership, reference: "AGENT-SETUP.md" },
       },
       issuePath: "desired.receipt.ownedFiles.0.ownership._tag",
     },
     {
       name: "the file kind or owner",
-      desiredFile: { ...settingsFile, path: jsonReferenceFile.path },
+      desiredFile: { ...settingsFile, path: documentReferenceFile.path },
       issuePath: "desired.receipt.ownedFiles.0.kind",
     },
   ])("rejects changing $name at an already receipted path", ({ desiredFile, issuePath }) => {
-    const checked = rejectionMessage(() =>
-      planInstall(installRequest({ previous: [jsonReferenceFile], desired: [desiredFile] })),
+    const rejectedCheckMessage = readRejectionMessage(() =>
+      planInstall(installRequest({ previous: [documentReferenceFile], desired: [desiredFile] })),
     );
 
-    expect(checked).toContain(issuePath);
-    expect(checked).toContain("remove the prior ownership first");
+    expect(rejectedCheckMessage).toContain(issuePath);
+    expect(rejectedCheckMessage).toContain("remove the prior ownership first");
   });
 });
 
@@ -746,7 +764,7 @@ describe.each([
   {
     planner: "planUninstall",
     plan: (restorations: ReadonlyArray<object>) =>
-      planUninstall(uninstallRequest([runtimeFile, skillFile], restorations)),
+      planUninstall(createUninstallRequest([runtimeFile, skillFile], restorations)),
   },
 ])("$planner restoration set", ({ plan }) => {
   it("emits one exact restoration per prior entry in reverse receipt order", () => {
@@ -755,7 +773,7 @@ describe.each([
 
   it.each([
     { name: "a missing", restorations: [remove(runtimeFile)] },
-    { name: "an extra", restorations: [...exactRestorations, remove(ruleFileEntry)] },
+    { name: "an extra", restorations: [...exactRestorations, remove(ruleFileLine)] },
     {
       name: "a duplicate",
       restorations: [restore(skillFile, previousSkillBytes), restore(skillFile, previousSkillBytes)],
@@ -763,7 +781,7 @@ describe.each([
     {
       name: "a metadata-mismatched",
       restorations: [
-        restore(withOwnership(skillFile, { installedHash: newHash }), previousSkillBytes),
+        restore(attachOwnership(skillFile, { installedHash: newHash }), previousSkillBytes),
         remove(runtimeFile),
       ],
     },
@@ -775,18 +793,18 @@ describe.each([
 describe("planUninstall", () => {
   it("uses exact reverse-order final restorations from receipt entries and removes the receipt last", () => {
     const restorations = [
-      restore(instructionFileEntry, previousInstructionBytes),
+      restore(instructionFileLine, previousInstructionBytes),
       restore(skillFile, previousSkillBytes),
       remove(runtimeFile),
     ];
-    const plan = planUninstall(uninstallRequest([runtimeFile, skillFile, instructionFileEntry], restorations));
+    const plan = planUninstall(createUninstallRequest([runtimeFile, skillFile, instructionFileLine], restorations));
 
     expect(plan.operations).toEqual(restorations);
     expect(plan.receipt).toEqual({ _tag: "remove", target: receiptTarget, expectedCurrent: expectedPresent });
   });
 
   it("rejects detection evidence and proves it cannot authorize a remove", () => {
-    const request = uninstallRequest([runtimeFile], [remove(runtimeFile)]);
+    const request = createUninstallRequest([runtimeFile], [remove(runtimeFile)]);
     const detection = { homePaths: [".cursor"], absolutePaths: [], commands: ["cursor"] };
 
     expect(() => planUninstall({ ...request, detection })).toThrow();

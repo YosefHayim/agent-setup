@@ -1,5 +1,3 @@
-/** Host files as install sees them: snapshot, expected-current guard, prior value, and checked file change. */
-
 import { readFile } from "node:fs/promises";
 
 import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
@@ -37,20 +35,21 @@ export const readFileSnapshot = async (filePath: string): Promise<FileSnapshot> 
   }
 };
 
-export const expectedCurrent = (snapshot: FileSnapshot): ExpectedCurrent => {
+export const readExpectedCurrent = (snapshot: FileSnapshot): ExpectedCurrent => {
   const isMissing = snapshot._tag === "missing";
 
   return isMissing ? { _tag: "missing" } : { _tag: "file", sha256: hashBytes(snapshot.bytes) };
 };
 
-export const previousFileValue = (snapshot: FileSnapshot): PreviousFileValue => {
+export const readPreviousFileField = (snapshot: FileSnapshot): PreviousFileValue => {
   const isMissing = snapshot._tag === "missing";
 
   return isMissing ? { _tag: "missing" } : { _tag: "priorFile", bytes: snapshot.bytes };
 };
 
-export const checkFileChange = (input: unknown): FileChange => {
-  const changeCheck = fileChangeSchema.safeParse(input);
+export const checkFileChange = (details: unknown): FileChange => {
+  const changeCheck = fileChangeSchema.safeParse(details);
+
   const isChangeInvalid = !changeCheck.success;
   if (isChangeInvalid) {
     throw createInstallError(`Generated file change is invalid: ${joinZodIssueMessages(changeCheck.error)}`);
@@ -59,36 +58,46 @@ export const checkFileChange = (input: unknown): FileChange => {
   return changeCheck.data;
 };
 
-export const previousReceiptFile = (receipt: Receipt | undefined, filePath: string): OwnedFile | undefined =>
-  receipt?.ownedFiles.find((file) => file.path === filePath);
+export const readPreviousReceiptFile = (receipt: Receipt | null, filePath: string): OwnedFile | null => {
+  const isReceiptMissing = receipt == null;
+  if (isReceiptMissing) {
+    return null;
+  }
+
+  return receipt.ownedFiles.find((file) => file.path === filePath) ?? null;
+};
 
 // A receipted file that already holds the bytes about to be written is adopted, not refused: an external
 // skill sync can reproduce our content, and rewriting identical bytes destroys nothing.
-export const previousWholeFile = (input: {
-  receipt: Receipt | undefined;
+export const readPreviousWholeFile = (details: {
+  receipt: Receipt | null;
   filePath: string;
   snapshot: FileSnapshot;
-  desiredBytes?: Uint8Array;
+  desiredBytes: Uint8Array | null;
 }): PreviousFileValue => {
-  const file = previousReceiptFile(input.receipt, input.filePath);
+  const file = readPreviousReceiptFile(details.receipt, details.filePath);
+
   const isNewFile = file == null;
   if (isNewFile) {
-    return previousFileValue(input.snapshot);
+    return readPreviousFileField(details.snapshot);
   }
 
   const ownership = file.ownership;
+
   const isOwnershipIncompatible = ownership._tag !== "wholeFile";
   if (isOwnershipIncompatible) {
-    throw createInstallError(`Receipted whole-file file ${input.filePath} has incompatible ownership.`);
+    throw createInstallError(`Receipted whole-file file ${details.filePath} has incompatible ownership.`);
   }
 
-  const snapshot = input.snapshot;
-  const installedContent = snapshot._tag === "file" && hashBytes(snapshot.bytes) === ownership.installedHash;
-  const desiredContent =
-    snapshot._tag === "file" && input.desiredBytes != null && bytesEqual(snapshot.bytes, input.desiredBytes);
-  const isChangedAfterInstall = !installedContent && !desiredContent;
+  const snapshot = details.snapshot;
+  const isSnapshotFile = snapshot._tag === "file";
+  const isInstalledBytes = isSnapshotFile && hashBytes(snapshot.bytes) === ownership.installedHash;
+  const isDesiredBytes =
+    isSnapshotFile && details.desiredBytes != null && bytesEqual(snapshot.bytes, details.desiredBytes);
+
+  const isChangedAfterInstall = !isInstalledBytes && !isDesiredBytes;
   if (isChangedAfterInstall) {
-    throw createInstallError(`Receipted whole-file file ${input.filePath} changed after installation.`);
+    throw createInstallError(`Receipted whole-file file ${details.filePath} changed after installation.`);
   }
 
   return ownership.previous;

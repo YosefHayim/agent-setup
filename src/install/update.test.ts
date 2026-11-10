@@ -28,7 +28,7 @@ const packageFiles = {
 };
 
 // A receipt written before active-run-reminder became a dependency of run-tasks-in-parallel.
-const RECEIPT_BEFORE_REMINDER_JSON = JSON.stringify({
+const RECEIPT_BEFORE_REMINDER_DOCUMENT = JSON.stringify({
   version: "0.12.0",
   scope: "project",
   features: ["organize-commits", "finish-and-push", "run-local-and-check", "run-tasks-in-parallel"],
@@ -81,11 +81,11 @@ const createWorkspace = async () => {
   };
 };
 
-const request = (input: { root: string; preparedRoot: string; features: ReadonlyArray<string> }) => ({
-  destination: { _tag: "project", root: input.root },
-  host: { homeRoot: input.root },
-  preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: input.features },
+const request = (details: { root: string; preparedRoot: string; features: ReadonlyArray<string> }) => ({
+  destination: { _tag: "project", root: details.root },
+  host: { homeRoot: details.root },
+  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
+  features: { _tag: "selected", ids: details.features },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "automatic" },
@@ -95,7 +95,7 @@ const selectedDefaults = { _tag: "selected", config: defaultConfig };
 
 describe("update", () => {
   it("restores removed feature files while retaining user bytes outside owned regions", async () => {
-    const { root, preparedRoot, writeFiles, readText, exists } = await createWorkspace();
+    const { root, preparedRoot, writeFiles, readText: readString, exists } = await createWorkspace();
     await writeFiles({
       "AGENTS.md": "User instructions.\n",
       ".claude/settings.json": '{\n  "theme": "dark"\n}\n',
@@ -119,11 +119,11 @@ describe("update", () => {
     ]) {
       expect(exists(removed)).toBe(false);
     }
-    expect(await readText("AGENTS.md")).toBe("User instructions.\n");
-    expect(await readText(".claude/settings.json")).toContain('"theme": "dark"');
-    expect(await readText(".claude/settings.json")).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
+    expect(await readString("AGENTS.md")).toBe("User instructions.\n");
+    expect(await readString(".claude/settings.json")).toContain('"theme": "dark"');
+    expect(await readString(".claude/settings.json")).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
 
-    const receipt = JSON.parse(await readText(".claude/agent-setup/receipt.json"));
+    const receipt = JSON.parse(await readString(".claude/agent-setup/receipt.json"));
     expect(receipt.features).toEqual(["scratch-folder-guard"]);
     // The make-code-readable skill files are removed with the feature, so none may remain in the receipt.
     const makeCodeReadableSkillFile = /(?:^|\/)make-code-readable(?:\/|\.)/;
@@ -215,7 +215,7 @@ describe("update", () => {
 
   it("resets a receipted config.json that no longer decodes and records the new bytes", async () => {
     const { root, preparedRoot, writeFiles, readText } = await createWorkspace();
-    const configPath = ".claude/agent-setup/config.json";
+    const settingsPath = ".claude/agent-setup/config.json";
     const baseRequest = request({ root, preparedRoot, features: ["scratch-folder-guard"] });
     await install(
       {
@@ -226,7 +226,7 @@ describe("update", () => {
     );
     // Neither decodable nor the receipted bytes: both guards that used to block a reset.
     await writeFiles({
-      [configPath]: '{ "sessionRehomeRoots": ["fixtures"], "unknownSetting": true,\n',
+      [settingsPath]: '{ "sessionRehomeRoots": ["fixtures"], "unknownSetting": true,\n',
     });
 
     await expect(update({ ...baseRequest, features: { _tag: "preserve" } }, notAbortedSignal)).rejects.toThrow();
@@ -236,17 +236,17 @@ describe("update", () => {
       notAbortedSignal,
     );
 
-    const configBytes = await readFile(join(root, configPath));
-    expect(JSON.parse(new TextDecoder().decode(configBytes))).toEqual(defaultConfig);
+    const settingsBytes = await readFile(join(root, settingsPath));
+    expect(JSON.parse(new TextDecoder().decode(settingsBytes))).toEqual(defaultConfig);
     const receipt = JSON.parse(await readText(".claude/agent-setup/receipt.json"));
-    const managedConfigFile = receipt.ownedFiles.find((file: { path: string }) => file.path === configPath);
-    expect(managedConfigFile.ownership.installedHash).toBe(createHash("sha256").update(configBytes).digest("hex"));
-    expect(managedConfigFile.ownership.previous).toEqual({ _tag: "missing" });
+    const managedSettingsFile = receipt.ownedFiles.find((file: { path: string }) => file.path === settingsPath);
+    expect(managedSettingsFile.ownership.installedHash).toBe(createHash("sha256").update(settingsBytes).digest("hex"));
+    expect(managedSettingsFile.ownership.previous).toEqual({ _tag: "missing" });
   });
 
   it("install adds a dependency that an older receipt does not list", async () => {
     const { root, preparedRoot, writeFiles, readText, exists } = await createWorkspace();
-    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_DOCUMENT });
 
     const installSummary = await install(
       {
@@ -264,7 +264,7 @@ describe("update", () => {
 
   it("update adds a dependency that an older receipt does not list", async () => {
     const { root, preparedRoot, writeFiles, readText, exists } = await createWorkspace();
-    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_DOCUMENT });
 
     const updateSummary = await update(
       {
@@ -283,7 +283,7 @@ describe("update", () => {
 
   it("update refreshes a dependency that an older receipt does not list", async () => {
     const { root, preparedRoot, writeFiles } = await createWorkspace();
-    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_JSON });
+    await writeFiles({ ".claude/agent-setup/receipt.json": RECEIPT_BEFORE_REMINDER_DOCUMENT });
 
     const updateSummary = await update(
       {

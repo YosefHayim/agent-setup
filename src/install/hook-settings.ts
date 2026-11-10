@@ -5,14 +5,19 @@ import { z } from "zod";
 import type { AgentDefinition } from "#src/catalog/agent-catalog.js";
 import { featureCatalog } from "#src/catalog/feature-catalog.js";
 import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
-import { decodeStrictText } from "./file-bytes.js";
+import { decodeStrictString } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
-import { applicationOwner, checkFileChange, expectedCurrent, type FileSnapshot } from "./host-files.js";
+import { applicationOwner, checkFileChange, type FileSnapshot, readExpectedCurrent } from "./host-files.js";
 import { settingsPath } from "./install-paths.js";
 import { createInstallError, readErrorMessage } from "./install-request.js";
-import { appendJsonArrayItem, editJsonValue, hashJsonValue, removeJsonArrayItem } from "./json-edit.js";
-import type { HookEntriesOwnership, OwnedFile, OwnedHookEvent, OwnedJsonValue } from "./ownership.js";
-import { installedHookFile, registrationEntrypoint } from "./package-files.js";
+import {
+  appendDocumentArrayElement,
+  editDocumentField,
+  hashDocumentField,
+  removeDocumentArrayElement,
+} from "./json-edit.js";
+import type { HookLinesOwnership, OwnedDocumentField, OwnedFile, OwnedHookEvent } from "./ownership.js";
+import { readInstalledHookFile, readRegistrationEntrypoint } from "./package-files.js";
 import type { FileChange } from "./plan.js";
 
 const SETTINGS_FILE_NAME = "settings.json";
@@ -22,7 +27,7 @@ const HOOKS_CONTAINER_POINTER = "/hooks";
 const HOOKS_POINTER_PREFIX = "/hooks/";
 const CLAUDE_CODE_AGENT_ID = "claude-code";
 
-const textEncoder = new TextEncoder();
+const stringEncoder = new TextEncoder();
 
 const settingsDocumentSchema = z.looseObject({
   hooks: z.record(z.string(), z.array(z.unknown())).optional(),
@@ -41,17 +46,18 @@ interface HookSettingsEdit extends DecodedSettings {
   readonly createdContainers: ReadonlyArray<string>;
 }
 
-const parseSettingsJson = (settingsText: string, label: string): unknown => {
+const parseSettingsDocument = (settingsString: string, label: string): unknown => {
   try {
-    return JSON.parse(settingsText);
+    return JSON.parse(settingsString);
   } catch (error) {
     throw createInstallError(`${label} is invalid: ${readErrorMessage(error)}`);
   }
 };
 
-const parseSettings = (settingsText: string, label: string): SettingsDocument => {
-  const parsedJson = parseSettingsJson(settingsText, label);
-  const settingsReply = settingsDocumentSchema.safeParse(parsedJson);
+const parseSettings = (settingsString: string, label: string): SettingsDocument => {
+  const parsedDocument = parseSettingsDocument(settingsString, label);
+  const settingsReply = settingsDocumentSchema.safeParse(parsedDocument);
+
   const isSettingsInvalid = !settingsReply.success;
   if (isSettingsInvalid) {
     throw createInstallError(`${label} is invalid: ${joinZodIssueMessages(settingsReply.error)}`);
@@ -66,14 +72,16 @@ export const decodeSettings = (snapshot: FileSnapshot): DecodedSettings => {
     return { source: "{}\n", document: {} };
   }
 
-  const textReply = decodeStrictText(snapshot.bytes, SETTINGS_FILE_NAME);
-  const isTextInvalid = textReply._tag === "invalid";
-  if (isTextInvalid) {
-    throw createInstallError(textReply.message);
+  const stringReply = decodeStrictString(snapshot.bytes, SETTINGS_FILE_NAME);
+
+  const isStringInvalid = stringReply._tag === "invalid";
+  if (isStringInvalid) {
+    throw createInstallError(stringReply.message);
   }
 
-  const jsonText = textReply.fileContents;
-  const duplicateProperty = findDuplicateJsonKey(jsonText);
+  const documentString = stringReply.fileContents;
+  const duplicateProperty = findDuplicateJsonKey(documentString);
+
   const isPropertyDuplicated = duplicateProperty != null;
   if (isPropertyDuplicated) {
     throw createInstallError(
@@ -81,10 +89,10 @@ export const decodeSettings = (snapshot: FileSnapshot): DecodedSettings => {
     );
   }
 
-  return { source: jsonText, document: parseSettings(jsonText, SETTINGS_FILE_NAME) };
+  return { source: documentString, document: parseSettings(documentString, SETTINGS_FILE_NAME) };
 };
 
-const hookEventFromPointer = (pointer: string): string | null => {
+const readHookEventFromPointer = (pointer: string): string | null => {
   const isHookPointer = pointer.startsWith(HOOKS_POINTER_PREFIX);
   const event = pointer.slice(HOOKS_POINTER_PREFIX.length);
   const isDirectHookEvent = isHookPointer && !event.includes("/");
@@ -93,7 +101,7 @@ const hookEventFromPointer = (pointer: string): string | null => {
 };
 
 const readGroupsAtPointer = (document: SettingsDocument, pointer: string): ReadonlyArray<unknown> | null => {
-  const event = hookEventFromPointer(pointer);
+  const event = readHookEventFromPointer(pointer);
   const isEventNamed = event != null;
 
   return isEventNamed ? (document.hooks?.[event] ?? null) : null;
@@ -101,48 +109,49 @@ const readGroupsAtPointer = (document: SettingsDocument, pointer: string): Reado
 
 const readEventNames = (ownedEvents: ReadonlyArray<OwnedHookEvent>): string[] =>
   ownedEvents.flatMap((owned) => {
-    const event = hookEventFromPointer(owned.pointer);
+    const event = readHookEventFromPointer(owned.pointer);
     const isEventNamed = event != null;
 
     return isEventNamed ? [event] : [];
   });
 
-const decodeHookGroups = (value: unknown, event: string): ReadonlyArray<unknown> => {
-  const isGroupList = Array.isArray(value);
+const decodeHookGroups = (field: unknown, event: string): ReadonlyArray<unknown> => {
+  const isGroupList = Array.isArray(field);
   if (isGroupList) {
-    return value;
+    return field;
   }
 
   throw createInstallError(`${SETTINGS_FILE_NAME} hook event ${event} must contain an array.`);
 };
 
-const createChangedEntriesError = ({ filePath, pointer }: { filePath: string; pointer: string }): Error =>
+const createChangedLinesError = ({ filePath, pointer }: { filePath: string; pointer: string }): Error =>
   createInstallError(`Receipted hook entries in ${filePath} ${pointer} changed after installation.`);
 
-const hashGroups = (groups: ReadonlyArray<unknown>): string[] => groups.map((group) => hashJsonValue(group));
+const hashGroups = (groups: ReadonlyArray<unknown>): string[] => groups.map((group) => hashDocumentField(group));
 
 // Receipts written before entry ownership hashed a whole event array: the user's groups, then agent-setup's.
 // That installed array is still the start of the current one when other tools only appended entries since.
 const migrateLegacyEvent = ({
   filePath,
-  value,
+  value: field,
   document,
 }: {
   filePath: string;
-  value: OwnedJsonValue;
+  value: OwnedDocumentField;
   document: SettingsDocument;
 }): OwnedHookEvent => {
-  const { pointer, previous, installed } = value;
-  const event = hookEventFromPointer(pointer);
+  const { pointer, previous, installed } = field;
+  const event = readHookEventFromPointer(pointer);
   const isEventNamed = event != null;
   const current = readGroupsAtPointer(document, pointer);
+
   const isCurrentMissing = !isEventNamed || current == null;
   if (isCurrentMissing) {
-    throw createChangedEntriesError({ filePath, pointer });
+    throw createChangedLinesError({ filePath, pointer });
   }
 
-  const isUserValuePresent = previous._tag === "value";
-  const userGroups = isUserValuePresent ? decodeHookGroups(previous.value, event) : [];
+  const isUserFieldPresent = previous._tag === "value";
+  const userGroups = isUserFieldPresent ? decodeHookGroups(previous.value, event) : [];
   const prefixLengths = Array.from(
     { length: current.length - userGroups.length + 1 },
     (_, offset) => current.length - offset,
@@ -150,26 +159,27 @@ const migrateLegacyEvent = ({
   const installedLength = prefixLengths.find((length) => {
     const installedPrefix = current.slice(0, length);
 
-    return hashJsonValue(installedPrefix) === installed.hash;
+    return hashDocumentField(installedPrefix) === installed.hash;
   });
+
   const isInstalledPrefixMissing = installedLength == null;
   if (isInstalledPrefixMissing) {
-    throw createChangedEntriesError({ filePath, pointer });
+    throw createChangedLinesError({ filePath, pointer });
   }
 
   const ownedGroups = current.slice(userGroups.length, installedLength);
 
-  return { pointer, previouslyPresent: isUserValuePresent, entries: hashGroups(ownedGroups) };
+  return { pointer, previouslyPresent: isUserFieldPresent, entries: hashGroups(ownedGroups) };
 };
 
 // Reads the entries the receipt says agent-setup owns in one settings file, migrating the older whole-array layout.
-const readPreviousHookEntries = ({
+const readPreviousHookLines = ({
   file,
   document,
 }: {
   file: OwnedFile;
   document: SettingsDocument;
-}): HookEntriesOwnership => {
+}): HookLinesOwnership => {
   const { ownership } = file;
   switch (ownership._tag) {
     case "hookEntries":
@@ -179,7 +189,7 @@ const readPreviousHookEntries = ({
         _tag: "hookEntries",
         filePreviouslyPresent: ownership.filePreviouslyPresent,
         createdContainers: ownership.createdContainers,
-        events: ownership.values.map((value) => migrateLegacyEvent({ filePath: file.path, value, document })),
+        events: ownership.values.map((field) => migrateLegacyEvent({ filePath: file.path, value: field, document })),
       };
     case "wholeFile":
     case "managedBlock":
@@ -194,6 +204,7 @@ const countOf = (hashes: ReadonlyArray<string>, hash: string): number =>
 // Only agent-setup's own entries are checked, so entries other tools add to the same event never count as drift.
 const isOwnedEventPresent = ({ event, document }: { event: OwnedHookEvent; document: SettingsDocument }): boolean => {
   const currentGroups = readGroupsAtPointer(document, event.pointer);
+
   const isCurrentMissing = currentGroups == null;
   if (isCurrentMissing) {
     return false;
@@ -204,19 +215,20 @@ const isOwnedEventPresent = ({ event, document }: { event: OwnedHookEvent; docum
   return event.entries.every((hash) => countOf(currentHashes, hash) >= countOf(event.entries, hash));
 };
 
-const validateOwnedEntries = ({
+const validateOwnedLines = ({
   filePath,
   ownership,
   document,
 }: {
   filePath: string;
-  ownership: HookEntriesOwnership | null;
+  ownership: HookLinesOwnership | null;
   document: SettingsDocument;
 }): void => {
   const changedEvent = ownership?.events.find((event) => !isOwnedEventPresent({ event, document }));
+
   const isEventChanged = changedEvent != null;
   if (isEventChanged) {
-    throw createChangedEntriesError({ filePath, pointer: changedEvent.pointer });
+    throw createChangedLinesError({ filePath, pointer: changedEvent.pointer });
   }
 };
 
@@ -231,6 +243,7 @@ const isExtraOccurrence = ({
   baseline: ReadonlyArray<string>;
 }): boolean => {
   const hash = hashes[index];
+
   const isHashMissing = hash == null;
   if (isHashMissing) {
     return false;
@@ -241,15 +254,15 @@ const isExtraOccurrence = ({
   return countOf(seen, hash) > countOf(baseline, hash);
 };
 
-const applyEdits = <Item>({
-  source,
-  items,
+const applyEdits = <Element>({
+  source: code,
+  items: elements,
   edit,
 }: {
   source: string;
-  items: ReadonlyArray<Item>;
-  edit: (source: string, item: Item) => string;
-}): string => items.reduce((editedSource, item) => edit(editedSource, item), source);
+  items: ReadonlyArray<Element>;
+  edit: (currentCode: string, element: Element) => string;
+}): string => elements.reduce((editedCode, element) => edit(editedCode, element), code);
 
 interface HookCommand {
   readonly type: "command";
@@ -279,8 +292,9 @@ const isEventPreviouslyPresent = (plan: HookEventPlan): boolean => {
 };
 
 const listOwnedHookEvents = (plan: HookEventPlan): OwnedHookEvent[] => {
-  const entries = hashGroups(plan.desired);
-  const isNothingDesired = entries.length === 0;
+  const lines = hashGroups(plan.desired);
+
+  const isNothingDesired = lines.length === 0;
   if (isNothingDesired) {
     return [];
   }
@@ -289,24 +303,26 @@ const listOwnedHookEvents = (plan: HookEventPlan): OwnedHookEvent[] => {
     {
       pointer: `${HOOKS_POINTER_PREFIX}${plan.event}`,
       previouslyPresent: isEventPreviouslyPresent(plan),
-      entries,
+      entries: lines,
     },
   ];
 };
 
 // Removes agent-setup's stale entries and appends its new ones; every other entry in the array keeps its bytes.
-const editHookEvent = ({ source, plan }: { source: string; plan: HookEventPlan }): string => {
+const editHookEvent = ({ source: code, plan }: { source: string; plan: HookEventPlan }): string => {
   const { event, current, owned, desired } = plan;
   const path = [HOOKS_KEY, event];
   const isEventNew = current == null;
+
   const isNothingDesired = desired.length === 0;
 
-  if (isEventNew && isNothingDesired) {
-    return source;
+  const isEmptyNewEvent = isEventNew && isNothingDesired;
+  if (isEmptyNewEvent) {
+    return code;
   }
 
   if (isEventNew) {
-    return editJsonValue({ source, path, value: desired });
+    return editDocumentField({ source: code, path, value: desired });
   }
 
   const ownedHashes = owned?.entries ?? [];
@@ -330,47 +346,50 @@ const editHookEvent = ({ source, plan }: { source: string; plan: HookEventPlan }
   );
 
   const withoutStale = applyEdits({
-    source,
+    source: code,
     items: staleIndexes,
-    edit: (edited, index) => removeJsonArrayItem({ source: edited, path, index }),
+    edit: (edited, index) => removeDocumentArrayElement({ source: edited, path, index }),
   });
   const withAdded = applyEdits({
     source: withoutStale,
     items: addedGroups,
-    edit: (edited, group) => appendJsonArrayItem({ source: edited, path, value: group }),
+    edit: (edited, group) => appendDocumentArrayElement({ source: edited, path, value: group }),
   });
 
   const remainingGroupCount = current.length - staleIndexes.length + addedGroups.length;
+
   const isCreatedEventEmptied = remainingGroupCount === 0 && !isEventPreviouslyPresent(plan);
   if (isCreatedEventEmptied) {
-    return editJsonValue({ source: withAdded, path, value: undefined });
+    return editDocumentField({ source: withAdded, path, value: undefined });
   }
 
   return withAdded;
 };
 
-const addEmptyHooksContainer = (source: string): string => editJsonValue({ source, path: [HOOKS_KEY], value: {} });
+const addEmptyHooksContainer = (code: string): string =>
+  editDocumentField({ source: code, path: [HOOKS_KEY], value: {} });
 
 // A hooks object agent-setup created goes again once it is empty; a user's own empty hooks object stays.
 const removeEmptyCreatedHooks = ({
-  source,
-  ownsHooksContainer,
+  source: code,
+  isHooksContainerOwned,
 }: {
   source: string;
-  ownsHooksContainer: boolean;
+  isHooksContainerOwned: boolean;
 }): DecodedSettings => {
-  const document = parseSettings(source, GENERATED_SETTINGS_LABEL);
+  const document = parseSettings(code, GENERATED_SETTINGS_LABEL);
   const hooks = document.hooks;
-  const isHooksKept = !ownsHooksContainer || hooks == null || Object.keys(hooks).length > 0;
+
+  const isHooksKept = !isHooksContainerOwned || hooks == null || Object.keys(hooks).length > 0;
   if (isHooksKept) {
-    return { source, document };
+    return { source: code, document };
   }
 
-  const sourceWithoutHooks = editJsonValue({ source, path: [HOOKS_KEY], value: undefined });
+  const originWithoutHooks = editDocumentField({ source: code, path: [HOOKS_KEY], value: undefined });
 
   return {
-    source: sourceWithoutHooks,
-    document: parseSettings(sourceWithoutHooks, GENERATED_SETTINGS_LABEL),
+    source: originWithoutHooks,
+    document: parseSettings(originWithoutHooks, GENERATED_SETTINGS_LABEL),
   };
 };
 
@@ -379,7 +398,7 @@ const isInstalledHookGroup = (group: unknown, installedHooksFolder: string): boo
   JSON.stringify(group).includes(`${installedHooksFolder}/`);
 
 // Installed groups that no receipt lists (a lost receipt, or an older layout) join the receipted hashes, so the edit replaces them.
-const ownInstalledGroups = ({
+const listOwnInstalledGroups = ({
   receiptEvents,
   hooks,
   installedHooksFolder,
@@ -430,16 +449,16 @@ const editHookSettings = ({
 }: {
   filePath: string;
   decoded: DecodedSettings;
-  previous: HookEntriesOwnership | null;
+  previous: HookLinesOwnership | null;
   desiredGroups: ReadonlyMap<string, ReadonlyArray<ManagedHookGroup>>;
   installedHooksFolder: string;
 }): HookSettingsEdit => {
   const { document } = decoded;
-  validateOwnedEntries({ filePath, ownership: previous, document });
+  validateOwnedLines({ filePath, ownership: previous, document });
 
   // Events agent-setup no longer wants are edited first, newest first, then every desired event.
   const receiptEvents = previous?.events ?? [];
-  const ownedEvents = ownInstalledGroups({ receiptEvents, hooks: document.hooks, installedHooksFolder });
+  const ownedEvents = listOwnInstalledGroups({ receiptEvents, hooks: document.hooks, installedHooksFolder });
   const previousEventNames = readEventNames(ownedEvents);
   const removedEventNames = previousEventNames.filter((event) => !desiredGroups.has(event)).reverse();
   const eventNames = [...new Set([...removedEventNames, ...desiredGroups.keys()])];
@@ -453,30 +472,30 @@ const editHookSettings = ({
   );
 
   const isHooksMissing = document.hooks == null;
-  const createsHooksContainer = isHooksMissing && desiredGroups.size > 0;
+  const isHooksContainerCreated = isHooksMissing && desiredGroups.size > 0;
   const isHooksContainerReceipted = previous?.createdContainers.includes(HOOKS_CONTAINER_POINTER) ?? false;
-  const ownsHooksContainer = isHooksContainerReceipted || createsHooksContainer;
+  const isHooksContainerOwned = isHooksContainerReceipted || isHooksContainerCreated;
 
-  const sourceWithContainer = createsHooksContainer ? addEmptyHooksContainer(decoded.source) : decoded.source;
+  const originWithContainer = isHooksContainerCreated ? addEmptyHooksContainer(decoded.source) : decoded.source;
   const withEvents = applyEdits({
-    source: sourceWithContainer,
+    source: originWithContainer,
     items: plans,
     edit: (edited, plan) => editHookEvent({ source: edited, plan }),
   });
-  const settingsWithoutEmptyHooks = removeEmptyCreatedHooks({ source: withEvents, ownsHooksContainer });
+  const settingsWithoutEmptyHooks = removeEmptyCreatedHooks({ source: withEvents, isHooksContainerOwned });
 
   return {
     source: settingsWithoutEmptyHooks.source,
     document: settingsWithoutEmptyHooks.document,
     events: plans.flatMap(listOwnedHookEvents),
-    createdContainers: ownsHooksContainer ? [HOOKS_CONTAINER_POINTER] : [],
+    createdContainers: isHooksContainerOwned ? [HOOKS_CONTAINER_POINTER] : [],
   };
 };
 
 // A file agent-setup created and left empty is removed; anything else keeps its remaining user bytes.
 const restoreOrRemove = ({
   file,
-  source,
+  source: code,
   document,
   snapshot,
   filePreviouslyPresent,
@@ -493,15 +512,15 @@ const restoreOrRemove = ({
       _tag: "remove",
       file,
       unownedBytes: new Uint8Array(),
-      expectedCurrent: expectedCurrent(snapshot),
+      expectedCurrent: readExpectedCurrent(snapshot),
     };
   }
 
   return {
     _tag: "restore",
     file,
-    bytes: textEncoder.encode(source),
-    expectedCurrent: expectedCurrent(snapshot),
+    bytes: stringEncoder.encode(code),
+    expectedCurrent: readExpectedCurrent(snapshot),
   };
 };
 
@@ -509,7 +528,7 @@ const restoreOrRemove = ({
 const isEventSupportedBy = (event: string, agent: AgentDefinition): boolean =>
   event !== "SubagentStop" || agent.id === CLAUDE_CODE_AGENT_ID;
 
-export const desiredHookGroups = ({
+export const readDesiredHookGroups = ({
   root,
   featureIds,
   selectedAgents,
@@ -525,6 +544,7 @@ export const desiredHookGroups = ({
   const groups = new Map<string, ManagedHookGroup[]>();
   const isAgentSelected = selectedAgents.some((selectedAgent) => selectedAgent.id === agent.id);
   const isAgentWithoutHooks = agent.nativeHooks._tag === "unsupported";
+
   const isAgentSkipped = !isAgentSelected || isAgentWithoutHooks;
   if (isAgentSkipped) {
     return groups;
@@ -532,6 +552,7 @@ export const desiredHookGroups = ({
 
   for (const feature of featureCatalog) {
     const featureRuntime = feature.runtime;
+
     const isFeatureSkipped = !featureIds.includes(feature.id) || featureRuntime._tag === "none";
     if (isFeatureSkipped) {
       continue;
@@ -543,9 +564,9 @@ export const desiredHookGroups = ({
         continue;
       }
 
-      const entrypoint = installedHookFile(
+      const entrypoint = readInstalledHookFile(
         feature.sourceDirectory,
-        registrationEntrypoint(featureRuntime, registration),
+        readRegistrationEntrypoint(featureRuntime, registration),
       );
       const runtimeCommand = `node "${path.join(root, entrypoint)}"`;
       const doesReadAgentId = registration.readsAgentId === true;
@@ -576,11 +597,12 @@ export const planSettings = ({
   filePath?: string;
   snapshot: FileSnapshot;
   decoded: DecodedSettings;
-  previousFile: OwnedFile | undefined;
+  previousFile: OwnedFile | null;
   desiredGroups: ReadonlyMap<string, ReadonlyArray<ManagedHookGroup>>;
   installedHooksFolder: string;
 }): FileChange | null => {
   const filePath = requestedFilePath ?? settingsPath;
+
   const isPreviousFileWrong =
     previousFile != null &&
     (previousFile.path !== filePath ||
@@ -597,7 +619,7 @@ export const planSettings = ({
 
   const isReceiptPresent = previousFile != null;
   const previousOwnership = isReceiptPresent
-    ? readPreviousHookEntries({ file: previousFile, document: decoded.document })
+    ? readPreviousHookLines({ file: previousFile, document: decoded.document })
     : null;
   const edited = editHookSettings({
     filePath,
@@ -606,13 +628,13 @@ export const planSettings = ({
     desiredGroups,
     installedHooksFolder,
   });
-  const { source, document, events, createdContainers } = edited;
+  const { source: code, document, events, createdContainers } = edited;
 
   const isReceiptedFileEmptied = events.length === 0 && previousFile != null && previousOwnership != null;
   if (isReceiptedFileEmptied) {
     const restoration = restoreOrRemove({
       file: previousFile,
-      source,
+      source: code,
       document,
       snapshot,
       filePreviouslyPresent: previousOwnership.filePreviouslyPresent,
@@ -621,8 +643,9 @@ export const planSettings = ({
     return checkFileChange(restoration);
   }
 
-  const isSettingsUnchanged = source === decoded.source;
+  const isSettingsUnchanged = code === decoded.source;
   const hasNoHookEvent = events.length === 0;
+
   const isNothingToWrite = hasNoHookEvent && isSettingsUnchanged;
   if (isNothingToWrite) {
     return null;
@@ -630,7 +653,7 @@ export const planSettings = ({
 
   const wasFilePresent = snapshot._tag === "file";
   const hasNoPreviousOwnership = previousOwnership == null;
-  const ownership: HookEntriesOwnership = {
+  const ownership: HookLinesOwnership = {
     _tag: "hookEntries",
     filePreviouslyPresent: hasNoPreviousOwnership ? wasFilePresent : previousOwnership.filePreviouslyPresent,
     createdContainers: [...createdContainers],
@@ -640,8 +663,8 @@ export const planSettings = ({
   return checkFileChange({
     _tag: "write",
     file: { owner: applicationOwner, path: filePath, kind: { _tag: "settings" }, ownership },
-    bytes: textEncoder.encode(source),
-    expectedCurrent: expectedCurrent(snapshot),
+    bytes: stringEncoder.encode(code),
+    expectedCurrent: readExpectedCurrent(snapshot),
   });
 };
 
@@ -665,7 +688,7 @@ export const restoreSettings = ({
   }
 
   const decoded = decodeSettings(snapshot);
-  const previous = readPreviousHookEntries({ file, document: decoded.document });
+  const previous = readPreviousHookLines({ file, document: decoded.document });
   const edited = editHookSettings({
     filePath: file.path,
     decoded,

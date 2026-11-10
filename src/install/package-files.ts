@@ -10,13 +10,13 @@ import {
   skillsForFeatures,
 } from "#src/catalog/feature-catalog.js";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
-import { decodeStrictText, hashBytes } from "./file-bytes.js";
+import { decodeStrictString, hashBytes } from "./file-bytes.js";
 import {
   applicationOwner,
   checkFileChange,
-  expectedCurrent,
-  previousWholeFile,
+  readExpectedCurrent,
   readFileSnapshot,
+  readPreviousWholeFile,
 } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
 import { createInstallError, type InstallRequest } from "./install-request.js";
@@ -34,13 +34,13 @@ type PreparedFile = z.infer<typeof preparedFileSchema>;
 const isUnderShippedPath = (filePath: string, shippedPath: string): boolean =>
   filePath === shippedPath || filePath.startsWith(`${shippedPath}/`);
 
-const preparedSkillPathIssues = (preparedSkill: {
+const listPreparedSkillPathIssues = (preparedSkill: {
   installedSkill: z.infer<typeof installedSkillSchema>;
   sourceFiles: ReadonlyArray<PreparedFile>;
 }): Array<ZodIssueDetail> => {
-  const sourceFileIssues = preparedSkill.sourceFiles.flatMap((sourceFile, index) => {
+  const originFileIssues = preparedSkill.sourceFiles.flatMap((originFile, index) => {
     const isShippedFile = preparedSkill.installedSkill.shippedPaths.some((shippedPath) =>
-      isUnderShippedPath(sourceFile.path, shippedPath),
+      isUnderShippedPath(originFile.path, shippedPath),
     );
     if (isShippedFile) {
       return [];
@@ -49,14 +49,14 @@ const preparedSkillPathIssues = (preparedSkill: {
     return [
       {
         path: ["sourceFiles", index, "path"],
-        message: `Prepared skill file ${sourceFile.path} is not catalog-shipped.`,
+        message: `Prepared skill file ${originFile.path} is not catalog-shipped.`,
       },
     ];
   });
 
   const shippedPathIssues = preparedSkill.installedSkill.shippedPaths.flatMap((shippedPath, index) => {
-    const isShippedPathPrepared = preparedSkill.sourceFiles.some((sourceFile) =>
-      isUnderShippedPath(sourceFile.path, shippedPath),
+    const isShippedPathPrepared = preparedSkill.sourceFiles.some((skillFile) =>
+      isUnderShippedPath(skillFile.path, shippedPath),
     );
     if (isShippedPathPrepared) {
       return [];
@@ -70,7 +70,7 @@ const preparedSkillPathIssues = (preparedSkill: {
     ];
   });
 
-  return [...sourceFileIssues, ...shippedPathIssues];
+  return [...originFileIssues, ...shippedPathIssues];
 };
 
 const preparedSkillSchema = z
@@ -79,42 +79,43 @@ const preparedSkillSchema = z
     sourceFiles: z.array(preparedFileSchema).describe("Complete verified prepared skill file tree."),
     markdown: z.string().min(1).describe("Strict UTF-8 SKILL.md text used by native rule and instruction formats."),
   })
-  .superRefine((preparedSkill, context) => addZodIssueDetails(context, preparedSkillPathIssues(preparedSkill)));
+  .superRefine((preparedSkill, scope) => addZodIssueDetails(scope, listPreparedSkillPathIssues(preparedSkill)));
 
 export type PreparedSkill = z.infer<typeof preparedSkillSchema>;
 
-export const installedHookFile = (sourceDirectory: string, filePath: string): string =>
-  `${hooksPath}/${sourceDirectory}/${filePath}`;
+export const readInstalledHookFile = (originDirectory: string, filePath: string): string =>
+  `${hooksPath}/${originDirectory}/${filePath}`;
 
 // The compiled .js path a hook registration runs, relative to its feature's prepared hook folder.
-export const registrationEntrypoint = (
+export const readRegistrationEntrypoint = (
   runtime: { readonly sourceEntrypoint: string },
   registration: { readonly entrypoint: { _tag: "featureDefault" } | { _tag: "path"; value: string } },
 ): string => {
   const { entrypoint } = registration;
   const isCustomEntrypoint = entrypoint._tag === "path";
-  const sourceEntrypoint = isCustomEntrypoint ? entrypoint.value : runtime.sourceEntrypoint;
+  const originEntrypoint = isCustomEntrypoint ? entrypoint.value : runtime.sourceEntrypoint;
 
-  return `${sourceEntrypoint.slice(0, -3)}.js`;
+  return `${originEntrypoint.slice(0, -3)}.js`;
 };
 
 const readPreparedFiles = async (directory: string): Promise<Array<PreparedFile>> => {
   const relativePaths = (await readdir(directory, { recursive: true })).sort();
   const files: Array<PreparedFile> = [];
   for (const relativePath of relativePaths) {
-    const sourcePath = join(directory, relativePath);
-    const entryStats = await stat(sourcePath);
-    const isDirectory = entryStats.isDirectory();
+    const originPath = join(directory, relativePath);
+    const lineStats = await stat(originPath);
+
+    const isDirectory = lineStats.isDirectory();
     if (isDirectory) {
       continue;
     }
 
-    const isNotRegularFile = !entryStats.isFile();
+    const isNotRegularFile = !lineStats.isFile();
     if (isNotRegularFile) {
-      throw createInstallError(`Prepared path ${sourcePath} must be a regular file.`);
+      throw createInstallError(`Prepared path ${originPath} must be a regular file.`);
     }
 
-    const bytes = await readFile(sourcePath);
+    const bytes = await readFile(originPath);
     files.push({ path: relativePath.replaceAll("\\", "/"), bytes });
   }
 
@@ -123,7 +124,7 @@ const readPreparedFiles = async (directory: string): Promise<Array<PreparedFile>
 
 interface HookFileWriteRequest {
   readonly request: InstallRequest;
-  readonly previousReceipt: Receipt | undefined;
+  readonly previousReceipt: Receipt | null;
   readonly filePath: string;
   readonly bytes: Uint8Array;
 }
@@ -131,7 +132,7 @@ interface HookFileWriteRequest {
 const createHookFileWrite = async (fileWriteRequest: HookFileWriteRequest): Promise<FileChange> => {
   const { request, previousReceipt, filePath, bytes } = fileWriteRequest;
   const snapshot = await readFileSnapshot(join(request.destination.root, filePath));
-  const previous = previousWholeFile({
+  const previous = readPreviousWholeFile({
     receipt: previousReceipt,
     filePath,
     snapshot,
@@ -147,14 +148,14 @@ const createHookFileWrite = async (fileWriteRequest: HookFileWriteRequest): Prom
       ownership: { _tag: "wholeFile", installedHash: hashBytes(bytes), previous },
     },
     bytes,
-    expectedCurrent: expectedCurrent(snapshot),
+    expectedCurrent: readExpectedCurrent(snapshot),
   });
 };
 
 interface HookWritesRequest {
   readonly request: InstallRequest;
   readonly featureIds: ReadonlyArray<string>;
-  readonly previousReceipt: Receipt | undefined;
+  readonly previousReceipt: Receipt | null;
 }
 
 export const createHookWrites = async (hookWritesRequest: HookWritesRequest): Promise<Array<FileChange>> => {
@@ -162,8 +163,11 @@ export const createHookWrites = async (hookWritesRequest: HookWritesRequest): Pr
   const hookFeatures = featureCatalog.flatMap((feature) => {
     const isSelected = featureIds.includes(feature.id);
     const { runtime } = feature;
+
     const isHookRuntime = runtime._tag === "hook";
-    if (isSelected && isHookRuntime) {
+
+    const isHookRuntimeSelected = isSelected && isHookRuntime;
+    if (isHookRuntimeSelected) {
       return [{ sourceDirectory: feature.sourceDirectory, runtime }];
     }
 
@@ -171,13 +175,14 @@ export const createHookWrites = async (hookWritesRequest: HookWritesRequest): Pr
   });
 
   const writes: Array<FileChange> = [];
-  for (const { sourceDirectory, runtime } of hookFeatures) {
-    const files = await readPreparedFiles(join(request.preparedPackage.root, "hooks", sourceDirectory));
+  for (const { sourceDirectory: originDirectory, runtime } of hookFeatures) {
+    const files = await readPreparedFiles(join(request.preparedPackage.root, "hooks", originDirectory));
     for (const registration of runtime.registrations) {
-      const entrypoint = registrationEntrypoint(runtime, registration);
+      const entrypoint = readRegistrationEntrypoint(runtime, registration);
+
       const isEntrypointMissing = !files.some((file) => file.path === entrypoint);
       if (isEntrypointMissing) {
-        throw createInstallError(`Prepared runtime entrypoint is missing: ${sourceDirectory}/${entrypoint}`);
+        throw createInstallError(`Prepared runtime entrypoint is missing: ${originDirectory}/${entrypoint}`);
       }
     }
 
@@ -185,7 +190,7 @@ export const createHookWrites = async (hookWritesRequest: HookWritesRequest): Pr
       const fileWrite = await createHookFileWrite({
         request,
         previousReceipt,
-        filePath: installedHookFile(sourceDirectory, file.path),
+        filePath: readInstalledHookFile(originDirectory, file.path),
         bytes: file.bytes,
       });
       writes.push(fileWrite);
@@ -200,14 +205,16 @@ const readPreparedSkill = async (
   installedSkill: z.infer<typeof installedSkillSchema>,
 ): Promise<PreparedSkill> => {
   const directory = join(preparedPackageRoot, "skills", installedSkill.id);
-  const sourceFiles = await readPreparedFiles(directory);
-  const skillFile = sourceFiles.find((file) => file.path === "SKILL.md");
+  const originFiles = await readPreparedFiles(directory);
+  const skillFile = originFiles.find((file) => file.path === "SKILL.md");
+
   const isSkillFileMissing = skillFile == null;
   if (isSkillFileMissing) {
     throw createInstallError(`Prepared skill ${installedSkill.id} is missing SKILL.md.`);
   }
 
-  const markdownReply = decodeStrictText(skillFile.bytes, join(directory, "SKILL.md"));
+  const markdownReply = decodeStrictString(skillFile.bytes, join(directory, "SKILL.md"));
+
   const isMarkdownInvalid = markdownReply._tag === "invalid";
   if (isMarkdownInvalid) {
     throw createInstallError(markdownReply.message);
@@ -215,13 +222,14 @@ const readPreparedSkill = async (
 
   const preparedSkillReply = preparedSkillSchema.safeParse({
     installedSkill,
-    sourceFiles,
+    sourceFiles: originFiles,
     markdown: markdownReply.fileContents,
   });
+
   const isPreparedSkillInvalid = !preparedSkillReply.success;
   if (isPreparedSkillInvalid) {
-    const issueText = joinZodIssueMessages(preparedSkillReply.error);
-    throw createInstallError(`Prepared skill ${installedSkill.id} is invalid: ${issueText}`);
+    const issueString = joinZodIssueMessages(preparedSkillReply.error);
+    throw createInstallError(`Prepared skill ${installedSkill.id} is invalid: ${issueString}`);
   }
 
   return preparedSkillReply.data;

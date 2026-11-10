@@ -6,25 +6,25 @@ import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 
 import {
+  documentFieldsOwnershipSchema,
+  documentPointerSchema,
   fileKindSchema,
   fileOwnerSchema,
-  hookEntriesOwnershipSchema,
-  jsonPointerSchema,
-  jsonValuesOwnershipSchema,
+  hookLinesOwnershipSchema,
   managedBlockOwnershipSchema,
   type OwnedFile,
   ownedFileSchema,
-  previousFileValueSchema,
-  previousJsonValueSchema,
+  previousDocumentFieldSchema,
+  previousFileFieldSchema,
   relativePathSchema,
   sha256Schema,
-  yamlSequenceValueOwnershipSchema,
+  yamlSequenceFieldOwnershipSchema,
 } from "./ownership.js";
-import { decodeReceiptJson, encodeReceiptJson, type Receipt, readReceipt, receiptSchema } from "./receipt.js";
+import { decodeReceiptDocument, encodeReceiptDocument, type Receipt, readReceipt, receiptSchema } from "./receipt.js";
 
 const installedHash = "a".repeat(64);
-const installedValueHash = "b".repeat(64);
-const textEncoder = new TextEncoder();
+const installedFieldHash = "b".repeat(64);
+const stringEncoder = new TextEncoder();
 
 const temporaryRoots: Array<string> = [];
 
@@ -63,34 +63,34 @@ const managedBlockOwnership = {
   installedBodyHash: installedHash,
 };
 
-const ownedValue = (pointer: string, previous: object = missingPrevious) => ({
+const createOwnedField = (pointer: string, previous: object = missingPrevious) => ({
   pointer,
-  installed: { _tag: "value", hash: installedValueHash },
+  installed: { _tag: "field", hash: installedFieldHash },
   previous,
 });
 
-const jsonValues = (values: ReadonlyArray<object>, createdContainers: ReadonlyArray<string> = []) => ({
+const createDocumentFields = (fields: ReadonlyArray<object>, createdContainers: ReadonlyArray<string> = []) => ({
   _tag: "jsonValues",
   filePreviouslyPresent: true,
   createdContainers,
-  values,
+  values: fields,
 });
 
-const jsonValuesOwnership = jsonValues([
-  ownedValue("/hooks/PreToolUse"),
-  { pointer: "/enabled", installed: { _tag: "value", hash: installedHash }, previous: { _tag: "value", value: false } },
+const documentFieldsOwnership = createDocumentFields([
+  createOwnedField("/hooks/PreToolUse"),
+  { pointer: "/enabled", installed: { _tag: "field", hash: installedHash }, previous: { _tag: "field", field: false } },
 ]);
 
-const settingsJsonValuesOwnership = jsonValues([
-  ownedValue("/hooks/PreToolUse"),
+const settingsDocumentFieldsOwnership = createDocumentFields([
+  createOwnedField("/hooks/PreToolUse"),
   {
     pointer: "/enabled",
-    installed: { _tag: "value", hash: installedHash },
-    previous: { _tag: "value", value: false, lexical: { _tag: "value", source: "false" } },
+    installed: { _tag: "field", hash: installedHash },
+    previous: { _tag: "field", field: false, lexical: { _tag: "field", source: "false" } },
   },
 ]);
 
-const hookEntries = (
+const createHookLines = (
   events: ReadonlyArray<{ pointer: string; entries: ReadonlyArray<string> }>,
   createdContainers: ReadonlyArray<string> = [],
 ) => ({
@@ -110,40 +110,48 @@ const yamlSequenceOwnership = {
   previouslyPresent: false,
 };
 
-const ownedFile = (kind: string, file: { owner: object; path: string; ownership: object }) => ({
+const createOwnedFile = (kind: string, file: { owner: object; path: string; ownership: object }) => ({
   ...file,
   kind: { _tag: kind },
 });
 
-const completeReceiptInput = {
+const completeReceiptDetails = {
   version: "1.0.0",
   scope: "project",
   features: ["scratch-folder-guard", "make-code-readable"],
   ownedFiles: [
-    ownedFile("runtime", {
+    createOwnedFile("runtime", {
       owner: applicationOwner,
       path: ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js",
       ownership: { ...wholeFileOwnership, previous: { _tag: "priorFile", bytes: "AQID" } },
     }),
-    ownedFile("skill", {
+    createOwnedFile("skill", {
       owner: agentOwner,
       path: ".claude/skills/make-code-readable/SKILL.md",
       ownership: wholeFileOwnership,
     }),
-    ownedFile("rule", {
+    createOwnedFile("rule", {
       owner: agentOwner,
       path: ".cursor/rules/make-code-readable.mdc",
       ownership: wholeFileOwnership,
     }),
-    ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
-    ownedFile("instructionLink", { owner: agentOwner, path: ".continue/config.json", ownership: jsonValuesOwnership }),
-    ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),
-    ownedFile("settings", {
+    createOwnedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
+    createOwnedFile("instructionLink", {
+      owner: agentOwner,
+      path: ".continue/config.json",
+      ownership: documentFieldsOwnership,
+    }),
+    createOwnedFile("instructionLink", {
+      owner: agentOwner,
+      path: ".aider.conf.yml",
+      ownership: yamlSequenceOwnership,
+    }),
+    createOwnedFile("settings", {
       owner: applicationOwner,
       path: ".claude/settings.json",
-      ownership: settingsJsonValuesOwnership,
+      ownership: settingsDocumentFieldsOwnership,
     }),
-    ownedFile("managedConfig", {
+    createOwnedFile("managedConfig", {
       owner: applicationOwner,
       path: ".claude/agent-setup/config.json",
       ownership: wholeFileOwnership,
@@ -152,32 +160,32 @@ const completeReceiptInput = {
 };
 
 const createStrictDecoder =
-  <Output>(zodSchema: z.ZodType<Output>) =>
-  (input: unknown): Output =>
-    zodSchema.parse(input);
+  <Printout>(zodSchema: z.ZodType<Printout>) =>
+  (details: unknown): Printout =>
+    zodSchema.parse(details);
 
 const decodeReceipt = createStrictDecoder(receiptSchema);
-const decodeEntry = createStrictDecoder(ownedFileSchema);
+const decodeLine = createStrictDecoder(ownedFileSchema);
 const decodeOwner = createStrictDecoder(fileOwnerSchema);
 const decodeKind = createStrictDecoder(fileKindSchema);
-const decodePreviousFile = createStrictDecoder(previousFileValueSchema);
-const decodePreviousJson = createStrictDecoder(previousJsonValueSchema);
-const decodeJsonValues = createStrictDecoder(jsonValuesOwnershipSchema);
-const decodeYamlSequenceValue = createStrictDecoder(yamlSequenceValueOwnershipSchema);
-const decodeHookEntries = createStrictDecoder(hookEntriesOwnershipSchema);
+const decodePreviousFile = createStrictDecoder(previousFileFieldSchema);
+const decodePreviousDocument = createStrictDecoder(previousDocumentFieldSchema);
+const decodeDocumentFields = createStrictDecoder(documentFieldsOwnershipSchema);
+const decodeYamlSequenceField = createStrictDecoder(yamlSequenceFieldOwnershipSchema);
+const decodeHookLines = createStrictDecoder(hookLinesOwnershipSchema);
 
-const completeReceipt = decodeReceipt(completeReceiptInput);
-const completeReceiptJson = encodeReceiptJson(completeReceipt);
+const completeReceipt = decodeReceipt(completeReceiptDetails);
+const completeReceiptDocument = encodeReceiptDocument(completeReceipt);
 
-const receiptWithFiles = (files: ReadonlyArray<unknown>) => ({
+const createReceiptWithFiles = (files: ReadonlyArray<unknown>) => ({
   version: "1.0.0",
   scope: "project",
   features: ["scratch-folder-guard"],
   ownedFiles: files,
 });
 
-const roundTrip = (files: ReadonlyArray<unknown>) =>
-  decodeReceiptJson(encodeReceiptJson(decodeReceipt(receiptWithFiles(files))));
+const readAfterWrite = (files: ReadonlyArray<unknown>) =>
+  decodeReceiptDocument(encodeReceiptDocument(decodeReceipt(createReceiptWithFiles(files))));
 
 describe("receiptSchema", () => {
   it("decodes every receiptable file kind and all ownership tags", () => {
@@ -220,38 +228,42 @@ describe("receiptSchema", () => {
       "managedConfig",
       "receipt",
     ];
-    const receiptEntry = ownedFile("receipt", {
+    const receiptLine = createOwnedFile("receipt", {
       owner: applicationOwner,
       path: ".claude/agent-setup/receipt.json",
       ownership: wholeFileOwnership,
     });
 
     expect(kindTags.map((_tag) => decodeKind({ _tag })._tag)).toEqual(kindTags);
-    expect(decodeEntry(receiptEntry).kind._tag).toBe("receipt");
-    expect(() => decodeReceipt(receiptWithFiles([receiptEntry]))).toThrow(/itself|receipt/i);
+    expect(decodeLine(receiptLine).kind._tag).toBe("receipt");
+    expect(() => decodeReceipt(createReceiptWithFiles([receiptLine]))).toThrow(/itself|receipt/i);
   });
 
   it("round-trips every receipt field through the JSON codec", () => {
-    const encoded = JSON.parse(completeReceiptJson);
+    const encoded = JSON.parse(completeReceiptDocument);
 
     expect(Object.keys(encoded)).toEqual(["version", "scope", "features", "ownedFiles"]);
     expect(encoded.ownedFiles[0].ownership.previous.bytes).toBe("AQID");
-    expect(decodeReceiptJson(completeReceiptJson)).toEqual(completeReceipt);
+    expect(decodeReceiptDocument(completeReceiptDocument)).toEqual(completeReceipt);
   });
 
   it("preserves host-file existence for member-level ownership through receipt JSON", () => {
-    const receipt = roundTrip([
-      ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
-      ownedFile("instructionLink", {
+    const receipt = readAfterWrite([
+      createOwnedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
+      createOwnedFile("instructionLink", {
         owner: agentOwner,
         path: ".continue/config.json",
         ownership: {
-          ...jsonValuesOwnership,
+          ...documentFieldsOwnership,
           filePreviouslyPresent: false,
-          values: jsonValuesOwnership.values.map((value) => ({ ...value, previous: missingPrevious })),
+          values: documentFieldsOwnership.values.map((field) => ({ ...field, previous: missingPrevious })),
         },
       }),
-      ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),
+      createOwnedFile("instructionLink", {
+        owner: agentOwner,
+        path: ".aider.conf.yml",
+        ownership: yamlSequenceOwnership,
+      }),
     ]);
 
     expect(receipt.ownedFiles.map((file) => file.ownership)).toMatchObject([
@@ -262,13 +274,13 @@ describe("receiptSchema", () => {
   });
 
   it("round-trips members acquired after a receipt first created their host files", () => {
-    const receipt = roundTrip([
-      ownedFile("instructionLink", {
+    const receipt = readAfterWrite([
+      createOwnedFile("instructionLink", {
         owner: agentOwner,
         path: ".continue/config.json",
-        ownership: { ...jsonValuesOwnership, filePreviouslyPresent: false },
+        ownership: { ...documentFieldsOwnership, filePreviouslyPresent: false },
       }),
-      ownedFile("instructionLink", {
+      createOwnedFile("instructionLink", {
         owner: agentOwner,
         path: ".aider.conf.yml",
         ownership: { ...yamlSequenceOwnership, filePreviouslyPresent: false, previouslyPresent: true },
@@ -279,29 +291,29 @@ describe("receiptSchema", () => {
       {
         _tag: "jsonValues",
         filePreviouslyPresent: false,
-        values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "value", value: false } }],
+        values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "field", field: false } }],
       },
       { _tag: "yamlSequenceValue", filePreviouslyPresent: false, previouslyPresent: true },
     ]);
   });
 
   it.each([
-    { ...completeReceiptInput, unexpected: true },
-    { ...completeReceiptInput, detectedAgents: ["codex"] },
-  ])("rejects receipt-level excess or detection evidence", (input) => {
-    expect(() => decodeReceipt(input)).toThrow();
-    expect(() => decodeReceiptJson(JSON.stringify(input))).toThrow();
+    { ...completeReceiptDetails, unexpected: true },
+    { ...completeReceiptDetails, detectedAgents: ["codex"] },
+  ])("rejects receipt-level excess or detection evidence", (details) => {
+    expect(() => decodeReceipt(details)).toThrow();
+    expect(() => decodeReceiptDocument(JSON.stringify(details))).toThrow();
   });
 
   it.each([
     { name: "owner", decode: () => decodeOwner({ _tag: "application", extra: true }) },
     { name: "kind", decode: () => decodeKind({ _tag: "runtime", extra: true }) },
     { name: "previous file", decode: () => decodePreviousFile({ _tag: "missing", extra: true }) },
-    { name: "previous JSON value", decode: () => decodePreviousJson({ _tag: "value", value: null, extra: true }) },
-    { name: "owned file", decode: () => decodeEntry({ ...completeReceiptInput.ownedFiles[0], extra: true }) },
+    { name: "previous JSON field", decode: () => decodePreviousDocument({ _tag: "field", field: null, extra: true }) },
+    { name: "owned file", decode: () => decodeLine({ ...completeReceiptDetails.ownedFiles[0], extra: true }) },
     {
-      name: "owned JSON value",
-      decode: () => decodeJsonValues(jsonValues([{ ...ownedValue("/value"), extra: true }])),
+      name: "owned JSON field",
+      decode: () => decodeDocumentFields(createDocumentFields([{ ...createOwnedField("/field"), extra: true }])),
     },
   ])("rejects excess properties on the $name boundary", ({ decode }) => {
     expect(decode).toThrow();
@@ -341,17 +353,17 @@ describe("receiptSchema", () => {
   });
 
   it.each(["", "rules", "#/rules", "/bad~2escape", "/bad~escape"])("rejects invalid JSON pointer %j", (pointer) => {
-    expect(() => jsonPointerSchema.parse(pointer)).toThrow();
+    expect(() => documentPointerSchema.parse(pointer)).toThrow();
   });
 
   it.each(["/rules/0", "/a~1b/~0key"])("accepts escaped absolute JSON pointer %j", (pointer) => {
-    expect(jsonPointerSchema.parse(pointer)).toBe(pointer);
+    expect(documentPointerSchema.parse(pointer)).toBe(pointer);
   });
 
   it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 1n, new Date("2026-01-01T00:00:00.000Z")])(
-    "rejects a non-JSON previous value",
-    (value) => {
-      expect(() => decodePreviousJson({ _tag: "value", value })).toThrow();
+    "rejects a non-JSON previous field",
+    (field) => {
+      expect(() => decodePreviousDocument({ _tag: "field", field })).toThrow();
     },
   );
 
@@ -359,68 +371,72 @@ describe("receiptSchema", () => {
     { name: "duplicate", pointers: ["/rules", "/rules"] },
     { name: "parent-child", pointers: ["/rules", "/rules/0"] },
   ])("rejects $name JSON pointers", ({ pointers }) => {
-    expect(() => decodeJsonValues(jsonValues(pointers.map((pointer) => ownedValue(pointer))))).toThrow(/pointer/i);
+    expect(() =>
+      decodeDocumentFields(createDocumentFields(pointers.map((pointer) => createOwnedField(pointer)))),
+    ).toThrow(/pointer/i);
   });
 
   it("records hashed installed JSON states with exact created containers", () => {
-    const ownership = decodeJsonValues(jsonValues([ownedValue("/hooks/PreToolUse")], ["/hooks"]));
+    const ownership = decodeDocumentFields(createDocumentFields([createOwnedField("/hooks/PreToolUse")], ["/hooks"]));
 
     expect(ownership.createdContainers).toEqual(["/hooks"]);
-    expect(ownership.values.map((value) => value.installed)).toEqual([{ _tag: "value", hash: installedValueHash }]);
+    expect(ownership.values.map((field) => field.installed)).toEqual([{ _tag: "field", hash: installedFieldHash }]);
   });
 
   it.each([
     { name: "duplicate", createdContainers: ["/hooks", "/hooks"] },
     { name: "unrelated", createdContainers: ["/permissions"] },
-    { name: "owned value itself", createdContainers: ["/hooks/Stop"] },
+    { name: "owned field itself", createdContainers: ["/hooks/Stop"] },
   ])("rejects $name created JSON containers", ({ createdContainers }) => {
     expect(() =>
-      decodeJsonValues(jsonValues([ownedValue("/hooks/Stop", { _tag: "value", value: [] })], createdContainers)),
+      decodeDocumentFields(
+        createDocumentFields([createOwnedField("/hooks/Stop", { _tag: "field", field: [] })], createdContainers),
+      ),
     ).toThrow(/container|ancestor|unique/i);
   });
 
   it("records the hash of each owned hook entry per event with exact created containers", () => {
-    const ownership = decodeHookEntries(
-      hookEntries([{ pointer: "/hooks/Stop", entries: [installedValueHash, installedValueHash] }], ["/hooks"]),
+    const ownership = decodeHookLines(
+      createHookLines([{ pointer: "/hooks/Stop", entries: [installedFieldHash, installedFieldHash] }], ["/hooks"]),
     );
 
     expect(ownership.createdContainers).toEqual(["/hooks"]);
     expect(ownership.events).toEqual([
-      { pointer: "/hooks/Stop", previouslyPresent: false, entries: [installedValueHash, installedValueHash] },
+      { pointer: "/hooks/Stop", previouslyPresent: false, entries: [installedFieldHash, installedFieldHash] },
     ]);
   });
 
   it.each([
-    { name: "nested hook entry pointer", events: [{ pointer: "/hooks/Stop/0", entries: [installedValueHash] }] },
-    { name: "non-hook pointer", events: [{ pointer: "/permissions", entries: [installedValueHash] }] },
-    { name: "escaped event name", events: [{ pointer: "/hooks/foo~1bar", entries: [installedValueHash] }] },
+    { name: "nested hook entry pointer", events: [{ pointer: "/hooks/Stop/0", entries: [installedFieldHash] }] },
+    { name: "non-hook pointer", events: [{ pointer: "/permissions", entries: [installedFieldHash] }] },
+    { name: "escaped event name", events: [{ pointer: "/hooks/foo~1bar", entries: [installedFieldHash] }] },
     { name: "event without entries", events: [{ pointer: "/hooks/Stop", entries: [] }] },
     { name: "missing events", events: [] },
     {
       name: "duplicate events",
       events: [
-        { pointer: "/hooks/Stop", entries: [installedValueHash] },
+        { pointer: "/hooks/Stop", entries: [installedFieldHash] },
         { pointer: "/hooks/Stop", entries: [installedHash] },
       ],
     },
   ])("rejects hook entry ownership with a $name", ({ events }) => {
-    expect(() => decodeHookEntries(hookEntries(events))).toThrow();
+    expect(() => decodeHookLines(createHookLines(events))).toThrow();
   });
 
   it("rejects a hook entry created container that holds no owned event", () => {
     expect(() =>
-      decodeHookEntries(hookEntries([{ pointer: "/hooks/Stop", entries: [installedValueHash] }], ["/permissions"])),
+      decodeHookLines(createHookLines([{ pointer: "/hooks/Stop", entries: [installedFieldHash] }], ["/permissions"])),
     ).toThrow(/container|ancestor/i);
   });
 
   it("allows missing owned members when the host file previously existed", () => {
-    expect(decodeJsonValues(jsonValues([ownedValue("/rules")])).filePreviouslyPresent).toBe(true);
-    expect(decodeYamlSequenceValue(yamlSequenceOwnership).filePreviouslyPresent).toBe(true);
+    expect(decodeDocumentFields(createDocumentFields([createOwnedField("/rules")])).filePreviouslyPresent).toBe(true);
+    expect(decodeYamlSequenceField(yamlSequenceOwnership).filePreviouslyPresent).toBe(true);
   });
 
   it("accepts an inserted YAML key prefix when the key did not exist", () => {
     expect(() =>
-      decodeYamlSequenceValue({ ...yamlSequenceOwnership, keyPreviouslyPresent: false, insertedPrefix: "\n" }),
+      decodeYamlSequenceField({ ...yamlSequenceOwnership, keyPreviouslyPresent: false, insertedPrefix: "\n" }),
     ).not.toThrow();
   });
 
@@ -441,7 +457,7 @@ describe("receiptSchema", () => {
       issue: /prefix|frame/i,
     },
   ])("rejects YAML key-lifetime evidence with $name", ({ fields, issue }) => {
-    expect(() => decodeYamlSequenceValue({ ...yamlSequenceOwnership, ...fields })).toThrow(issue);
+    expect(() => decodeYamlSequenceField({ ...yamlSequenceOwnership, ...fields })).toThrow(issue);
   });
 
   it.each([
@@ -464,34 +480,34 @@ describe("receiptSchema", () => {
   });
 
   it.each([
-    ownedFile("runtime", { owner: agentOwner, path: "runtime.js", ownership: wholeFileOwnership }),
-    ownedFile("skill", { owner: applicationOwner, path: "skill/SKILL.md", ownership: wholeFileOwnership }),
-    ownedFile("instruction", { owner: agentOwner, path: "AGENTS.md", ownership: wholeFileOwnership }),
-    ownedFile("settings", { owner: agentOwner, path: "settings.json", ownership: jsonValuesOwnership }),
-    ownedFile("settings", { owner: applicationOwner, path: "settings.yml", ownership: yamlSequenceOwnership }),
-    ownedFile("instructionLink", { owner: agentOwner, path: "config.json", ownership: managedBlockOwnership }),
-    ownedFile("managedConfig", { owner: agentOwner, path: "managed-config.json", ownership: wholeFileOwnership }),
-  ])("rejects incompatible owner or ownership combinations", (entry) => {
-    expect(() => decodeEntry(entry)).toThrow(/owner|ownership/i);
+    createOwnedFile("runtime", { owner: agentOwner, path: "runtime.js", ownership: wholeFileOwnership }),
+    createOwnedFile("skill", { owner: applicationOwner, path: "skill/SKILL.md", ownership: wholeFileOwnership }),
+    createOwnedFile("instruction", { owner: agentOwner, path: "AGENTS.md", ownership: wholeFileOwnership }),
+    createOwnedFile("settings", { owner: agentOwner, path: "settings.json", ownership: documentFieldsOwnership }),
+    createOwnedFile("settings", { owner: applicationOwner, path: "settings.yml", ownership: yamlSequenceOwnership }),
+    createOwnedFile("instructionLink", { owner: agentOwner, path: "config.json", ownership: managedBlockOwnership }),
+    createOwnedFile("managedConfig", { owner: agentOwner, path: "managed-config.json", ownership: wholeFileOwnership }),
+  ])("rejects incompatible owner or ownership combinations", (line) => {
+    expect(() => decodeLine(line)).toThrow(/owner|ownership/i);
   });
 
-  const runtimeEntry = ownedFile("runtime", {
+  const runtimeLine = createOwnedFile("runtime", {
     owner: applicationOwner,
     path: "hooks/guard.js",
     ownership: wholeFileOwnership,
   });
-  const instructionEntry = ownedFile("instruction", {
+  const instructionLine = createOwnedFile("instruction", {
     owner: sharedAgentOwner,
     path: "AGENTS.md",
     ownership: managedBlockOwnership,
   });
 
   it.each([
-    { name: "duplicate", files: [runtimeEntry, runtimeEntry] },
-    { name: "parent-child", files: [runtimeEntry, { ...runtimeEntry, path: "hooks/guard.js/map" }] },
-    { name: "case-folded", files: [instructionEntry, { ...instructionEntry, path: "agents.md" }] },
+    { name: "duplicate", files: [runtimeLine, runtimeLine] },
+    { name: "parent-child", files: [runtimeLine, { ...runtimeLine, path: "hooks/guard.js/map" }] },
+    { name: "case-folded", files: [instructionLine, { ...instructionLine, path: "agents.md" }] },
   ])("rejects $name file paths", ({ files }) => {
-    expect(() => decodeReceipt(receiptWithFiles(files))).toThrow(/path/i);
+    expect(() => decodeReceipt(createReceiptWithFiles(files))).toThrow(/path/i);
   });
 
   it.each([
@@ -499,13 +515,13 @@ describe("receiptSchema", () => {
     ["unknown feature", ["unknown-feature"]],
     ["non-catalog order", ["make-code-readable", "scratch-folder-guard"]],
   ])("rejects %s in receipt features", (_case, features) => {
-    expect(() => decodeReceipt({ ...receiptWithFiles([]), features })).toThrow(/feature|catalog order/i);
+    expect(() => decodeReceipt({ ...createReceiptWithFiles([]), features })).toThrow(/feature|catalog order/i);
   });
 
   it("reads a receipt that lists a feature but not its dependency added later", () => {
     const features = ["organize-commits", "finish-and-push", "run-local-and-check", "run-tasks-in-parallel"];
 
-    expect(decodeReceipt({ ...receiptWithFiles([]), features }).features).toEqual(features);
+    expect(decodeReceipt({ ...createReceiptWithFiles([]), features }).features).toEqual(features);
   });
 
   it("reads retired feature IDs as the features that replaced them", () => {
@@ -516,7 +532,10 @@ describe("receiptSchema", () => {
       "question-plan-with-docs",
     ];
 
-    expect(decodeReceipt({ ...receiptWithFiles([]), features }).features).toEqual(["question-my-plan", "code-style"]);
+    expect(decodeReceipt({ ...createReceiptWithFiles([]), features }).features).toEqual([
+      "question-my-plan",
+      "code-style",
+    ]);
   });
 });
 
@@ -530,7 +549,7 @@ describe("readReceipt", () => {
   });
 
   it("returns a present snapshot with the exact bytes and the decoded receipt", async () => {
-    const bytes = textEncoder.encode(`\n${completeReceiptJson}\n`);
+    const bytes = stringEncoder.encode(`\n${completeReceiptDocument}\n`);
     const receiptFilePath = writeReceiptFile(bytes);
 
     const present = await readReceipt(receiptFilePath);
@@ -539,11 +558,11 @@ describe("readReceipt", () => {
   });
 
   it("rejects malformed UTF-8 instead of accepting replacement characters", async () => {
-    const markerIndex = completeReceiptJson.indexOf("scratch-folder-guard.js");
+    const markerIndex = completeReceiptDocument.indexOf("scratch-folder-guard.js");
     const bytes = new Uint8Array([
-      ...textEncoder.encode(completeReceiptJson.slice(0, markerIndex)),
+      ...stringEncoder.encode(completeReceiptDocument.slice(0, markerIndex)),
       0xff,
-      ...textEncoder.encode(completeReceiptJson.slice(markerIndex + 1)),
+      ...stringEncoder.encode(completeReceiptDocument.slice(markerIndex + 1)),
     ]);
     const receiptFilePath = writeReceiptFile(bytes);
 
@@ -554,20 +573,20 @@ describe("readReceipt", () => {
   it.each([
     {
       name: "a leading UTF-8 byte-order mark",
-      bytes: new Uint8Array([0xef, 0xbb, 0xbf, ...textEncoder.encode(completeReceiptJson)]),
+      bytes: new Uint8Array([0xef, 0xbb, 0xbf, ...stringEncoder.encode(completeReceiptDocument)]),
       fragments: ["byte-order mark"],
     },
     {
       name: "duplicate JSON properties whose names use different escapes",
-      bytes: textEncoder.encode(
-        completeReceiptJson.replace('"version":"1.0.0"', '"\\u0076ersion":"1.0.0","version":"1.0.0"'),
+      bytes: stringEncoder.encode(
+        completeReceiptDocument.replace('"version":"1.0.0"', '"\\u0076ersion":"1.0.0","version":"1.0.0"'),
       ),
       fragments: ["duplicate JSON property", "version"],
     },
-    { name: "malformed JSON", bytes: textEncoder.encode("{not-json"), fragments: ["receipt.json"] },
+    { name: "malformed JSON", bytes: stringEncoder.encode("{not-json"), fragments: ["receipt.json"] },
     {
       name: "a receipt schema failure",
-      bytes: textEncoder.encode(
+      bytes: stringEncoder.encode(
         JSON.stringify({ version: "1.0.0", scope: "project", features: [], ownedFiles: [], unexpected: true }),
       ),
       fragments: ["unexpected"],

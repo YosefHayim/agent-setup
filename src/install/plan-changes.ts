@@ -4,40 +4,42 @@ import { z } from "zod";
 
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import {
-  type HookEntriesOwnership,
-  type JsonValuesOwnership,
+  type DocumentFieldsOwnership,
+  type HookLinesOwnership,
+  isOwnedFilesEqual,
+  isPathsConflict,
   type OwnedFile,
   type Ownership,
-  ownedFilesEqual,
-  pathsConflict,
-  type YamlSequenceValueOwnership,
+  type YamlSequenceFieldOwnership,
 } from "./ownership.js";
 import {
   absoluteRootSchema,
   checkPlan,
   expectedCurrentSchema,
+  listReservedReceiptPaths,
   type Plan,
   type PlannedRestoration,
   plannedRestorationSchema,
   plannedWriteOperationSchema,
   type Restoration,
   receiptTargetSchema,
-  reservedReceiptPaths,
 } from "./plan.js";
 import { receiptSchema } from "./receipt.js";
 
-const reverseValues = <Value>(values: ReadonlyArray<Value>): ReadonlyArray<Value> =>
-  values.map((_, index) => values[values.length - index - 1]);
+const reverseFields = <Field>(fields: ReadonlyArray<Field>): ReadonlyArray<Field> =>
+  fields.map((_, index) => fields[fields.length - index - 1]);
 
-const restorationConsistencyIssues = (
+const listRestorationConsistencyIssues = (
   expectedFiles: ReadonlyArray<OwnedFile>,
   restorations: ReadonlyArray<Restoration>,
 ): ReadonlyArray<ZodIssueDetail> => [
   ...expectedFiles.flatMap((expectedFile) => {
     const matchingIndexes = restorations.flatMap((restoration, index) =>
-      ownedFilesEqual(restoration.file, expectedFile) ? [index] : [],
+      isOwnedFilesEqual(restoration.file, expectedFile) ? [index] : [],
     );
-    if (matchingIndexes.length === 0) {
+
+    const isMatchingIndexesEmpty = matchingIndexes.length === 0;
+    if (isMatchingIndexesEmpty) {
       return [
         {
           path: ["restorations"],
@@ -52,7 +54,7 @@ const restorationConsistencyIssues = (
     }));
   }),
   ...restorations.flatMap((restoration, index) => {
-    const isPriorFile = expectedFiles.some((file) => ownedFilesEqual(restoration.file, file));
+    const isPriorFile = expectedFiles.some((file) => isOwnedFilesEqual(restoration.file, file));
     if (isPriorFile) {
       return [];
     }
@@ -72,8 +74,8 @@ const orderRestorations = (
 ): ReadonlyArray<PlannedRestoration> =>
   [...restorations].sort(
     (left, right) =>
-      expectedFiles.findIndex((file) => ownedFilesEqual(file, left.file)) -
-      expectedFiles.findIndex((file) => ownedFilesEqual(file, right.file)),
+      expectedFiles.findIndex((file) => isOwnedFilesEqual(file, left.file)) -
+      expectedFiles.findIndex((file) => isOwnedFilesEqual(file, right.file)),
   );
 
 const previousReceiptSchema = z.discriminatedUnion("_tag", [
@@ -81,10 +83,12 @@ const previousReceiptSchema = z.discriminatedUnion("_tag", [
   z.strictObject({ _tag: z.literal("receipt"), receipt: receiptSchema }),
 ]);
 
-const desiredWriteIssues = (desired: DesiredState): ReadonlyArray<ZodIssueDetail> =>
+const listDesiredWriteIssues = (desired: DesiredStatus): ReadonlyArray<ZodIssueDetail> =>
   desired.writes.flatMap((operation, index) => {
     const receiptFile = desired.receipt.ownedFiles.find((file) => file.path === operation.file.path);
-    if (receiptFile != null && ownedFilesEqual(operation.file, receiptFile)) {
+
+    const isReceiptFileEqual = receiptFile != null && isOwnedFilesEqual(operation.file, receiptFile);
+    if (isReceiptFileEqual) {
       return [];
     }
 
@@ -96,9 +100,10 @@ const desiredWriteIssues = (desired: DesiredState): ReadonlyArray<ZodIssueDetail
     ];
   });
 
-const desiredReceiptEntryIssues = (desired: DesiredState): ReadonlyArray<ZodIssueDetail> =>
+const listDesiredReceiptLineIssues = (desired: DesiredStatus): ReadonlyArray<ZodIssueDetail> =>
   desired.receipt.ownedFiles.flatMap((file, index) => {
     const writeCount = desired.writes.filter((operation) => operation.file.path === file.path).length;
+
     const isExactlyOneWrite = writeCount === 1;
     if (isExactlyOneWrite) {
       return [];
@@ -112,16 +117,16 @@ const desiredReceiptEntryIssues = (desired: DesiredState): ReadonlyArray<ZodIssu
     ];
   });
 
-const desiredStateSchema = z
+const desiredStatusSchema = z
   .strictObject({
     receipt: receiptSchema,
     writes: z.array(plannedWriteOperationSchema),
   })
-  .superRefine((desired, context) =>
-    addZodIssueDetails(context, [...desiredWriteIssues(desired), ...desiredReceiptEntryIssues(desired)]),
+  .superRefine((desired, scope) =>
+    addZodIssueDetails(scope, [...listDesiredWriteIssues(desired), ...listDesiredReceiptLineIssues(desired)]),
   );
 
-type DesiredState = z.infer<typeof desiredStateSchema>;
+type DesiredStatus = z.infer<typeof desiredStatusSchema>;
 
 type RetainedFile = {
   readonly file: OwnedFile;
@@ -129,33 +134,38 @@ type RetainedFile = {
   readonly path: ReadonlyArray<string | number>;
 };
 
-const retainedFileIssues = ({ file, previous, path }: RetainedFile): ReadonlyArray<ZodIssueDetail> => [
-  ...(previous.kind._tag === file.kind._tag
-    ? []
-    : [
-        {
-          path: [...path, "kind"],
-          message: `Cannot change file kind from ${previous.kind._tag} to ${file.kind._tag} at ${file.path}; remove the prior ownership first.`,
-        },
-      ]),
-  ...(previous.owner._tag === file.owner._tag
-    ? []
-    : [
-        {
-          path: [...path, "owner"],
-          message: `Cannot change file owner from ${previous.owner._tag} to ${file.owner._tag} at ${file.path}; remove the prior ownership first.`,
-        },
-      ]),
-];
+const listRetainedFileIssues = ({ file, previous, path }: RetainedFile): ReadonlyArray<ZodIssueDetail> => {
+  const isSameKind = previous.kind._tag === file.kind._tag;
+  const isSameOwner = previous.owner._tag === file.owner._tag;
+  return [
+    ...(isSameKind
+      ? []
+      : [
+          {
+            path: [...path, "kind"],
+            message: `Cannot change file kind from ${previous.kind._tag} to ${file.kind._tag} at ${file.path}; remove the prior ownership first.`,
+          },
+        ]),
+    ...(isSameOwner
+      ? []
+      : [
+          {
+            path: [...path, "owner"],
+            message: `Cannot change file owner from ${previous.owner._tag} to ${file.owner._tag} at ${file.path}; remove the prior ownership first.`,
+          },
+        ]),
+  ];
+};
 
 // Settings receipts from before entry ownership owned whole hook event arrays; the next install migrates them.
-const ownershipChangeAllowed = ({ file, previous }: RetainedFile): boolean =>
+const isOwnershipChangeAllowed = ({ file, previous }: RetainedFile): boolean =>
   previous.ownership._tag === file.ownership._tag ||
   (file.kind._tag === "settings" && previous.ownership._tag === "jsonValues" && file.ownership._tag === "hookEntries");
 
-const ownershipChangeIssues = (retained: RetainedFile): ReadonlyArray<ZodIssueDetail> => {
+const listOwnershipChangeIssues = (retained: RetainedFile): ReadonlyArray<ZodIssueDetail> => {
   const { file, previous, path } = retained;
-  if (ownershipChangeAllowed(retained)) {
+
+  if (isOwnershipChangeAllowed(retained)) {
     return [];
   }
 
@@ -167,31 +177,44 @@ const ownershipChangeIssues = (retained: RetainedFile): ReadonlyArray<ZodIssueDe
   ];
 };
 
-type JsonPointerOwnership = JsonValuesOwnership | HookEntriesOwnership;
+type DocumentPointerOwnership = DocumentFieldsOwnership | HookLinesOwnership;
 
-const ownedJsonPointers = (ownership: JsonPointerOwnership): ReadonlyArray<string> =>
-  ownership._tag === "jsonValues"
-    ? ownership.values.map((value) => value.pointer)
+const listOwnedDocumentPointers = (ownership: DocumentPointerOwnership): ReadonlyArray<string> => {
+  const isDocumentValuesOwnership = ownership._tag === "jsonValues";
+  return isDocumentValuesOwnership
+    ? ownership.values.map((field) => field.pointer)
     : ownership.events.map((event) => event.pointer);
+};
 
-const jsonPointerOwnership = (ownership: Ownership): JsonPointerOwnership | undefined =>
-  ownership._tag === "jsonValues" || ownership._tag === "hookEntries" ? ownership : undefined;
+const readDocumentPointerOwnership = (ownership: Ownership): DocumentPointerOwnership | null => {
+  const isDocumentOrHookEntriesOwnership = ownership._tag === "jsonValues" || ownership._tag === "hookEntries";
+  return isDocumentOrHookEntriesOwnership ? ownership : null;
+};
 
 // A created container is deletion authority, so it may only be acquired together with a newly owned value inside it.
-const jsonContainerAcquisitionIssues = ({ file, previous, path }: RetainedFile): ReadonlyArray<ZodIssueDetail> => {
-  const previousOwnership = jsonPointerOwnership(previous.ownership);
-  const desiredOwnership = jsonPointerOwnership(file.ownership);
-  if (previousOwnership == null || desiredOwnership == null) {
+const listDocumentContainerAcquisitionIssues = ({
+  file,
+  previous,
+  path,
+}: RetainedFile): ReadonlyArray<ZodIssueDetail> => {
+  const previousOwnership = readDocumentPointerOwnership(previous.ownership);
+
+  const desiredOwnership = readDocumentPointerOwnership(file.ownership);
+
+  const isOwnershipMissing = previousOwnership == null || desiredOwnership == null;
+  if (isOwnershipMissing) {
     return [];
   }
 
-  const previousPointers = ownedJsonPointers(previousOwnership);
-  const desiredPointers = ownedJsonPointers(desiredOwnership);
+  const previousPointers = listOwnedDocumentPointers(previousOwnership);
+  const desiredPointers = listOwnedDocumentPointers(desiredOwnership);
   return desiredOwnership.createdContainers.flatMap((container, containerIndex) => {
     const ownsNewDescendant = desiredPointers.some(
       (pointer) => pointer.startsWith(`${container}/`) && !previousPointers.includes(pointer),
     );
-    if (previousOwnership.createdContainers.includes(container) || ownsNewDescendant) {
+    const isContainerStillNeeded = previousOwnership.createdContainers.includes(container) || ownsNewDescendant;
+
+    if (isContainerStillNeeded) {
       return [];
     }
 
@@ -205,23 +228,27 @@ const jsonContainerAcquisitionIssues = ({ file, previous, path }: RetainedFile):
 };
 
 const installRequestIssues = (request: InstallPlanRequest): ReadonlyArray<ZodIssueDetail> => {
-  const previousFiles = request.previous._tag === "receipt" ? request.previous.receipt.ownedFiles : [];
+  const previousStatus = request.previous;
+  const isPreviousReceipt = previousStatus._tag === "receipt";
+  const previousFiles = isPreviousReceipt ? previousStatus.receipt.ownedFiles : [];
   const desiredFiles = request.desired.receipt.ownedFiles;
-  const staleFiles = reverseValues(
+  const staleFiles = reverseFields(
     previousFiles.filter((previousFile) => !desiredFiles.some((file) => file.path === previousFile.path)),
   );
   const retainedFiles = desiredFiles.flatMap((file, index): ReadonlyArray<RetainedFile> => {
     const previous = previousFiles.find((candidate) => candidate.path === file.path);
-    return previous == null ? [] : [{ file, previous, path: ["desired", "receipt", "ownedFiles", index] }];
+
+    const isPreviousMissing = previous == null;
+    return isPreviousMissing ? [] : [{ file, previous, path: ["desired", "receipt", "ownedFiles", index] }];
   });
 
   return [
     ...installScopeIssues(request),
-    ...restorationConsistencyIssues(staleFiles, request.restorations),
-    ...retainedFiles.flatMap(ownershipChangeIssues),
-    ...retainedFiles.flatMap(retainedFileIssues),
-    ...retainedFiles.flatMap(jsonContainerAcquisitionIssues),
-    ...reservedDesiredPathIssues(request),
+    ...listRestorationConsistencyIssues(staleFiles, request.restorations),
+    ...retainedFiles.flatMap(listOwnershipChangeIssues),
+    ...retainedFiles.flatMap(listRetainedFileIssues),
+    ...retainedFiles.flatMap(listDocumentContainerAcquisitionIssues),
+    ...listReservedDesiredPathIssues(request),
   ];
 };
 
@@ -235,10 +262,14 @@ const installScopeIssues = (request: InstallPlanRequest): ReadonlyArray<ZodIssue
   return [{ path: ["previous", "receipt", "scope"], message: "Previous and desired receipt scopes must match." }];
 };
 
-const reservedDesiredPathIssues = (request: InstallPlanRequest): ReadonlyArray<ZodIssueDetail> =>
+const listReservedDesiredPathIssues = (request: InstallPlanRequest): ReadonlyArray<ZodIssueDetail> =>
   request.desired.receipt.ownedFiles.flatMap((file, index) => {
-    const reservedPath = reservedReceiptPaths(request.receiptTarget).find((path) => pathsConflict(file.path, path));
-    if (reservedPath == null) {
+    const reservedPath = listReservedReceiptPaths(request.receiptTarget).find((path) =>
+      isPathsConflict(file.path, path),
+    );
+
+    const isReservedPathMissing = reservedPath == null;
+    if (isReservedPathMissing) {
       return [];
     }
 
@@ -257,13 +288,13 @@ const installRequestSchema = z
     restorations: z
       .array(plannedRestorationSchema)
       .describe("Exact final-action set for stale prior receipt entries; the planner owns operation order."),
-    desired: desiredStateSchema,
+    desired: desiredStatusSchema,
     receiptTarget: receiptTargetSchema,
     receiptExpectedCurrent: expectedCurrentSchema.describe(
       "Receipt target state captured during capability inspection.",
     ),
   })
-  .superRefine((request, context) => addZodIssueDetails(context, installRequestIssues(request)));
+  .superRefine((request, scope) => addZodIssueDetails(scope, installRequestIssues(request)));
 
 type InstallPlanRequest = z.infer<typeof installRequestSchema>;
 
@@ -279,17 +310,20 @@ const uninstallRequestSchema = z
       "Receipt target state captured during capability inspection.",
     ),
   })
-  .superRefine((request, context) =>
+  .superRefine((request, scope) =>
     addZodIssueDetails(
-      context,
-      restorationConsistencyIssues(reverseValues(request.receipt.ownedFiles), request.restorations),
+      scope,
+      listRestorationConsistencyIssues(reverseFields(request.receipt.ownedFiles), request.restorations),
     ),
   );
 
 type UninstallPlanRequest = z.infer<typeof uninstallRequestSchema>;
 
-const preservedContainers = (previous: JsonPointerOwnership, desired: JsonPointerOwnership): Array<string> => {
-  const desiredPointers = ownedJsonPointers(desired);
+const listPreservedContainers = (
+  previous: DocumentPointerOwnership,
+  desired: DocumentPointerOwnership,
+): Array<string> => {
+  const desiredPointers = listOwnedDocumentPointers(desired);
 
   return [
     ...previous.createdContainers.filter((container) =>
@@ -299,46 +333,56 @@ const preservedContainers = (previous: JsonPointerOwnership, desired: JsonPointe
   ];
 };
 
-const preserveJsonRestoration = (previous: JsonValuesOwnership, desired: JsonValuesOwnership): Ownership => ({
+const readPreserveDocumentRestoration = (
+  previous: DocumentFieldsOwnership,
+  desired: DocumentFieldsOwnership,
+): Ownership => ({
   ...desired,
   filePreviouslyPresent: previous.filePreviouslyPresent,
-  createdContainers: preservedContainers(previous, desired),
-  values: desired.values.map((value) => {
-    const priorValue = previous.values.find((candidate) => candidate.pointer === value.pointer);
+  createdContainers: listPreservedContainers(previous, desired),
+  values: desired.values.map((field) => {
+    const priorField = previous.values.find((candidate) => candidate.pointer === field.pointer);
 
-    return priorValue == null ? value : { ...value, previous: priorValue.previous };
+    const isPriorFieldMissing = priorField == null;
+    return isPriorFieldMissing ? field : { ...field, previous: priorField.previous };
   }),
 });
 
 // Whether each hook event array existed before agent-setup first owned it, from either settings receipt format.
-const priorEventPresence = (previous: JsonPointerOwnership): ReadonlyMap<string, boolean> =>
-  new Map(
-    previous._tag === "jsonValues"
-      ? previous.values.map((value) => [value.pointer, value.previous._tag === "value"])
+const readPriorEventPresence = (previous: DocumentPointerOwnership): ReadonlyMap<string, boolean> => {
+  const isPreviousDocumentValues = previous._tag === "jsonValues";
+  return new Map(
+    isPreviousDocumentValues
+      ? previous.values.map((field) => [field.pointer, field.previous._tag === "value"])
       : previous.events.map((event) => [event.pointer, event.previouslyPresent]),
   );
+};
 
-const preserveHookEntriesRestoration = (previous: JsonPointerOwnership, desired: HookEntriesOwnership): Ownership => {
-  const presence = priorEventPresence(previous);
+const readPreserveHookLinesRestoration = (
+  previous: DocumentPointerOwnership,
+  desired: HookLinesOwnership,
+): Ownership => {
+  const presence = readPriorEventPresence(previous);
 
   return {
     ...desired,
     filePreviouslyPresent: previous.filePreviouslyPresent,
-    createdContainers: preservedContainers(previous, desired),
+    createdContainers: listPreservedContainers(previous, desired),
     events: desired.events.map((event) => {
       const previouslyPresent = presence.get(event.pointer);
 
-      return previouslyPresent == null ? event : { ...event, previouslyPresent };
+      const isPreviouslyPresentUnknown = previouslyPresent == null;
+      return isPreviouslyPresentUnknown ? event : { ...event, previouslyPresent };
     }),
   };
 };
 
-const preserveYamlRestoration = (
-  previous: YamlSequenceValueOwnership,
-  desired: YamlSequenceValueOwnership,
+const readPreserveYamlRestoration = (
+  previous: YamlSequenceFieldOwnership,
+  desired: YamlSequenceFieldOwnership,
 ): Ownership => {
-  const isYamlValueChanged = previous.key !== desired.key || previous.reference !== desired.reference;
-  if (isYamlValueChanged) {
+  const isYamlFieldChanged = previous.key !== desired.key || previous.reference !== desired.reference;
+  if (isYamlFieldChanged) {
     return { ...desired, filePreviouslyPresent: previous.filePreviouslyPresent };
   }
 
@@ -352,39 +396,45 @@ const preserveYamlRestoration = (
 };
 
 // A retained path keeps the restoration evidence from when it was first owned, not from this install.
-const preserveRestoration = (previous: Ownership, desired: Ownership): Ownership => {
-  if (previous._tag === "wholeFile" && desired._tag === "wholeFile") {
+const readPreserveRestoration = (previous: Ownership, desired: Ownership): Ownership => {
+  const isWholeFileChange = previous._tag === "wholeFile" && desired._tag === "wholeFile";
+  if (isWholeFileChange) {
     return { ...desired, previous: previous.previous };
   }
 
-  if (previous._tag === "jsonValues" && desired._tag === "jsonValues") {
-    return preserveJsonRestoration(previous, desired);
+  const isDocumentValuesChange = previous._tag === "jsonValues" && desired._tag === "jsonValues";
+  if (isDocumentValuesChange) {
+    return readPreserveDocumentRestoration(previous, desired);
   }
 
-  const previousJsonOwnership = jsonPointerOwnership(previous);
-  const isHookEntriesOverJsonPointer = previousJsonOwnership != null && desired._tag === "hookEntries";
-  if (isHookEntriesOverJsonPointer) {
-    return preserveHookEntriesRestoration(previousJsonOwnership, desired);
+  const previousDocumentOwnership = readDocumentPointerOwnership(previous);
+
+  const isHookLinesOverDocumentPointer = previousDocumentOwnership != null && desired._tag === "hookEntries";
+  if (isHookLinesOverDocumentPointer) {
+    return readPreserveHookLinesRestoration(previousDocumentOwnership, desired);
   }
 
-  if (previous._tag === "managedBlock" && desired._tag === "managedBlock") {
+  const isManagedBlockChange = previous._tag === "managedBlock" && desired._tag === "managedBlock";
+  if (isManagedBlockChange) {
     return { ...desired, filePreviouslyPresent: previous.filePreviouslyPresent };
   }
 
   const isYamlSequencePair = previous._tag === "yamlSequenceValue" && desired._tag === "yamlSequenceValue";
   if (isYamlSequencePair) {
-    return preserveYamlRestoration(previous, desired);
+    return readPreserveYamlRestoration(previous, desired);
   }
 
   return desired;
 };
 
-const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => {
-  if (left._tag === "wholeFile" && right._tag === "wholeFile") {
+const isInstalledOwnershipEqual = (left: Ownership, right: Ownership): boolean => {
+  const isWholeFilePair = left._tag === "wholeFile" && right._tag === "wholeFile";
+  if (isWholeFilePair) {
     return left.installedHash === right.installedHash;
   }
 
-  if (left._tag === "managedBlock" && right._tag === "managedBlock") {
+  const isManagedBlockPair = left._tag === "managedBlock" && right._tag === "managedBlock";
+  if (isManagedBlockPair) {
     return (
       left.startMarker === right.startMarker &&
       left.endMarker === right.endMarker &&
@@ -392,22 +442,24 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
     );
   }
 
-  if (left._tag === "jsonValues" && right._tag === "jsonValues") {
+  const isDocumentValuesPair = left._tag === "jsonValues" && right._tag === "jsonValues";
+  if (isDocumentValuesPair) {
     return (
       left.values.length === right.values.length &&
-      left.values.every((value, index) => {
+      left.values.every((field, index) => {
         const candidate = right.values[index];
 
         return (
           candidate != null &&
-          value.pointer === candidate.pointer &&
-          isDeepStrictEqual(value.installed, candidate.installed)
+          field.pointer === candidate.pointer &&
+          isDeepStrictEqual(field.installed, candidate.installed)
         );
       })
     );
   }
 
-  if (left._tag === "hookEntries" && right._tag === "hookEntries") {
+  const isHookEntriesPair = left._tag === "hookEntries" && right._tag === "hookEntries";
+  if (isHookEntriesPair) {
     return (
       left.events.length === right.events.length &&
       left.events.every((event, index) => {
@@ -422,34 +474,39 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
     );
   }
 
-  if (left._tag === "yamlSequenceValue" && right._tag === "yamlSequenceValue") {
+  const isYamlSequencePair = left._tag === "yamlSequenceValue" && right._tag === "yamlSequenceValue";
+  if (isYamlSequencePair) {
     return left.key === right.key && left.reference === right.reference;
   }
 
   return false;
 };
 
-const installedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
+const isInstalledFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
   left.path === right.path &&
   left.kind._tag === right.kind._tag &&
   isDeepStrictEqual(left.owner, right.owner) &&
-  installedOwnershipEqual(left.ownership, right.ownership);
+  isInstalledOwnershipEqual(left.ownership, right.ownership);
 
-const withPreservedRestoration = (desiredFile: OwnedFile, previousFiles: ReadonlyArray<OwnedFile>): OwnedFile => {
+const readWithPreservedRestoration = (desiredFile: OwnedFile, previousFiles: ReadonlyArray<OwnedFile>): OwnedFile => {
   const previousFile = previousFiles.find((file) => file.path === desiredFile.path);
-  if (previousFile == null) {
+
+  const isPreviousFileMissing = previousFile == null;
+  if (isPreviousFileMissing) {
     return desiredFile;
   }
 
-  return { ...desiredFile, ownership: preserveRestoration(previousFile.ownership, desiredFile.ownership) };
+  return { ...desiredFile, ownership: readPreserveRestoration(previousFile.ownership, desiredFile.ownership) };
 };
 
 const planAcceptedInstall = (request: InstallPlanRequest): Plan => {
-  const previousFiles = request.previous._tag === "receipt" ? request.previous.receipt.ownedFiles : [];
+  const previousStatus = request.previous;
+  const isPreviousReceipt = previousStatus._tag === "receipt";
+  const previousFiles = isPreviousReceipt ? previousStatus.receipt.ownedFiles : [];
   const nextFiles = request.desired.receipt.ownedFiles.map((desiredFile) =>
-    withPreservedRestoration(desiredFile, previousFiles),
+    readWithPreservedRestoration(desiredFile, previousFiles),
   );
-  const staleFiles = reverseValues(
+  const staleFiles = reverseFields(
     previousFiles.filter((previousFile) => !nextFiles.some((file) => file.path === previousFile.path)),
   );
   // Only writes whose installed state changes are emitted; unchanged files become preconditions.
@@ -459,7 +516,8 @@ const planAcceptedInstall = (request: InstallPlanRequest): Plan => {
       .flatMap((file) => {
         const previousFile = previousFiles.find((candidate) => candidate.path === file.path);
 
-        return previousFile != null && installedFilesEqual(previousFile, file) ? [] : [{ ...operation, file }];
+        const isPreviousFileEqual = previousFile != null && isInstalledFilesEqual(previousFile, file);
+        return isPreviousFileEqual ? [] : [{ ...operation, file }];
       }),
   );
   const changedPaths = new Set(changedWrites.map((operation) => operation.file.path));
@@ -469,11 +527,10 @@ const planAcceptedInstall = (request: InstallPlanRequest): Plan => {
     scope: receipt.scope,
     root: request.root,
     operations: [...orderRestorations(staleFiles, request.restorations), ...changedWrites],
-    preconditions: request.desired.writes.flatMap((operation) =>
-      changedPaths.has(operation.file.path)
-        ? []
-        : [{ path: operation.file.path, expectedCurrent: operation.expectedCurrent }],
-    ),
+    preconditions: request.desired.writes.flatMap((operation) => {
+      const isPathChanged = changedPaths.has(operation.file.path);
+      return isPathChanged ? [] : [{ path: operation.file.path, expectedCurrent: operation.expectedCurrent }];
+    }),
     receipt: {
       _tag: "receiptPublish",
       target: request.receiptTarget,
@@ -487,7 +544,7 @@ const planAcceptedUninstall = (request: UninstallPlanRequest): Plan =>
   checkPlan({
     scope: request.receipt.scope,
     root: request.root,
-    operations: orderRestorations(reverseValues(request.receipt.ownedFiles), request.restorations),
+    operations: orderRestorations(reverseFields(request.receipt.ownedFiles), request.restorations),
     preconditions: [],
     receipt: { _tag: "remove", target: request.receiptTarget, expectedCurrent: request.receiptExpectedCurrent },
   });
@@ -495,6 +552,7 @@ const planAcceptedUninstall = (request: UninstallPlanRequest): Plan =>
 // Plans an install from the raw request, or throws one Error that lists every rejected field.
 export const planInstall = (candidateRequest: unknown): Plan => {
   const requestCheck = installRequestSchema.safeParse(candidateRequest);
+
   const isRequestAccepted = requestCheck.success;
   if (isRequestAccepted) {
     return planAcceptedInstall(requestCheck.data);
@@ -506,6 +564,7 @@ export const planInstall = (candidateRequest: unknown): Plan => {
 // Plans an uninstall from the raw request, or throws one Error that lists every rejected field.
 export const planUninstall = (candidateRequest: unknown): Plan => {
   const requestCheck = uninstallRequestSchema.safeParse(candidateRequest);
+
   const isRequestAccepted = requestCheck.success;
   if (isRequestAccepted) {
     return planAcceptedUninstall(requestCheck.data);

@@ -9,11 +9,12 @@ import { type InstructionFilePlan, planInstructionFile } from "./instruction-fil
 
 const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+const stringEncoder = new TextEncoder();
+const stringDecoder = new TextDecoder();
 
-const installedSkillOf = (featureId: string) => {
+const createInstalledSkill = (featureId: string) => {
   const feature = findFeature(featureId);
+
   const isFeatureMissing = feature == null;
   if (isFeatureMissing) {
     throw new Error(`Unknown feature: ${featureId}`);
@@ -27,66 +28,74 @@ const installedSkillOf = (featureId: string) => {
   return feature.installedSkill;
 };
 
-const makeCodeReadableSkill = installedSkillOf("make-code-readable");
-const simplifyCodeSkill = installedSkillOf("simplify-code");
+const makeCodeReadableSkill = createInstalledSkill("make-code-readable");
+const simplifyCodeSkill = createInstalledSkill("simplify-code");
 
-const encode = (value: string): Uint8Array => textEncoder.encode(value);
+const encode = (field: string): Uint8Array => stringEncoder.encode(field);
 
-const decode = (value: Uint8Array): string => textDecoder.decode(value);
+const decode = (field: Uint8Array): string => stringDecoder.decode(field);
 
-const hash = (value: Uint8Array): string => createHash("sha256").update(value).digest("hex");
+const hash = (field: Uint8Array): string => createHash("sha256").update(field).digest("hex");
 
-const desiredSkill = (markdown = "Alpha body.") => ({
+const createDesiredSkill = (markdown = "Alpha body.") => ({
   installedSkill: makeCodeReadableSkill,
   markdown,
 });
 
-const request = (input?: {
+const request = (details?: {
   agentIds?: ReadonlyArray<string>;
   currentBytes?: Uint8Array;
   desired?: "present" | "absent";
   path?: string;
   previousFile?: OwnedFile;
   skills?: ReadonlyArray<{ installedSkill: typeof makeCodeReadableSkill; markdown: string }>;
-}) => ({
-  path: input?.path || "AGENTS.md",
-  desired:
-    input?.desired === "absent"
+}) => {
+  const isDesiredAbsent = details?.desired === "absent";
+  const isCurrentBytesUnset = details?.currentBytes == null;
+  const isPreviousFileUnset = details?.previousFile == null;
+  return {
+    path: details?.path || "AGENTS.md",
+    desired: isDesiredAbsent
       ? { _tag: "absent" }
       : {
           _tag: "present",
-          agentIds: input?.agentIds || ["aider"],
-          skills: input?.skills || [desiredSkill()],
+          agentIds: details?.agentIds || ["aider"],
+          skills: details?.skills || [createDesiredSkill()],
         },
-  currentFile: input?.currentBytes === undefined ? { _tag: "missing" } : { _tag: "file", bytes: input.currentBytes },
-  previousFile: input?.previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: input.previousFile },
-});
+    currentFile: isCurrentBytesUnset ? { _tag: "missing" } : { _tag: "file", bytes: details.currentBytes },
+    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: details.previousFile },
+  };
+};
 
-type RequestInput = Parameters<typeof request>[0];
+type RequestDetails = Parameters<typeof request>[0];
 
-const plan = (input?: RequestInput): InstructionFilePlan => planInstructionFile(request(input));
+const plan = (details?: RequestDetails): InstructionFilePlan => planInstructionFile(request(details));
 
-const rejects = (input: unknown): boolean => {
+const findRejectionMessage = (details: unknown): boolean => {
   try {
-    planInstructionFile(input);
+    planInstructionFile(details);
     return false;
   } catch {
     return true;
   }
 };
 
-const write = (input?: RequestInput) => {
-  const operation = plan(input);
-  if (operation._tag !== "write") {
+const write = (details?: RequestDetails) => {
+  const operation = plan(details);
+
+  const isNotWriteOperation = operation._tag !== "write";
+  if (isNotWriteOperation) {
     throw new Error("Expected one instruction-file write.");
   }
 
   return operation;
 };
 
-const restore = (input?: RequestInput) => {
-  const operation = plan(input);
-  if (operation._tag !== "restore") {
+const restore = (details?: RequestDetails) => {
+  const operation = plan(details);
+
+  const isNotRestoreOperation = operation._tag !== "restore";
+  if (isNotRestoreOperation) {
     throw new Error("Expected one instruction-file restoration.");
   }
 
@@ -97,17 +106,17 @@ describe("planInstructionFile", () => {
   it("renders exact catalog skills in order", () => {
     const operation = write({
       skills: [
-        desiredSkill("---\nname: make-code-readable\n---\nReadable body.\n"),
+        createDesiredSkill("---\nname: make-code-readable\n---\nReadable body.\n"),
         { installedSkill: simplifyCodeSkill, markdown: "---\r\nname: simplify-code\r\n---\r\nV2 body.\r\n" },
       ],
     });
-    const expectedContent = "\n## make-code-readable\n\nReadable body.\n\n---\n\n## simplify-code\n\nV2 body.\n";
+    const expectedMessage = "\n## make-code-readable\n\nReadable body.\n\n---\n\n## simplify-code\n\nV2 body.\n";
     const exactInstructionKind: "instruction" = operation.file.kind._tag;
 
     expectTypeOf(exactInstructionKind).toEqualTypeOf<"instruction">();
     expectTypeOf(operation.file.owner._tag).toEqualTypeOf<"agent">();
     expectTypeOf(operation.file.ownership._tag).toEqualTypeOf<"managedBlock">();
-    expect(decode(operation.bytes)).toBe(`${startMarker}${expectedContent}${endMarker}\n`);
+    expect(decode(operation.bytes)).toBe(`${startMarker}${expectedMessage}${endMarker}\n`);
     expect(operation.file).toEqual({
       owner: { _tag: "agent", agentIds: ["aider"] },
       path: "AGENTS.md",
@@ -117,7 +126,7 @@ describe("planInstructionFile", () => {
         filePreviouslyPresent: false,
         startMarker,
         endMarker,
-        installedBodyHash: hash(encode(expectedContent)),
+        installedBodyHash: hash(encode(expectedMessage)),
       },
     });
   });
@@ -209,14 +218,16 @@ describe("planInstructionFile", () => {
 
   it.each(
     agentCatalog.flatMap((agent) => {
-      if (agent.target._tag === "instructionFile") {
+      const isInstructionFileTarget = agent.target._tag === "instructionFile";
+      if (isInstructionFileTarget) {
         return [{ agentId: agent.id, path: agent.target.path }];
       }
 
-      return agent.target._tag === "instructionLink" ? [{ agentId: agent.id, path: agent.target.instructionPath }] : [];
+      const isInstructionLinkTarget = agent.target._tag === "instructionLink";
+      return isInstructionLinkTarget ? [{ agentId: agent.id, path: agent.target.instructionPath }] : [];
     }),
   )("plans catalog instruction consumer $agentId at $path", ({ agentId, path }) => {
-    expect(rejects(request({ agentIds: [agentId], path }))).toBe(false);
+    expect(findRejectionMessage(request({ agentIds: [agentId], path }))).toBe(false);
   });
 
   it.each([
@@ -230,16 +241,18 @@ describe("planInstructionFile", () => {
 
   it("rejects edits inside a receipted body and changed framing", () => {
     const installed = write();
-    const editedContent = encode(`${startMarker}\nEdited\n${endMarker}\n`);
+    const editedMessage = encode(`${startMarker}\nEdited\n${endMarker}\n`);
 
-    expect(rejects(request({ currentBytes: editedContent, previousFile: installed.file }))).toBe(true);
-    expect(rejects(request({ currentBytes: installed.bytes.slice(0, -1), previousFile: installed.file }))).toBe(true);
+    expect(findRejectionMessage(request({ currentBytes: editedMessage, previousFile: installed.file }))).toBe(true);
+    expect(
+      findRejectionMessage(request({ currentBytes: installed.bytes.slice(0, -1), previousFile: installed.file })),
+    ).toBe(true);
   });
 
   it.each([["unknown request property", { ...request(), unexpected: true }]])(
     "rejects %s at the strict request boundary",
-    (_case, input) => {
-      expect(rejects(input)).toBe(true);
+    (_case, details) => {
+      expect(findRejectionMessage(details)).toBe(true);
     },
   );
 
@@ -248,7 +261,10 @@ describe("planInstructionFile", () => {
     const forged = { ...installed.file, owner: { _tag: "agent", agentIds: ["gemini"] } };
 
     expect(
-      rejects({ ...request({ currentBytes: installed.bytes }), previousFile: { _tag: "owned", file: forged } }),
+      findRejectionMessage({
+        ...request({ currentBytes: installed.bytes }),
+        previousFile: { _tag: "owned", file: forged },
+      }),
     ).toBe(true);
   });
 });

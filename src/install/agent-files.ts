@@ -1,17 +1,17 @@
 import { join } from "node:path";
 
 import type { AgentDefinition } from "#src/catalog/agent-catalog.js";
-import { instructionPath, planInstructionFile } from "./agent-formats/instruction-file.js";
+import { planInstructionFile, readInstructionPath } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { planRuleFiles } from "./agent-formats/rule-file.js";
 import { planSkillDirectory } from "./agent-formats/skill-directory.js";
 import {
   checkFileChange,
-  expectedCurrent,
   type FileSnapshot,
-  previousReceiptFile,
-  previousWholeFile,
+  readExpectedCurrent,
   readFileSnapshot,
+  readPreviousReceiptFile,
+  readPreviousWholeFile,
 } from "./host-files.js";
 import { createInstallError, type InstallRequest, wrapAsInstallError } from "./install-request.js";
 import type { PreviousFileValue } from "./ownership.js";
@@ -23,7 +23,7 @@ interface AgentWritesRequest {
   request: InstallRequest;
   selectedAgents: ReadonlyArray<AgentDefinition>;
   preparedSkills: ReadonlyArray<PreparedSkill>;
-  previousReceipt: Receipt | undefined;
+  previousReceipt: Receipt | null;
 }
 
 interface FormatWritesRequest extends AgentWritesRequest {
@@ -49,21 +49,21 @@ const tryAsInstallError = <Planned>(action: () => Planned): Planned => {
   }
 };
 
-// Reads every destination once and resolves the prior state its receipt keeps; desired bytes allow adoption.
+// Reads every destination once and settles the prior state its receipt keeps; desired bytes allow adoption.
 const readWholeFiles = async ({
   root,
   previousReceipt,
   desiredFiles,
 }: {
   root: string;
-  previousReceipt: Receipt | undefined;
-  desiredFiles: ReadonlyMap<string, Uint8Array | undefined>;
+  previousReceipt: Receipt | null;
+  desiredFiles: ReadonlyMap<string, Uint8Array | null>;
 }): Promise<InspectedFile[]> =>
   Promise.all(
     [...desiredFiles].map(async ([filePath, desiredBytes]) => {
       const snapshot = await readFileSnapshot(join(root, filePath));
       const previous = tryAsInstallError(() =>
-        previousWholeFile({ receipt: previousReceipt, filePath, snapshot, desiredBytes }),
+        readPreviousWholeFile({ receipt: previousReceipt, filePath, snapshot, desiredBytes }),
       );
 
       return { path: filePath, snapshot, previous };
@@ -76,18 +76,20 @@ const checkPlannedWrites = (
 ): FileChange[] =>
   writes.map((write) => {
     const inspectedFile = inspectedFiles.find((candidate) => candidate.path === write.file.path);
+
     const isInspectedFileMissing = inspectedFile == null;
     if (isInspectedFileMissing) {
       throw createInstallError(`Missing inspected state for ${write.file.path}.`);
     }
 
     return tryAsInstallError(() =>
-      checkFileChange({ ...write, expectedCurrent: expectedCurrent(inspectedFile.snapshot) }),
+      checkFileChange({ ...write, expectedCurrent: readExpectedCurrent(inspectedFile.snapshot) }),
     );
   });
 
 const createSkillDirectoryWrites = async (formatRequest: FormatWritesRequest): Promise<FileChange[]> => {
   const target = formatRequest.agent.target;
+
   const isNotSkillDirectory = target._tag !== "skillDirectory";
   if (isNotSkillDirectory) {
     return [];
@@ -110,7 +112,10 @@ const createSkillDirectoryWrites = async (formatRequest: FormatWritesRequest): P
   const plan = tryAsInstallError(() =>
     planSkillDirectory({
       agent: formatRequest.agent,
-      skills: formatRequest.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
+      skills: formatRequest.preparedSkills.map(({ installedSkill, sourceFiles: originFiles }) => ({
+        installedSkill,
+        sourceFiles: originFiles,
+      })),
       previousFiles: inspectedFiles.map(({ path, previous }) => ({ path, previous })),
     }),
   );
@@ -120,15 +125,16 @@ const createSkillDirectoryWrites = async (formatRequest: FormatWritesRequest): P
 
 const createRuleFileWrites = async (formatRequest: FormatWritesRequest): Promise<FileChange[]> => {
   const target = formatRequest.agent.target;
+
   const isNotRuleFile = target._tag !== "ruleFile";
   if (isNotRuleFile) {
     return [];
   }
 
-  const desiredFiles = new Map<string, Uint8Array | undefined>(
+  const desiredFiles = new Map<string, Uint8Array | null>(
     formatRequest.preparedSkills.map((skill) => [
       `${target.directory}/${skill.installedSkill.id}${target.extension}`,
-      undefined,
+      null,
     ]),
   );
   const inspectedFiles = await readWholeFiles({
@@ -157,30 +163,34 @@ const createSharedFileWrites = async ({
   planFile,
 }: {
   root: string;
-  previousReceipt: Receipt | undefined;
+  previousReceipt: Receipt | null;
   filePath: string;
   kind: "instruction" | "instructionLink";
   planFile: (files: { currentFile: FileSnapshot; previousFile: unknown }) => PlannedFile;
 }): Promise<FileChange[]> => {
   const currentFile = await readFileSnapshot(join(root, filePath));
-  const previousFile = previousReceiptFile(previousReceipt, filePath);
+  const previousFile = readPreviousReceiptFile(previousReceipt, filePath);
+
   const isPreviousFileOtherKind = previousFile != null && previousFile.kind._tag !== kind;
   if (isPreviousFileOtherKind) {
-    const label = kind === "instruction" ? "instruction" : "native config";
+    const isInstructionKind = kind === "instruction";
+    const label = isInstructionKind ? "instruction" : "native config";
 
     throw createInstallError(`Receipted ${label} path ${filePath} has an incompatible file kind.`);
   }
 
   const isPreviousFileMissing = previousFile == null;
-  const previousFileState = isPreviousFileMissing ? { _tag: "missing" } : { _tag: "owned", file: previousFile };
-  const plannedFile = tryAsInstallError(() => planFile({ currentFile, previousFile: previousFileState }));
+  const previousFileStatus = isPreviousFileMissing ? { _tag: "missing" } : { _tag: "owned", file: previousFile };
+  const plannedFile = tryAsInstallError(() => planFile({ currentFile, previousFile: previousFileStatus }));
 
   const isNothingPlanned = plannedFile._tag === "none";
   if (isNothingPlanned) {
     return [];
   }
 
-  return [tryAsInstallError(() => checkFileChange({ ...plannedFile, expectedCurrent: expectedCurrent(currentFile) }))];
+  return [
+    tryAsInstallError(() => checkFileChange({ ...plannedFile, expectedCurrent: readExpectedCurrent(currentFile) })),
+  ];
 };
 
 const createInstructionWrites = async (writesRequest: AgentWritesRequest): Promise<FileChange[]> => {
@@ -189,7 +199,9 @@ const createInstructionWrites = async (writesRequest: AgentWritesRequest): Promi
     return [];
   }
 
-  const instructionPaths = [...new Set(writesRequest.selectedAgents.flatMap((agent) => instructionPath(agent) ?? []))];
+  const instructionPaths = [
+    ...new Set(writesRequest.selectedAgents.flatMap((agent) => readInstructionPath(agent) ?? [])),
+  ];
   const writes = await Promise.all(
     instructionPaths.map((filePath) =>
       createSharedFileWrites({
@@ -203,7 +215,7 @@ const createInstructionWrites = async (writesRequest: AgentWritesRequest): Promi
             desired: {
               _tag: "present",
               agentIds: writesRequest.selectedAgents
-                .filter((agent) => instructionPath(agent) === filePath)
+                .filter((agent) => readInstructionPath(agent) === filePath)
                 .map((agent) => agent.id),
               skills: writesRequest.preparedSkills.map(({ installedSkill, markdown }) => ({
                 installedSkill,
@@ -228,6 +240,7 @@ const createInstructionLinkWrite = async ({
   agent: AgentDefinition;
 }): Promise<FileChange[]> => {
   const target = agent.target;
+
   const isNotInstructionLink = target._tag !== "instructionLink";
   if (isNotInstructionLink) {
     return [];

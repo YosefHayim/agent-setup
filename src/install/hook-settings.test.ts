@@ -41,7 +41,7 @@ interface ReceiptHookEvent {
   previouslyPresent: boolean;
 }
 
-interface ReceiptHookEntriesOwnership {
+interface ReceiptHookLinesOwnership {
   filePreviouslyPresent: boolean;
   createdContainers: ReadonlyArray<string>;
   events: ReadonlyArray<ReceiptHookEvent>;
@@ -54,9 +54,9 @@ afterEach(async () => {
   await Promise.all(directoriesToRemove.map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-const jsonContents = (document: object) => `${JSON.stringify(document, null, 2)}\n`;
+const createDocumentMessages = (document: object) => `${JSON.stringify(document, null, 2)}\n`;
 
-const sha256 = (contents: string): string => createHash("sha256").update(contents).digest("hex");
+const createSha256Hex = (messages: string): string => createHash("sha256").update(messages).digest("hex");
 
 // Returns the error a rejected installer call carries, and fails the test when the call succeeds.
 const captureRejection = async (installerPromise: Promise<unknown>): Promise<unknown> => {
@@ -78,21 +78,21 @@ const makeTemporaryDirectory = async (prefix: string): Promise<string> => {
 
 const writeFiles = async (base: string, files: Readonly<Record<string, string>>): Promise<void> => {
   await Promise.all(
-    Object.entries(files).map(async ([relativePath, contents]) => {
+    Object.entries(files).map(async ([relativePath, messages]) => {
       const destination = join(base, relativePath);
       await mkdir(dirname(destination), { recursive: true });
-      await writeFile(destination, contents);
+      await writeFile(destination, messages);
     }),
   );
 };
 
-const readFileContents = (root: string, relativePath: string): Promise<string> =>
+const readFileMessages = (root: string, relativePath: string): Promise<string> =>
   readFile(join(root, relativePath), "utf8");
 
-const readJsonFile = async (root: string, relativePath: string) => {
-  const fileContents = await readFileContents(root, relativePath);
+const readDocumentFile = async (root: string, relativePath: string) => {
+  const fileMessages = await readFileMessages(root, relativePath);
 
-  return JSON.parse(fileContents);
+  return JSON.parse(fileMessages);
 };
 
 const createWorkspace = async (): Promise<Workspace> => {
@@ -107,45 +107,49 @@ const createWorkspace = async (): Promise<Workspace> => {
 
 // Another tool, such as agent-voice, appends its own Stop entry and rewrites the file in its own format.
 const appendForeignStop = async (root: string, relativePath: string): Promise<void> => {
-  const settings = await readJsonFile(root, relativePath);
+  const settings = await readDocumentFile(root, relativePath);
   settings.hooks.Stop.push(foreignStop);
   await writeFiles(root, { [relativePath]: JSON.stringify(settings) });
 };
 
-const installRequest = (input: { root: string; preparedRoot: string; agentIds: ReadonlyArray<string> }) => ({
-  destination: { _tag: "project", root: input.root },
-  host: { homeRoot: input.root },
-  preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
+const installRequest = (details: { root: string; preparedRoot: string; agentIds: ReadonlyArray<string> }) => ({
+  destination: { _tag: "project", root: details.root },
+  host: { homeRoot: details.root },
+  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
-  agents: { _tag: "selected", ids: input.agentIds },
+  agents: { _tag: "selected", ids: details.agentIds },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: defaultConfig },
 });
 
-const uninstallRequest = (root: string) => ({
+const createUninstallRequest = (root: string) => ({
   destination: { _tag: "project", root },
   host: { homeRoot: root },
   interaction: { _tag: "scripted" },
 });
 
 // Receipts before entry ownership hashed each whole /hooks/<event> array and kept the groups it replaced.
-const legacyHookEventOwnership = (event: ReceiptHookEvent, hooks: Readonly<Record<string, unknown>>) => {
+const createLegacyHookEventOwnership = (event: ReceiptHookEvent, hooks: Readonly<Record<string, unknown>>) => {
   const installedGroups = hooks[event.pointer.slice("/hooks/".length)];
 
+  const wasPreviouslyPresent = event.previouslyPresent;
   return {
     pointer: event.pointer,
-    installed: { _tag: "value", hash: sha256(JSON.stringify(installedGroups)) },
-    previous: event.previouslyPresent
+    installed: { _tag: "value", hash: createSha256Hex(JSON.stringify(installedGroups)) },
+    previous: wasPreviouslyPresent
       ? { _tag: "value", value: [userStop], lexical: { _tag: "value", source: JSON.stringify([userStop]) } }
       : { _tag: "missing" },
   };
 };
 
-const legacySettingsOwnership = (ownership: ReceiptHookEntriesOwnership, hooks: Readonly<Record<string, unknown>>) => ({
+const createLegacySettingsOwnership = (
+  ownership: ReceiptHookLinesOwnership,
+  hooks: Readonly<Record<string, unknown>>,
+) => ({
   _tag: "jsonValues",
   filePreviouslyPresent: ownership.filePreviouslyPresent,
   createdContainers: ownership.createdContainers,
-  values: ownership.events.map((event) => legacyHookEventOwnership(event, hooks)),
+  values: ownership.events.map((event) => createLegacyHookEventOwnership(event, hooks)),
 });
 
 describe("hook settings", () => {
@@ -158,8 +162,8 @@ describe("hook settings", () => {
 
     await runInstall(request);
 
-    const claudeHooks = (await readJsonFile(root, claudeSettingsPath)).hooks;
-    const codexHooks = (await readJsonFile(root, codexHooksPath)).hooks;
+    const claudeHooks = (await readDocumentFile(root, claudeSettingsPath)).hooks;
+    const codexHooks = (await readDocumentFile(root, codexHooksPath)).hooks;
     expect(claudeHooks.Stop[0].hooks[0].async).toBe(true);
     expect(claudeHooks.SubagentStop[0].hooks[0].async).toBe(true);
     expect(codexHooks.Stop[0].hooks[0].async).toBeUndefined();
@@ -172,12 +176,12 @@ describe("hook settings", () => {
     const oldHookCommand = `node "${canonicalRoot}/.claude/agent-setup/hooks/scratchFolderGuard/hooks/askScratchCleanup.js"`;
     const oldInstalledStop = { hooks: [{ type: "command", command: oldHookCommand }] };
     await writeFiles(root, {
-      [claudeSettingsPath]: jsonContents({ hooks: { Stop: [oldInstalledStop, foreignStop] } }),
+      [claudeSettingsPath]: createDocumentMessages({ hooks: { Stop: [oldInstalledStop, foreignStop] } }),
     });
 
     await runInstall(request);
 
-    const stopGroups = (await readJsonFile(root, claudeSettingsPath)).hooks.Stop;
+    const stopGroups = (await readDocumentFile(root, claudeSettingsPath)).hooks.Stop;
     const stopCommands = stopGroups.flatMap((group: { hooks: Array<{ command: string }> }) =>
       group.hooks.map((hook) => hook.command),
     );
@@ -190,8 +194,8 @@ describe("hook settings", () => {
     const { root, preparedRoot } = await createWorkspace();
     const request = installRequest({ root, preparedRoot, agentIds: ["claude-code", "codex"] });
     await writeFiles(root, {
-      [claudeSettingsPath]: jsonContents({ theme: "dark" }),
-      [codexHooksPath]: jsonContents({ hooks: { Stop: [userStop] } }),
+      [claudeSettingsPath]: createDocumentMessages({ theme: "dark" }),
+      [codexHooksPath]: createDocumentMessages({ hooks: { Stop: [userStop] } }),
     });
     await runInstall(request);
     await appendForeignStop(root, claudeSettingsPath);
@@ -202,22 +206,22 @@ describe("hook settings", () => {
     await runUpdate({ ...request, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } });
 
     for (const hookFile of [claudeSettingsPath, codexHooksPath]) {
-      const settings = await readFileContents(root, hookFile);
+      const settings = await readFileMessages(root, hookFile);
       expect(settings).toContain("agent-voice-stop");
       expect(settings).toContain("ask-scratch-cleanup.js");
     }
 
-    await runUninstall(uninstallRequest(root));
+    await runUninstall(createUninstallRequest(root));
 
-    expect(await readJsonFile(root, claudeSettingsPath)).toEqual({ theme: "dark", hooks: { Stop: [foreignStop] } });
-    expect(await readJsonFile(root, codexHooksPath)).toEqual({ hooks: { Stop: [userStop, foreignStop] } });
+    expect(await readDocumentFile(root, claudeSettingsPath)).toEqual({ theme: "dark", hooks: { Stop: [foreignStop] } });
+    expect(await readDocumentFile(root, codexHooksPath)).toEqual({ hooks: { Stop: [userStop, foreignStop] } });
   });
 
   it("still refuses an install after one of its own hook entries changed", async () => {
     const { root, preparedRoot } = await createWorkspace();
     const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
     await runInstall(request);
-    const changedSettings = (await readFileContents(root, claudeSettingsPath)).replace(
+    const changedSettings = (await readFileMessages(root, claudeSettingsPath)).replace(
       "ask-scratch-cleanup.js",
       "ask-scratch-cleanup.js --changed",
     );
@@ -228,34 +232,37 @@ describe("hook settings", () => {
     expect(installError).toMatchObject({
       message: expect.stringContaining(`Receipted hook entries in ${claudeSettingsPath}`),
     });
-    expect(await readFileContents(root, claudeSettingsPath)).toBe(changedSettings);
+    expect(await readFileMessages(root, claudeSettingsPath)).toBe(changedSettings);
   });
 
   it("migrates a whole-array settings receipt and keeps entries other tools appended since", async () => {
     const { root, preparedRoot } = await createWorkspace();
     const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
-    await writeFiles(root, { [claudeSettingsPath]: jsonContents({ theme: "dark", hooks: { Stop: [userStop] } }) });
+    await writeFiles(root, {
+      [claudeSettingsPath]: createDocumentMessages({ theme: "dark", hooks: { Stop: [userStop] } }),
+    });
     await runInstall(request);
-    const receipt = await readJsonFile(root, receiptPath);
-    const hooks = (await readJsonFile(root, claudeSettingsPath)).hooks;
-    const legacyOwnedFiles = receipt.ownedFiles.map((file: { path: string; ownership: ReceiptHookEntriesOwnership }) =>
-      file.path === claudeSettingsPath ? { ...file, ownership: legacySettingsOwnership(file.ownership, hooks) } : file,
-    );
-    await writeFiles(root, { [receiptPath]: jsonContents({ ...receipt, ownedFiles: legacyOwnedFiles }) });
+    const receipt = await readDocumentFile(root, receiptPath);
+    const hooks = (await readDocumentFile(root, claudeSettingsPath)).hooks;
+    const legacyOwnedFiles = receipt.ownedFiles.map((file: { path: string; ownership: ReceiptHookLinesOwnership }) => {
+      const isClaudeSettingsFile = file.path === claudeSettingsPath;
+      return isClaudeSettingsFile ? { ...file, ownership: createLegacySettingsOwnership(file.ownership, hooks) } : file;
+    });
+    await writeFiles(root, { [receiptPath]: createDocumentMessages({ ...receipt, ownedFiles: legacyOwnedFiles }) });
     await appendForeignStop(root, claudeSettingsPath);
 
     await runInstall(request);
 
-    const migratedReceipt = await readJsonFile(root, receiptPath);
-    const settingsEntry = migratedReceipt.ownedFiles.find((file: { path: string }) => file.path === claudeSettingsPath);
-    expect(settingsEntry.ownership._tag).toBe("hookEntries");
-    expect(settingsEntry.ownership.events).toContainEqual(
+    const migratedReceipt = await readDocumentFile(root, receiptPath);
+    const settingsLine = migratedReceipt.ownedFiles.find((file: { path: string }) => file.path === claudeSettingsPath);
+    expect(settingsLine.ownership._tag).toBe("hookEntries");
+    expect(settingsLine.ownership.events).toContainEqual(
       expect.objectContaining({ pointer: "/hooks/Stop", previouslyPresent: true }),
     );
 
-    await runUninstall(uninstallRequest(root));
+    await runUninstall(createUninstallRequest(root));
 
-    expect(await readJsonFile(root, claudeSettingsPath)).toEqual({
+    expect(await readDocumentFile(root, claudeSettingsPath)).toEqual({
       theme: "dark",
       hooks: { Stop: [userStop, foreignStop] },
     });

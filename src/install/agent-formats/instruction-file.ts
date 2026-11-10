@@ -14,31 +14,39 @@ import { markdownWithCompleteFrontmatterSchema, stripFrontmatter } from "./skill
 
 const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
-const textEncoder = new TextEncoder();
-const startMarkerBytes = textEncoder.encode(startMarker);
-const endMarkerBytes = textEncoder.encode(endMarker);
-const lineFeedBytes = textEncoder.encode("\n");
-const carriageReturnBytes = textEncoder.encode("\r");
-const blockSeparatorBytes = textEncoder.encode("\n\n");
+const stringEncoder = new TextEncoder();
+const startMarkerBytes = stringEncoder.encode(startMarker);
+const endMarkerBytes = stringEncoder.encode(endMarker);
+const lineFeedBytes = stringEncoder.encode("\n");
+const carriageReturnBytes = stringEncoder.encode("\r");
+const blockSeparatorBytes = stringEncoder.encode("\n\n");
 
 const createPlanError = (issue: string): Error => new Error(`Cannot plan instruction file: ${issue}`);
 
-export const instructionPath = (agent: AgentDefinition): string | undefined => {
-  if (agent.target._tag === "instructionFile") {
-    return agent.target.path;
+export const readInstructionPath = (agent: AgentDefinition): string | null => {
+  const agentTarget = agent.target;
+  const isInstructionFileTarget = agentTarget._tag === "instructionFile";
+  if (isInstructionFileTarget) {
+    return agentTarget.path;
   }
 
-  return agent.target._tag === "instructionLink" ? agent.target.instructionPath : undefined;
+  const isInstructionLinkTarget = agentTarget._tag === "instructionLink";
+  if (isInstructionLinkTarget) {
+    return agentTarget.instructionPath;
+  }
+
+  return null;
 };
 
-const agentIdsMatchPath = (agentIds: ReadonlyArray<string>, path: string): boolean =>
+const isAgentIdsAtPath = (agentIds: ReadonlyArray<string>, path: string): boolean =>
   agentIds.every((agentId) => {
     const agent = agentCatalog.find((candidate) => candidate.id === agentId);
+    const isAgentFound = agent != null;
 
-    return agent !== undefined && instructionPath(agent) === path;
+    return isAgentFound && readInstructionPath(agent) === path;
   });
 
-const concatenateBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+const joinBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
   const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
   let offset = 0;
   for (const part of parts) {
@@ -53,7 +61,8 @@ const concatenateBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 const findByteIndexes = (bytes: Uint8Array, pattern: Uint8Array): ReadonlyArray<number> => {
   const indexes: Array<number> = [];
   for (let offset = 0; offset <= bytes.byteLength - pattern.byteLength; offset += 1) {
-    if (pattern.every((value, index) => bytes[offset + index] === value)) {
+    const isPatternAtOffset = pattern.every((field, index) => bytes[offset + index] === field);
+    if (isPatternAtOffset) {
       indexes.push(offset);
     }
   }
@@ -74,6 +83,7 @@ type CurrentBlock = { readonly _tag: "missing" } | ManagedBlock;
 const inspectManagedBlock = (bytes: Uint8Array): CurrentBlock => {
   const starts = findByteIndexes(bytes, startMarkerBytes);
   const ends = findByteIndexes(bytes, endMarkerBytes);
+
   const isBlockAbsent = starts.length === 0 && ends.length === 0;
   if (isBlockAbsent) {
     return { _tag: "missing" };
@@ -86,7 +96,8 @@ const inspectManagedBlock = (bytes: Uint8Array): CurrentBlock => {
 
   const start = starts[0];
   const end = ends[0];
-  const isBlockReversed = start === undefined || end === undefined || end < start + startMarkerBytes.byteLength;
+
+  const isBlockReversed = start == null || end == null || end < start + startMarkerBytes.byteLength;
   if (isBlockReversed) {
     throw createPlanError("managed block markers are reversed or overlap.");
   }
@@ -112,28 +123,29 @@ const instructionSkillSchema = z.strictObject({
 type InstructionSkill = z.infer<typeof instructionSkillSchema>;
 
 const createSkillSection = (skill: InstructionSkill): string => {
-  const documentText = stripFrontmatter(skill.markdown).replaceAll("\r\n", "\n").trim();
-  const isBodyEmpty = documentText.length === 0;
-  if (isBodyEmpty) {
+  const documentString = stripFrontmatter(skill.markdown).replaceAll("\r\n", "\n").trim();
+
+  const isFieldsEmpty = documentString.length === 0;
+  if (isFieldsEmpty) {
     throw createPlanError(`skill ${skill.installedSkill.id} has no markdown body after frontmatter.`);
   }
 
-  const hasReservedMarker = documentText.includes(startMarker) || documentText.includes(endMarker);
+  const hasReservedMarker = documentString.includes(startMarker) || documentString.includes(endMarker);
   if (hasReservedMarker) {
     throw createPlanError(`skill ${skill.installedSkill.id} contains a reserved managed block marker.`);
   }
 
-  return `## ${skill.installedSkill.id}\n\n${documentText}`;
+  return `## ${skill.installedSkill.id}\n\n${documentString}`;
 };
 
 const createManagedSection = (skills: ReadonlyArray<InstructionSkill>): Uint8Array => {
   const sections = skills.map((skill) => createSkillSection(skill));
 
-  return textEncoder.encode(`\n${sections.join("\n\n---\n\n")}\n`);
+  return stringEncoder.encode(`\n${sections.join("\n\n---\n\n")}\n`);
 };
 
 // The block owns one trailing line feed, plus the blank-line separator before it when the file already existed.
-const receiptedBlockRange = ({
+const listReceiptedBlockRange = ({
   currentBytes,
   block,
   filePreviouslyPresent,
@@ -155,6 +167,7 @@ const receiptedBlockRange = ({
   }
 
   const frameStart = block.start - blockSeparatorBytes.byteLength;
+
   const isOpeningFrameChanged =
     frameStart < 0 || !bytesEqual(currentBytes.slice(frameStart, block.start), blockSeparatorBytes);
   if (isOpeningFrameChanged) {
@@ -174,18 +187,18 @@ const stripReceiptedBlock = ({
   block: ManagedBlock;
   filePreviouslyPresent: boolean;
 }): Uint8Array => {
-  const [start, end] = receiptedBlockRange({ currentBytes, block, filePreviouslyPresent });
+  const [start, end] = listReceiptedBlockRange({ currentBytes, block, filePreviouslyPresent });
   const prefix = currentBytes.slice(0, start);
   const suffix = currentBytes.slice(end);
   const suffixStartsLineEnding =
     suffix[0] === lineFeedBytes[0] || (suffix[0] === carriageReturnBytes[0] && suffix[1] === lineFeedBytes[0]);
-  const needsSeparator =
+  const isSeparatorNeeded =
     prefix.byteLength > 0 &&
     suffix.byteLength > 0 &&
     prefix[prefix.byteLength - 1] !== lineFeedBytes[0] &&
     !suffixStartsLineEnding;
 
-  return concatenateBytes([prefix, ...(needsSeparator ? [lineFeedBytes] : []), suffix]);
+  return joinBytes([prefix, ...(isSeparatorNeeded ? [lineFeedBytes] : []), suffix]);
 };
 
 const ownedInstructionFileSchema = z.strictObject({
@@ -249,15 +262,17 @@ const instructionFileRequestFieldsSchema = z.strictObject({
 type InstructionFileRequest = z.infer<typeof instructionFileRequestFieldsSchema>;
 
 const requestIssues = (request: InstructionFileRequest): Array<ZodIssueDetail | null> => {
-  if (request.previousFile._tag === "missing") {
+  const previousFileStatus = request.previousFile;
+  const isPreviousFileMissing = previousFileStatus._tag === "missing";
+  if (isPreviousFileMissing) {
     return [];
   }
 
-  const previousFile = request.previousFile.file;
+  const previousFile = previousFileStatus.file;
   const isPathMismatched = previousFile.path !== request.path;
   const isMarkerCanonical =
     previousFile.ownership.startMarker === startMarker && previousFile.ownership.endMarker === endMarker;
-  const isAgentSetLegitimate = agentIdsMatchPath(previousFile.owner.agentIds, request.path);
+  const isAgentSetLegitimate = isAgentIdsAtPath(previousFile.owner.agentIds, request.path);
   const isCurrentFileMissing = request.currentFile._tag !== "file";
 
   return [
@@ -285,27 +300,29 @@ const requestIssues = (request: InstructionFileRequest): Array<ZodIssueDetail | 
   ];
 };
 
-const instructionFileRequestSchema = instructionFileRequestFieldsSchema.superRefine((request, context) =>
-  addZodIssueDetails(context, requestIssues(request)),
+const instructionFileRequestSchema = instructionFileRequestFieldsSchema.superRefine((request, scope) =>
+  addZodIssueDetails(scope, requestIssues(request)),
 );
 
 // A block agent-setup wrote earlier may be replaced or removed only while its body still hashes to the receipt.
 const requireReceiptedOwnership = (request: InstructionFileRequest, block: ManagedBlock): ManagedBlockOwnership => {
   const previousFile = request.previousFile;
   const currentFile = request.currentFile;
+
   const isReceiptIncomplete = previousFile._tag === "missing" || currentFile._tag === "missing";
   if (isReceiptIncomplete) {
     throw createPlanError("current managed block has no complete prior receipt evidence.");
   }
 
   const ownership = previousFile.file.ownership;
-  const blockBody = currentFile.bytes.slice(block.bodyStart, block.bodyEnd);
-  const isBodyChanged = hashBytes(blockBody) !== ownership.installedBodyHash;
-  if (isBodyChanged) {
+  const blockFields = currentFile.bytes.slice(block.bodyStart, block.bodyEnd);
+
+  const isFieldsChanged = hashBytes(blockFields) !== ownership.installedBodyHash;
+  if (isFieldsChanged) {
     throw createPlanError("managed block changed inside its receipted body.");
   }
 
-  receiptedBlockRange({
+  listReceiptedBlockRange({
     currentBytes: currentFile.bytes,
     block,
     filePreviouslyPresent: ownership.filePreviouslyPresent,
@@ -325,8 +342,10 @@ const placeBlock = ({
   block: Uint8Array;
 }): { bytes: Uint8Array; filePreviouslyPresent: boolean } => {
   const currentFile = request.currentFile;
-  if (currentFile._tag === "missing") {
-    return { bytes: concatenateBytes([block, lineFeedBytes]), filePreviouslyPresent: false };
+
+  const isCurrentFileMissing = currentFile._tag === "missing";
+  if (isCurrentFileMissing) {
+    return { bytes: joinBytes([block, lineFeedBytes]), filePreviouslyPresent: false };
   }
 
   const isBlockMissing = currentBlock._tag === "missing";
@@ -337,7 +356,7 @@ const placeBlock = ({
     }
 
     return {
-      bytes: concatenateBytes([currentFile.bytes, blockSeparatorBytes, block, lineFeedBytes]),
+      bytes: joinBytes([currentFile.bytes, blockSeparatorBytes, block, lineFeedBytes]),
       filePreviouslyPresent: true,
     };
   }
@@ -345,7 +364,7 @@ const placeBlock = ({
   const ownership = requireReceiptedOwnership(request, currentBlock);
 
   return {
-    bytes: concatenateBytes([
+    bytes: joinBytes([
       currentFile.bytes.slice(0, currentBlock.start),
       block,
       currentFile.bytes.slice(currentBlock.end),
@@ -364,7 +383,7 @@ const planInstructionWrite = ({
   currentBlock: CurrentBlock;
 }): InstructionFilePlan => {
   const section = createManagedSection(desired.skills);
-  const block = concatenateBytes([startMarkerBytes, section, endMarkerBytes]);
+  const block = joinBytes([startMarkerBytes, section, endMarkerBytes]);
   const placed = placeBlock({ request, currentBlock, block });
   const file: OwnedInstructionFile = {
     owner: { _tag: "agent", agentIds: desired.agentIds },
@@ -384,12 +403,14 @@ const planInstructionWrite = ({
 
 const planInstructionRemoval = (request: InstructionFileRequest, currentBlock: CurrentBlock): InstructionFilePlan => {
   const previousFile = request.previousFile;
+
   const isNothingReceipted = previousFile._tag === "missing";
   if (isNothingReceipted) {
     return { _tag: "none" };
   }
 
   const currentFile = request.currentFile;
+
   const isBlockMissing = currentFile._tag === "missing" || currentBlock._tag === "missing";
   if (isBlockMissing) {
     throw createPlanError("receipted managed block is missing from the current instruction file.");
@@ -402,6 +423,7 @@ const planInstructionRemoval = (request: InstructionFileRequest, currentBlock: C
     block: currentBlock,
     filePreviouslyPresent: ownership.filePreviouslyPresent,
   });
+
   const isOnlyInstalledBlock = !ownership.filePreviouslyPresent && unownedBytes.byteLength === 0;
   if (isOnlyInstalledBlock) {
     return { _tag: "remove", file, unownedBytes };
@@ -411,8 +433,8 @@ const planInstructionRemoval = (request: InstructionFileRequest, currentBlock: C
 };
 
 // Plan one shared instruction path: a write, restoration, removal, or no-op.
-export const planInstructionFile = (input: unknown): InstructionFilePlan => {
-  const requestReply = instructionFileRequestSchema.safeParse(input);
+export const planInstructionFile = (details: unknown): InstructionFilePlan => {
+  const requestReply = instructionFileRequestSchema.safeParse(details);
 
   const isRequestInvalid = !requestReply.success;
   if (isRequestInvalid) {
@@ -421,13 +443,17 @@ export const planInstructionFile = (input: unknown): InstructionFilePlan => {
 
   const request = requestReply.data;
   const desired = request.desired;
+
   const isNothingToPlan = desired._tag === "absent" && request.previousFile._tag === "missing";
   if (isNothingToPlan) {
     return { _tag: "none" };
   }
 
-  const currentBytes = request.currentFile._tag === "missing" ? new Uint8Array() : request.currentFile.bytes;
+  const currentFile = request.currentFile;
+  const isCurrentFileMissing = currentFile._tag === "missing";
+  const currentBytes = isCurrentFileMissing ? new Uint8Array() : currentFile.bytes;
   const currentBlock = inspectManagedBlock(currentBytes);
+
   const isRemoval = desired._tag === "absent";
   if (isRemoval) {
     return planInstructionRemoval(request, currentBlock);

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-type StrictTextReply = { _tag: "decoded"; fileContents: string } | { _tag: "invalid"; message: string };
+type StrictStringReply = { _tag: "decoded"; fileContents: string } | { _tag: "invalid"; message: string };
 
-const strictTextDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const strictStringDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export const hashBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
@@ -12,9 +12,9 @@ export const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
 export const isNotFound = (error: unknown): boolean =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 
-const decodeUtf8 = (bytes: Uint8Array, filename: string): StrictTextReply => {
+const decodeUtf8 = (bytes: Uint8Array, filename: string): StrictStringReply => {
   try {
-    return { _tag: "decoded", fileContents: strictTextDecoder.decode(bytes) };
+    return { _tag: "decoded", fileContents: strictStringDecoder.decode(bytes) };
   } catch (error) {
     const isErrorObject = error instanceof Error;
     const reason = isErrorObject ? error.message : String(error);
@@ -23,8 +23,9 @@ const decodeUtf8 = (bytes: Uint8Array, filename: string): StrictTextReply => {
   }
 };
 
-export const decodeStrictText = (bytes: Uint8Array, filename: string): StrictTextReply => {
+export const decodeStrictString = (bytes: Uint8Array, filename: string): StrictStringReply => {
   const utf8Reply = decodeUtf8(bytes, filename);
+
   const isDecodeFailed = utf8Reply._tag === "invalid";
   if (isDecodeFailed) {
     return utf8Reply;
@@ -38,12 +39,14 @@ export const decodeStrictText = (bytes: Uint8Array, filename: string): StrictTex
   return utf8Reply;
 };
 
-export const lineEnding = (fileContents: string): "\r\n" | "\n" => {
-  const hasCrlfEnding = fileContents.includes("\r\n");
+export const readLineEnding = (fileMessages: string): "\r\n" | "\n" => {
+  const hasCrlfEnding = fileMessages.includes("\r\n");
 
   return hasCrlfEnding ? "\r\n" : "\n";
 };
 
 // JSON.stringify replacer: a Uint8Array becomes its canonical base64 text, as the receipt stores it.
-export const replaceBytesWithBase64 = (_key: string, jsonCandidate: unknown): unknown =>
-  jsonCandidate instanceof Uint8Array ? Buffer.from(jsonCandidate).toString("base64") : jsonCandidate;
+export const replaceBytesWithBase64 = (_key: string, documentCandidate: unknown): unknown => {
+  const isBytesCandidate = documentCandidate instanceof Uint8Array;
+  return isBytesCandidate ? Buffer.from(documentCandidate).toString("base64") : documentCandidate;
+};
