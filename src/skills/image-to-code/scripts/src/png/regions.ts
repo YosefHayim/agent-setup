@@ -9,12 +9,12 @@ const firstArgumentIndex = 2;
 const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
 const pngPath = readStringArgument(argumentList, "input") || "target.png";
 const png = PNG.sync.read(fs.readFileSync(pngPath));
-const { width: W, height: H, data: pixelBytes } = png;
+const { width, height, data: pixelBytes } = png;
 
-const isBg = (column: number, y: number) => {
+const isBackgroundPixel = (column: number, y: number) => {
   const bytesPerPixel = 4;
 
-  const i = (y * W + column) * bytesPerPixel;
+  const pixelOffset = (y * width + column) * bytesPerPixel;
   const blueChannelOffset = 2;
 
   const nearWhiteRedChannelFloor = 240;
@@ -24,36 +24,36 @@ const isBg = (column: number, y: number) => {
   const nearWhiteBlueChannelFloor = 240;
 
   return (
-    pixelBytes[i] > nearWhiteRedChannelFloor &&
-    pixelBytes[i + 1] > nearWhiteGreenChannelFloor &&
-    pixelBytes[i + blueChannelOffset] > nearWhiteBlueChannelFloor
+    pixelBytes[pixelOffset] > nearWhiteRedChannelFloor &&
+    pixelBytes[pixelOffset + 1] > nearWhiteGreenChannelFloor &&
+    pixelBytes[pixelOffset + blueChannelOffset] > nearWhiteBlueChannelFloor
   );
 };
 const readHexColorAt = (column: number, y: number) => {
   const bytesPerPixel = 4;
 
-  const i = (y * W + column) * bytesPerPixel;
+  const pixelOffset = (y * width + column) * bytesPerPixel;
   const blueChannelOffset = 2;
 
-  return readHexByte(pixelBytes[i], pixelBytes[i + 1], pixelBytes[i + blueChannelOffset]);
+  return readHexByte(pixelBytes[pixelOffset], pixelBytes[pixelOffset + 1], pixelBytes[pixelOffset + blueChannelOffset]);
 };
 
-const columnCounts = new Array<number>(W).fill(0);
-for (let column = 0; column < W; column++) {
-  let c = 0;
-  for (let y = 0; y < H; y++) {
-    const isForegroundPixel = !isBg(column, y);
-    if (isForegroundPixel) c++;
+const columnCounts = new Array<number>(width).fill(0);
+for (let column = 0; column < width; column++) {
+  let foregroundCount = 0;
+  for (let y = 0; y < height; y++) {
+    const isForegroundPixel = !isBackgroundPixel(column, y);
+    if (isForegroundPixel) foregroundCount++;
   }
-  columnCounts[column] = c;
+  columnCounts[column] = foregroundCount;
 }
 
 const GAP = 25;
 const bands: [number, number][] = [];
 let start = -1;
 let emptyRun = 0;
-for (let column = 0; column <= W; column++) {
-  const hasOpenRun = column < W && columnCounts[column] > 1;
+for (let column = 0; column <= width; column++) {
+  const hasOpenRun = column < width && columnCounts[column] > 1;
 
   if (hasOpenRun) {
     const isRunNotStarted = start === -1;
@@ -63,7 +63,7 @@ for (let column = 0; column <= W; column++) {
   } else {
     emptyRun++;
 
-    const isRunEnding = start !== -1 && (emptyRun >= GAP || column === W);
+    const isRunEnding = start !== -1 && (emptyRun >= GAP || column === width);
     if (isRunEnding) {
       bands.push([start, column - emptyRun]);
       start = -1;
@@ -77,26 +77,26 @@ const backgroundSampleLineIndex = 4;
 
 const regionMap: Record<string, unknown> = {
   background: readHexColorAt(backgroundSampleColumn, backgroundSampleLineIndex),
-  dimensions: { W, H },
+  dimensions: { W: width, H: height },
   bands: [] as unknown[],
 };
-for (const [x0, x1] of bands) {
-  let yTop = H;
-  let yBot = 0;
+for (const [bandStartColumn, bandEndColumn] of bands) {
+  let yTop = height;
+  let yBottom = 0;
   const colorCounts = new Map<string, number>();
-  for (let y = 0; y < H; y++) {
-    for (let column = x0; column <= x1; column++) {
-      if (isBg(column, y)) continue;
+  for (let y = 0; y < height; y++) {
+    for (let column = bandStartColumn; column <= bandEndColumn; column++) {
+      if (isBackgroundPixel(column, y)) continue;
 
       const isAboveRegion = y < yTop;
       if (isAboveRegion) yTop = y;
 
-      const isBelowRegion = y > yBot;
-      if (isBelowRegion) yBot = y;
+      const isBelowRegion = y > yBottom;
+      if (isBelowRegion) yBottom = y;
 
       const bytesPerPixel = 4;
 
-      const i = (y * W + column) * bytesPerPixel;
+      const pixelOffset = (y * width + column) * bytesPerPixel;
       const hexRadix = 16;
 
       const channelHighNibbleMask = 0xf0;
@@ -109,18 +109,18 @@ for (const [x0, x1] of bands) {
 
       const hexByteDigitCount = 2;
 
-      const key = `#${[pixelBytes[i] & channelHighNibbleMask, pixelBytes[i + 1] & greenChannelHighNibbleMask, pixelBytes[i + blueChannelOffsetForKey] & blueChannelHighNibbleMask].map((v) => v.toString(hexRadix).padStart(hexByteDigitCount, "0")).join("")}`;
+      const key = `#${[pixelBytes[pixelOffset] & channelHighNibbleMask, pixelBytes[pixelOffset + 1] & greenChannelHighNibbleMask, pixelBytes[pixelOffset + blueChannelOffsetForKey] & blueChannelHighNibbleMask].map((channelValue) => channelValue.toString(hexRadix).padStart(hexByteDigitCount, "0")).join("")}`;
       colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
     }
   }
   const topRegionCount = 3;
 
   const topColors = [...colorCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
+    .sort((firstColorPair, secondColorPair) => secondColorPair[1] - firstColorPair[1])
     .slice(0, topRegionCount)
-    .map(([h]) => h);
+    .map(([hexColor]) => hexColor);
   (regionMap.bands as unknown[]).push({
-    bbox: { column: x0, y: yTop, w: x1 - x0 + 1, h: yBot - yTop + 1 },
+    bbox: { column: bandStartColumn, y: yTop, w: bandEndColumn - bandStartColumn + 1, h: yBottom - yTop + 1 },
     colors: topColors,
   });
 }

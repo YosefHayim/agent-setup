@@ -2,10 +2,10 @@ import type { PNG } from "pngjs";
 
 const HEX_RADIX = 16;
 
-export const readHexByte = (r: number, g: number, b: number): string => {
+export const readHexByte = (red: number, green: number, blue: number): string => {
   const hexDigitsPerByte = 2;
 
-  return `#${[r, g, b].map((position) => position.toString(HEX_RADIX).padStart(hexDigitsPerByte, "0")).join("")}`;
+  return `#${[red, green, blue].map((position) => position.toString(HEX_RADIX).padStart(hexDigitsPerByte, "0")).join("")}`;
 };
 
 export const clamp = (position: number, maxPosition: number): number => {
@@ -37,14 +37,16 @@ export const readColorAt = (png: PNG, column: number, y: number) => {
   };
 };
 
-export const isPointInPolygon = (px: number, py: number, poly: [number, number][]): boolean => {
+export const isPointInPolygon = (pointX: number, pointY: number, polygon: [number, number][]): boolean => {
   let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [currentX, currentY] = polygon[i];
 
-    const [xj, yj] = poly[j];
+    const [previousX, previousY] = polygon[j];
 
-    const isEdgeCrossingRay = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    const isEdgeCrossingRay =
+      currentY > pointY !== previousY > pointY &&
+      pointX < ((previousX - currentX) * (pointY - currentY)) / (previousY - currentY) + currentX;
     if (isEdgeCrossingRay) inside = !inside;
   }
   return inside;
@@ -57,7 +59,7 @@ export const readRgbFromHex = (hex: string): [number, number, number] => {
 
   const secondHexByteStart = 3;
 
-  return [1, secondHexByteStart, thirdHexByteStart].map((k) =>
-    parseInt(hex.slice(k, k + hexByteLength), HEX_RADIX),
+  return [1, secondHexByteStart, thirdHexByteStart].map((hexByteStart) =>
+    parseInt(hex.slice(hexByteStart, hexByteStart + hexByteLength), HEX_RADIX),
   ) as [number, number, number];
 };

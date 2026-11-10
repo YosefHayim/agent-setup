@@ -93,8 +93,8 @@ const parseArgumentList = (argv) => {
     help: false,
   };
   for (let argumentIndex = 0; argumentIndex < argv.length; argumentIndex++) {
-    const arg = argv[argumentIndex];
-    switch (arg) {
+    const argument = argv[argumentIndex];
+    switch (argument) {
       case "--help":
       case "-h":
         argumentList.help = true;
@@ -121,7 +121,7 @@ const parseArgumentList = (argv) => {
         argumentList.listingFile = argv[++argumentIndex] || null;
         break;
       default:
-        throw new Error(`Unknown argument: ${arg}`);
+        throw new Error(`Unknown argument: ${argument}`);
     }
   }
   return argumentList;
@@ -209,7 +209,7 @@ const validate = ({ name, summary, description }, { strict }) => {
 
   const overusedTokens = [...counts.entries()]
     .filter(([, repeatCount]) => repeatCount > maximumRepeatsPerToken)
-    .sort((a, b) => b[1] - a[1]);
+    .sort((firstEntry, secondEntry) => secondEntry[1] - firstEntry[1]);
 
   for (const [token, repeatCount] of overusedTokens) {
     const repeatMessage = `token "${token}" appears ${repeatCount} times in description (CWS flags unnatural repeats >5 — review context)`;

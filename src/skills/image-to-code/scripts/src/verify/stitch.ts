@@ -10,9 +10,9 @@ const BYTES_PER_PIXEL = 4;
 
 const firstArgumentIndex = 2;
 
-const [a, b, out] = process.argv.slice(firstArgumentIndex);
+const [leftPath, rightPath, outPath] = process.argv.slice(firstArgumentIndex);
 
-const isStitchPathMissing = !a || !b || !out;
+const isStitchPathMissing = !leftPath || !rightPath || !outPath;
 if (isStitchPathMissing) {
   console.error("usage: tsx src/verify/stitch.ts <left.png> <right.png> <out.png>");
   const usageExitCode = 2;
@@ -20,49 +20,49 @@ if (isStitchPathMissing) {
   process.exit(usageExitCode);
 }
 
-const S = 460;
+const TILE_SIZE = 460;
 const GAP = 24;
-const load = (p: string) => PNG.sync.read(fs.readFileSync(p));
-const scale = (src: PNG) => {
-  const o = new PNG({ width: S, height: S });
-  for (let y = 0; y < S; y++)
-    for (let column = 0; column < S; column++) {
-      const sx = Math.floor((column * src.width) / S);
-      const sy = Math.floor((y * src.height) / S);
-      const si = (sy * src.width + sx) * BYTES_PER_PIXEL;
-      const oi = (y * S + column) * BYTES_PER_PIXEL;
-      o.data[oi] = src.data[si];
-      o.data[oi + 1] = src.data[si + 1];
+const load = (pngPath: string) => PNG.sync.read(fs.readFileSync(pngPath));
+const scale = (sourcePng: PNG) => {
+  const scaledPng = new PNG({ width: TILE_SIZE, height: TILE_SIZE });
+  for (let y = 0; y < TILE_SIZE; y++)
+    for (let column = 0; column < TILE_SIZE; column++) {
+      const sourceX = Math.floor((column * sourcePng.width) / TILE_SIZE);
+      const sourceY = Math.floor((y * sourcePng.height) / TILE_SIZE);
+      const sourceOffset = (sourceY * sourcePng.width + sourceX) * BYTES_PER_PIXEL;
+      const scaledOffset = (y * TILE_SIZE + column) * BYTES_PER_PIXEL;
+      scaledPng.data[scaledOffset] = sourcePng.data[sourceOffset];
+      scaledPng.data[scaledOffset + 1] = sourcePng.data[sourceOffset + 1];
       const blueChannelOffset = 2;
 
       const blueByteOffsetInPixel = 2;
 
-      o.data[oi + blueChannelOffset] = src.data[si + blueByteOffsetInPixel];
-      o.data[oi + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
+      scaledPng.data[scaledOffset + blueChannelOffset] = sourcePng.data[sourceOffset + blueByteOffsetInPixel];
+      scaledPng.data[scaledOffset + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
     }
-  return o;
+  return scaledPng;
 };
-const A = scale(load(a));
-const B = scale(load(b));
-const W = S * 2 + GAP;
-const c = new PNG({ width: W, height: S });
-c.data.fill(MAX_CHANNEL_LEVEL);
-const paste = (img: PNG, ox: number) => {
-  for (let y = 0; y < S; y++)
-    for (let column = 0; column < S; column++) {
-      const si = (y * S + column) * BYTES_PER_PIXEL;
-      const di = (y * W + (column + ox)) * BYTES_PER_PIXEL;
-      c.data[di] = img.data[si];
-      c.data[di + 1] = img.data[si + 1];
+const leftTile = scale(load(leftPath));
+const rightTile = scale(load(rightPath));
+const stitchedWidth = TILE_SIZE * 2 + GAP;
+const stitched = new PNG({ width: stitchedWidth, height: TILE_SIZE });
+stitched.data.fill(MAX_CHANNEL_LEVEL);
+const paste = (tile: PNG, offsetX: number) => {
+  for (let y = 0; y < TILE_SIZE; y++)
+    for (let column = 0; column < TILE_SIZE; column++) {
+      const tileOffset = (y * TILE_SIZE + column) * BYTES_PER_PIXEL;
+      const stitchedOffset = (y * stitchedWidth + (column + offsetX)) * BYTES_PER_PIXEL;
+      stitched.data[stitchedOffset] = tile.data[tileOffset];
+      stitched.data[stitchedOffset + 1] = tile.data[tileOffset + 1];
       const blueChannelOffsetInStitched = 2;
 
       const imageBlueChannelOffset = 2;
 
-      c.data[di + blueChannelOffsetInStitched] = img.data[si + imageBlueChannelOffset];
-      c.data[di + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
+      stitched.data[stitchedOffset + blueChannelOffsetInStitched] = tile.data[tileOffset + imageBlueChannelOffset];
+      stitched.data[stitchedOffset + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
     }
 };
-paste(A, 0);
-paste(B, S + GAP);
-fs.writeFileSync(out, PNG.sync.write(c));
-console.log("wrote", out);
+paste(leftTile, 0);
+paste(rightTile, TILE_SIZE + GAP);
+fs.writeFileSync(outPath, PNG.sync.write(stitched));
+console.log("wrote", outPath);

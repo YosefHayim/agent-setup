@@ -345,7 +345,7 @@ const createCut = ({ manifest, baseDirectory, mode, outputPath, canBurn, hold })
 
   const isFullRenderMode = mode === FULL_RENDER_MODE;
   const preset = isFullRenderMode ? "medium" : "ultrafast";
-  const crf = isFullRenderMode ? "18" : "28";
+  const constantRateFactor = isFullRenderMode ? "18" : "28";
   const argumentList = [
     FFMPEG_HIDE_BANNER_FLAG,
     "-loglevel",
@@ -359,7 +359,7 @@ const createCut = ({ manifest, baseDirectory, mode, outputPath, canBurn, hold })
     VIDEO_EXPORT_PAD,
     FFMPEG_MAP_FLAG,
     AUDIO_EXPORT_PAD,
-    "-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p", "-r", String(fps),
+    "-c:v", "libx264", "-preset", preset, "-crf", constantRateFactor, "-pix_fmt", "yuv420p", "-r", String(fps),
     "-c:a", "aac", "-b:a", "192k",
     FFMPEG_DURATION_FLAG, String(totalSeconds),
     "-movflags", "+faststart",
@@ -388,10 +388,10 @@ const runAssembleCommand = () => {
   const canBurn = isFullRenderMode && hasSubtitlesFilter();
   const isHoldRequested = isAnimaticMode && Boolean(flags.hold);
   const hold = isHoldRequested ? Number(flags.hold) : null;
-  const cut = createCut({ manifest, baseDirectory, mode, outputPath: flags.out, canBurn, hold });
+  const cutPlan = createCut({ manifest, baseDirectory, mode, outputPath: flags.out, canBurn, hold });
 
-  const isCaptionFileNeeded = cut.captionFile != null;
-  if (isCaptionFileNeeded) writeFileSync(cut.captionFile.path, cut.captionFile.text);
+  const isCaptionFileNeeded = cutPlan.captionFile != null;
+  if (isCaptionFileNeeded) writeFileSync(cutPlan.captionFile.path, cutPlan.captionFile.text);
 
   const isSrtSidecarUsed = isFullRenderMode && !canBurn;
   if (isSrtSidecarUsed)
@@ -400,7 +400,7 @@ const runAssembleCommand = () => {
         "Wrote a .srt sidecar to upload as a caption track, or install an ffmpeg built with libass.\n",
     );
 
-  runFfmpeg(cut.argumentList, exportFolder);
+  runFfmpeg(cutPlan.argumentList, exportFolder);
   const sidecarNote = isSrtSidecarUsed ? ", captions as .srt sidecar" : "";
   process.stdout.write(`Wrote ${flags.out} (${mode}${sidecarNote})\n`);
 };
