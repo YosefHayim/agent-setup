@@ -11,13 +11,13 @@ export interface ZodIssueDetail {
   readonly message: string;
 }
 
-// Reports each detail that is not undefined at its own path, e.g. ["ownedFiles", 1, "path"], from one refinement.
+// Reports each detail that is not null at its own path, e.g. ["ownedFiles", 1, "path"], from one refinement.
 export const addZodIssueDetails = (
   context: z.RefinementCtx,
-  issueDetails: ReadonlyArray<ZodIssueDetail | undefined>,
+  issueDetails: ReadonlyArray<ZodIssueDetail | null>,
 ): void => {
   for (const issueDetail of issueDetails) {
-    const isIssueFound = issueDetail !== undefined;
+    const isIssueFound = issueDetail != null;
     if (isIssueFound) {
       context.addIssue({ code: "custom", path: [...issueDetail.path], message: issueDetail.message });
     }

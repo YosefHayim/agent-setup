@@ -39,11 +39,14 @@ const priorBytesSchema = z
   .describe("Original bytes decoded from their receipt-safe base64 representation.");
 
 const isJsonValue = (jsonCandidate: unknown): boolean => {
-  if (jsonCandidate === null || typeof jsonCandidate === "string" || typeof jsonCandidate === "boolean") {
+  const isJsonPrimitive =
+    jsonCandidate === null || typeof jsonCandidate === "string" || typeof jsonCandidate === "boolean";
+  if (isJsonPrimitive) {
     return true;
   }
 
-  if (typeof jsonCandidate === "number") {
+  const isJsonNumber = typeof jsonCandidate === "number";
+  if (isJsonNumber) {
     return Number.isFinite(jsonCandidate);
   }
 
@@ -55,7 +58,9 @@ const isJsonValue = (jsonCandidate: unknown): boolean => {
     typeof jsonCandidate === "object" &&
     jsonCandidate !== null &&
     Object.getPrototypeOf(jsonCandidate) === Object.prototype;
-  if (!isPlainObject) {
+
+  const isNotPlainObject = !isPlainObject;
+  if (isNotPlainObject) {
     return false;
   }
 
@@ -91,7 +96,9 @@ const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssu
 
 const agentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const isAgentIdsUnique = hasUniqueEntries(agentIds);
-  if (!isAgentIdsUnique) {
+
+  const hasDuplicateAgentIds = !isAgentIdsUnique;
+  if (hasDuplicateAgentIds) {
     return [{ path: [], message: "Agent ownership IDs must be unique." }];
   }
 
@@ -178,10 +185,10 @@ const managedBlockFieldsSchema = z.strictObject({
   installedBodyHash: sha256Schema.describe("Hash of the exact managed block body."),
 });
 
-const managedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSchema>): ZodIssueDetail | undefined => {
-  const isMarkerRepeated = ownership.startMarker === ownership.endMarker;
-  if (!isMarkerRepeated) {
-    return undefined;
+const managedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSchema>): ZodIssueDetail | null => {
+  const areMarkersDistinct = ownership.startMarker !== ownership.endMarker;
+  if (areMarkersDistinct) {
+    return null;
   }
 
   return { path: ["endMarker"], message: "Managed block markers must be distinct." };
@@ -337,19 +344,19 @@ const yamlSequenceFieldsSchema = z.strictObject({
 
 type YamlSequenceFields = z.infer<typeof yamlSequenceFieldsSchema>;
 
-const yamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | undefined => {
+const yamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
   const isReferenceAfterKey = ownership.keyPreviouslyPresent || !ownership.previouslyPresent;
   if (isReferenceAfterKey) {
-    return undefined;
+    return null;
   }
 
   return { path: ["previouslyPresent"], message: "A YAML reference cannot predate a key that did not exist." };
 };
 
-const yamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | undefined => {
+const yamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
   const isPrefixAllowed = !ownership.keyPreviouslyPresent || ownership.insertedPrefix.length === 0;
   if (isPrefixAllowed) {
-    return undefined;
+    return null;
   }
 
   return { path: ["insertedPrefix"], message: "A pre-existing YAML key cannot own an inserted key prefix." };
@@ -415,12 +422,15 @@ const parseJsonSourceOrNull = (source: string): { readonly parsedValue: unknown 
 const jsonValuesEqual = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
-  if (ownedValue.previous._tag === "missing" || ownedValue.previous.lexical == null) {
+  const isLexicalAbsent = ownedValue.previous._tag === "missing" || ownedValue.previous.lexical == null;
+  if (isLexicalAbsent) {
     return false;
   }
 
   const lexicalSource = parseJsonSourceOrNull(ownedValue.previous.lexical.source);
-  if (lexicalSource === null) {
+
+  const isLexicalSourceUnparsed = lexicalSource === null;
+  if (isLexicalSourceUnparsed) {
     return false;
   }
 
@@ -436,14 +446,15 @@ const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }):
 
   return entry.ownership.values.flatMap((ownedValue, index) => {
     const path = ["ownership", "values", index, "previous", "lexical"];
-    const lexical = ownedValue.previous._tag === "value" ? ownedValue.previous.lexical : undefined;
+    const lexical = ownedValue.previous._tag === "value" ? ownedValue.previous.lexical : null;
     if (entry.kind._tag !== "settings") {
       return lexical == null
         ? []
         : [{ path, message: "Only settings ownership may carry lexical JSON restoration evidence." }];
     }
 
-    if (ownedValue.previous._tag === "missing" || lexicalMatchesPrevious(ownedValue)) {
+    const isLexicalEvidenceMatched = ownedValue.previous._tag === "missing" || lexicalMatchesPrevious(ownedValue);
+    if (isLexicalEvidenceMatched) {
       return [];
     }
 
@@ -451,9 +462,9 @@ const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }):
   });
 };
 
-const ownerKindIssue = (entry: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | undefined => {
+const ownerKindIssue = (entry: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
   if (ownerMatchesKind(entry.kind, entry.owner)) {
-    return undefined;
+    return null;
   }
 
   return {
@@ -462,9 +473,9 @@ const ownerKindIssue = (entry: { kind: FileKind; owner: FileOwner }): ZodIssueDe
   };
 };
 
-const ownershipKindIssue = (entry: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | undefined => {
+const ownershipKindIssue = (entry: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
   if (ownershipMatchesKind(entry.kind, entry.ownership)) {
-    return undefined;
+    return null;
   }
 
   return {

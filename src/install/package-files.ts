@@ -1,7 +1,7 @@
 /** Files the prepared package ships: hook code and skill trees read from the prepared folder and planned as whole-file writes. */
 
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import type { z } from "zod";
 
 import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
@@ -206,7 +206,7 @@ export const readPreparedSkills = (input: { request: InstallRequest; featureIds:
           Effect.mapError(
             (error) =>
               new InstallError({
-                issue: `Prepared skill ${installedSkill.id} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`,
+                issue: `Prepared skill ${installedSkill.id} is invalid: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
               }),
           ),
         );

@@ -70,7 +70,9 @@ const receiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDe
 // A receipt from before a feature merge reads as the feature that replaced the retired ID.
 const withCurrentFeatureIds = (features: string[]): string[] => {
   const hasRetiredFeatureId = features.some((feature) => retiredFeatureIds.has(feature));
-  if (!hasRetiredFeatureId) {
+
+  const isFeatureListCurrent = !hasRetiredFeatureId;
+  if (isFeatureListCurrent) {
     return features;
   }
 
@@ -115,7 +117,9 @@ export const encodeReceiptJson = (receipt: Receipt): string => {
 export const decodeReceiptJson = (json: string): Receipt => {
   const parsedJson: unknown = JSON.parse(json);
   const receiptReply = receiptSchema.safeParse(parsedJson);
-  if (!receiptReply.success) {
+
+  const isReceiptInvalid = !receiptReply.success;
+  if (isReceiptInvalid) {
     throw new Error(joinZodIssueMessages(receiptReply.error));
   }
 

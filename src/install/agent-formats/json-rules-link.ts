@@ -125,18 +125,18 @@ const decodeJsonConfiguration = (bytes: Uint8Array, filename: string): Either.Ei
     return Either.left(textReply.message);
   }
 
-  const source = textReply.fileContents;
-  const duplicateProperty = findDuplicateJsonKey(source);
+  const jsonText = textReply.fileContents;
+  const duplicateProperty = findDuplicateJsonKey(jsonText);
   const isPropertyDuplicated = duplicateProperty !== undefined;
   if (isPropertyDuplicated) {
     return Either.left(`${filename} contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`);
   }
 
   return Either.mapBoth(
-    Schema.decodeUnknownEither(Schema.parseJson(jsonConfigurationSchema), { onExcessProperty: "preserve" })(source),
+    Schema.decodeUnknownEither(Schema.parseJson(jsonConfigurationSchema), { onExcessProperty: "preserve" })(jsonText),
     {
       onLeft: (error) => `${filename} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`,
-      onRight: (configuration) => ({ source, rules: configuration.rules }),
+      onRight: (configuration) => ({ source: jsonText, rules: configuration.rules }),
     },
   );
 };

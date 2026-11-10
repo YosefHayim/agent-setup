@@ -34,7 +34,9 @@ export const validatePlanRoot = async (root: string): Promise<string> => {
 
   const realRoot = await realpath(normalizedRoot);
   const rootStats = await stat(realRoot);
-  if (!rootStats.isDirectory()) {
+
+  const isRootNotDirectory = !rootStats.isDirectory();
+  if (isRootNotDirectory) {
     throw createRealPathError(`Plan root ${root} is not a directory.`);
   }
 

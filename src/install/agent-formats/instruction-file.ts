@@ -111,7 +111,7 @@ const instructionSkillSchema = z.strictObject({
 
 type InstructionSkill = z.infer<typeof instructionSkillSchema>;
 
-const renderSkillSection = (skill: InstructionSkill): string => {
+const createSkillSection = (skill: InstructionSkill): string => {
   const documentText = stripFrontmatter(skill.markdown).replaceAll("\r\n", "\n").trim();
   const isBodyEmpty = documentText.length === 0;
   if (isBodyEmpty) {
@@ -126,8 +126,8 @@ const renderSkillSection = (skill: InstructionSkill): string => {
   return `## ${skill.installedSkill.id}\n\n${documentText}`;
 };
 
-const renderManagedSection = (skills: ReadonlyArray<InstructionSkill>): Uint8Array => {
-  const sections = skills.map((skill) => renderSkillSection(skill));
+const createManagedSection = (skills: ReadonlyArray<InstructionSkill>): Uint8Array => {
+  const sections = skills.map((skill) => createSkillSection(skill));
 
   return textEncoder.encode(`\n${sections.join("\n\n---\n\n")}\n`);
 };
@@ -148,7 +148,9 @@ const receiptedBlockRange = ({
   }
 
   const end = block.end + lineFeedBytes.byteLength;
-  if (!filePreviouslyPresent) {
+
+  const isFileAbsentBefore = !filePreviouslyPresent;
+  if (isFileAbsentBefore) {
     return [block.start, end];
   }
 
@@ -246,7 +248,7 @@ const instructionFileRequestFieldsSchema = z.strictObject({
 
 type InstructionFileRequest = z.infer<typeof instructionFileRequestFieldsSchema>;
 
-const requestIssues = (request: InstructionFileRequest): Array<ZodIssueDetail | undefined> => {
+const requestIssues = (request: InstructionFileRequest): Array<ZodIssueDetail | null> => {
   if (request.previousFile._tag === "missing") {
     return [];
   }
@@ -264,22 +266,22 @@ const requestIssues = (request: InstructionFileRequest): Array<ZodIssueDetail | 
           path: ["previousFile", "file", "path"],
           message: "Prior instruction ownership must match the requested path.",
         }
-      : undefined,
+      : null,
     isMarkerCanonical
-      ? undefined
+      ? null
       : {
           path: ["previousFile", "file", "ownership"],
           message: "Prior instruction ownership must use the canonical managed-block markers.",
         },
     isAgentSetLegitimate
-      ? undefined
+      ? null
       : {
           path: ["previousFile", "file", "owner"],
           message: "Every prior owner must legitimately consume this instruction path from the catalog.",
         },
     isCurrentFileMissing
       ? { path: ["currentFile"], message: "A receipted instruction file requires current file bytes." }
-      : undefined,
+      : null,
   ];
 };
 
@@ -361,7 +363,7 @@ const planInstructionWrite = ({
   desired: PresentInstruction;
   currentBlock: CurrentBlock;
 }): InstructionFilePlan => {
-  const section = renderManagedSection(desired.skills);
+  const section = createManagedSection(desired.skills);
   const block = concatenateBytes([startMarkerBytes, section, endMarkerBytes]);
   const placed = placeBlock({ request, currentBlock, block });
   const file: OwnedInstructionFile = {
@@ -411,7 +413,9 @@ const planInstructionRemoval = (request: InstructionFileRequest, currentBlock: C
 // Plan one shared instruction path: a write, restoration, removal, or no-op.
 export const planInstructionFile = (input: unknown): InstructionFilePlan => {
   const requestReply = instructionFileRequestSchema.safeParse(input);
-  if (!requestReply.success) {
+
+  const isRequestInvalid = !requestReply.success;
+  if (isRequestInvalid) {
     throw createPlanError(`request is invalid: ${joinZodIssueMessages(requestReply.error)}`);
   }
 

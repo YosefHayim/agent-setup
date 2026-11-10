@@ -49,8 +49,8 @@ export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSet
     return Either.left(new InstallError({ issue: textReply.message }));
   }
 
-  const source = textReply.fileContents;
-  const duplicateProperty = findDuplicateJsonKey(source);
+  const jsonText = textReply.fileContents;
+  const duplicateProperty = findDuplicateJsonKey(jsonText);
   const isPropertyDuplicated = duplicateProperty !== undefined;
   if (isPropertyDuplicated) {
     return Either.left(
@@ -60,7 +60,7 @@ export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSet
     );
   }
 
-  return Either.map(parseSettings(source, "settings.json"), (document) => ({ source, document }));
+  return Either.map(parseSettings(jsonText, "settings.json"), (document) => ({ source: jsonText, document }));
 };
 
 const hookEventFromPointer = (pointer: string): string | undefined => {

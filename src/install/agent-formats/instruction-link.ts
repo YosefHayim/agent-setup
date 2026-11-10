@@ -185,7 +185,7 @@ const addReference = (
 
   switch (target.referenceFormat) {
     case "yamlReadArray": {
-      const previousYamlOwnership = ownership?._tag === "yamlSequenceValue" ? ownership : undefined;
+      const previousYamlOwnership = ownership?._tag === "yamlSequenceValue" ? ownership : null;
       const yamlReadReply = Either.try({
         try: () => addYamlRead({ ...link, previousOwnership: previousYamlOwnership }),
         catch: (error) => linkIssue(readErrorMessage(error)),

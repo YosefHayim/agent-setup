@@ -9,7 +9,7 @@ interface YamlReadLink {
   readonly currentBytes: Uint8Array | undefined;
   readonly configPath: string;
   readonly instructionPath: string;
-  readonly previousOwnership: YamlSequenceValueOwnership | undefined;
+  readonly previousOwnership: YamlSequenceValueOwnership | null;
 }
 
 interface YamlReadBlock {
@@ -62,7 +62,9 @@ const inspectYamlReadDocument = (source: string): YamlReadDocument => {
   }
 
   const isBlockMapping = isMap(contents) && contents.flow !== true;
-  if (!isBlockMapping) {
+
+  const isNotBlockMapping = !isBlockMapping;
+  if (isNotBlockMapping) {
     throw new Error("Aider configuration must be one block mapping.");
   }
 
@@ -72,10 +74,10 @@ const inspectYamlReadDocument = (source: string): YamlReadDocument => {
     return { _tag: "missing", source };
   }
 
-  const keyScalar = isScalar(pair.key) ? pair.key : undefined;
+  const keyScalar = isScalar(pair.key) ? pair.key : null;
   const keyRange = keyScalar?.range;
-  const hasKeyRange = keyRange != null;
-  if (!hasKeyRange) {
+  const isKeyRangeMissing = keyRange == null;
+  if (isKeyRangeMissing) {
     throw new Error("Aider read key has no stable source range.");
   }
 
@@ -94,17 +96,18 @@ const inspectYamlReadDocument = (source: string): YamlReadDocument => {
     };
   }
 
-  const readSequence = isSeq(pair.value) && pair.value.flow !== true ? pair.value : undefined;
+  const readSequence = isSeq(pair.value) && pair.value.flow !== true ? pair.value : null;
   const sequenceRange = readSequence?.range;
-  const isReadBlockSequence = readSequence != null && sequenceRange != null;
-  if (!isReadBlockSequence) {
+
+  const isReadBlockSequenceMissing = readSequence == null || sequenceRange == null;
+  if (isReadBlockSequenceMissing) {
     throw new Error("Aider read must be one block sequence of strings.");
   }
 
   const items = [];
   let itemPrefix: string | undefined;
-  for (const item of readSequence.items) {
-    const itemScalar = isScalar(item) ? item : undefined;
+  for (const sequenceItem of readSequence.items) {
+    const itemScalar = isScalar(sequenceItem) ? sequenceItem : null;
     const itemValue = itemScalar?.value;
     const itemRange = itemScalar?.range;
     const isDirectString =
@@ -112,14 +115,18 @@ const inspectYamlReadDocument = (source: string): YamlReadDocument => {
       itemRange != null &&
       itemScalar?.anchor === undefined &&
       itemScalar?.tag === undefined;
-    if (!isDirectString) {
+
+    const isNotDirectString = !isDirectString;
+    if (isNotDirectString) {
       throw new Error("Aider read must contain only direct string values.");
     }
 
     const start = lineStartAt(source, itemRange[0]);
     const prefix = source.slice(start, itemRange[0]);
     const isPrefixConsistent = /^ +-\s+$/.test(prefix) && (itemPrefix === undefined || itemPrefix === prefix);
-    if (!isPrefixConsistent) {
+
+    const isNotPrefixConsistent = !isPrefixConsistent;
+    if (isNotPrefixConsistent) {
       throw new Error("Aider read must use one consistent space-indented block sequence.");
     }
 
@@ -156,7 +163,9 @@ const appendYamlReference = ({
   keyPreviouslyPresent: boolean;
 } => {
   const ending = lineEnding(document.source);
-  if (document._tag === "missing") {
+
+  const isDocumentMissing = document._tag === "missing";
+  if (isDocumentMissing) {
     const insertedPrefix = document.source.length === 0 ? "" : ending;
 
     return {
@@ -225,7 +234,7 @@ export const addYamlRead = (link: YamlReadLink): { bytes: Uint8Array; ownership:
   }
 
   const referenceItems = yamlReferenceItems(document, link.instructionPath);
-  const isReceiptedReferenceChanged = link.previousOwnership !== undefined && referenceItems.length !== 1;
+  const isReceiptedReferenceChanged = link.previousOwnership != null && referenceItems.length !== 1;
   if (isReceiptedReferenceChanged) {
     throw new Error("Receipted Aider read reference changed after installation.");
   }
@@ -290,8 +299,8 @@ export const removeYamlRead = ({
   configPath: string;
   ownership: YamlSequenceValueOwnership;
 }): Uint8Array => {
-  const source = readConfigText(currentBytes, configPath);
-  const document = inspectYamlReadDocument(source);
+  const configYaml = readConfigText(currentBytes, configPath);
+  const document = inspectYamlReadDocument(configYaml);
   const isDocumentMissing = document._tag === "missing";
   if (isDocumentMissing) {
     throw new Error("Receipted Aider read reference changed after installation.");
@@ -300,24 +309,26 @@ export const removeYamlRead = ({
   const referenceItems = yamlReferenceItems(document, ownership.reference);
   const referenceItem = referenceItems[0];
   const isReferenceUnique = referenceItems.length === 1 && referenceItem !== undefined;
-  if (!isReferenceUnique) {
+
+  const isReferenceNotUnique = !isReferenceUnique;
+  if (isReferenceNotUnique) {
     throw new Error("Receipted Aider read reference changed after installation.");
   }
 
   if (ownership.previouslyPresent) {
-    return textEncoder.encode(source);
+    return textEncoder.encode(configYaml);
   }
 
-  const installedReferenceLine = source.slice(referenceItem.start, referenceItem.end);
-  const expectedReferenceLine = `${document.itemPrefix}${ownership.reference}${lineEnding(source)}`;
+  const installedReferenceLine = configYaml.slice(referenceItem.start, referenceItem.end);
+  const expectedReferenceLine = `${document.itemPrefix}${ownership.reference}${lineEnding(configYaml)}`;
   if (installedReferenceLine !== expectedReferenceLine) {
     throw new Error("Receipted Aider reference line changed after installation.");
   }
 
   const isInsertedKeyOnly = !ownership.keyPreviouslyPresent && document.items.length === 1;
   if (isInsertedKeyOnly) {
-    return removeInsertedYamlKey({ source, document, ownership });
+    return removeInsertedYamlKey({ source: configYaml, document, ownership });
   }
 
-  return textEncoder.encode(`${source.slice(0, referenceItem.start)}${source.slice(referenceItem.end)}`);
+  return textEncoder.encode(`${configYaml.slice(0, referenceItem.start)}${configYaml.slice(referenceItem.end)}`);
 };
