@@ -64,7 +64,7 @@ export const withSettingText = (request: {
 
 export const formatSettingValue = (request: { readonly config: Config; readonly setting: ConfigSetting }): string => {
   const configuredSetting: unknown = request.config[request.setting.key];
-  const isSettingNotSet = configuredSetting === undefined;
+  const isSettingNotSet = configuredSetting == null;
   if (isSettingNotSet) {
     return "(not set)";
   }

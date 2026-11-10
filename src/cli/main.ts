@@ -49,7 +49,8 @@ const reportFailure = async (request: { readonly error: unknown; readonly isInte
   const isCommanderExit = error instanceof CommanderError;
   if (isCommanderExit) {
     // Help and version exit 0; a usage error from commander has already printed its message.
-    process.exitCode = error.exitCode === 0 ? 0 : USAGE_EXIT_CODE;
+    const isHelpOrVersionExit = error.exitCode === 0;
+    process.exitCode = isHelpOrVersionExit ? 0 : USAGE_EXIT_CODE;
     return;
   }
 
