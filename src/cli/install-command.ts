@@ -48,14 +48,19 @@ export const installCommand = Command.make(
         yield* Effect.tryPromise({ try: () => TerminalUI.intro("install"), catch: (error) => error });
       }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-      const installation = yield* install({
+      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+      const installRequest = {
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
         host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
+        preparedPackage,
         features: args.featureIds.length === 0 ? { _tag: "defaults" } : { _tag: "selected", ids: args.featureIds },
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "scripted" },
         configuration: { _tag: "automatic" },
+      };
+      const installation = yield* Effect.tryPromise({
+        try: (signal) => install(installRequest, signal),
+        catch: (error) => error,
       });
       if (args.format === "json") {
         yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(installation), catch: (error) => error });

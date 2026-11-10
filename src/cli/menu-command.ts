@@ -72,14 +72,19 @@ const runInstall = Effect.gen(function* () {
     ],
     confirmMessage: "Apply this install plan?",
     apply: Effect.gen(function* () {
-      const installation = yield* install({
+      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+      const installRequest = {
         destination,
         host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
+        preparedPackage,
         features: { _tag: "selected", ids: features },
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "interactive" },
         configuration: { _tag: "automatic" },
+      };
+      const installation = yield* Effect.tryPromise({
+        try: (signal) => install(installRequest, signal),
+        catch: (error) => error,
       });
       yield* showInstallation(installation);
     }),
@@ -149,9 +154,11 @@ const runUninstall = Effect.gen(function* () {
       { label: "Safety", detail: "only receipt-authorized files are removed" },
     ],
     confirmMessage: `Uninstall agent-setup from ${scope}?`,
-    apply: uninstall({ destination, host: { homeRoot: host.homeRoot }, interaction: { _tag: "interactive" } }).pipe(
-      Effect.flatMap(showUninstallation),
-    ),
+    apply: Effect.tryPromise({
+      try: (signal) =>
+        uninstall({ destination, host: { homeRoot: host.homeRoot }, interaction: { _tag: "interactive" } }, signal),
+      catch: (error) => error,
+    }).pipe(Effect.flatMap(showUninstallation)),
   });
 });
 

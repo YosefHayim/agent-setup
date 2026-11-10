@@ -1,5 +1,5 @@
-import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either } from "effect";
+import { realpath } from "node:fs/promises";
+import * as path from "node:path";
 
 import { type AgentDefinition, agentCatalog, detectAgents } from "../catalog/agent-catalog.js";
 import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "../catalog/feature-catalog.js";
@@ -36,7 +36,7 @@ import {
 } from "./install-request.js";
 import type { PreviousFileValue } from "./ownership.js";
 import { createHookWrites, readPreparedSkills } from "./package-files.js";
-import type { FileChange, ReceiptTarget } from "./plan.js";
+import type { ExpectedCurrent, FileChange, ReceiptTarget } from "./plan.js";
 import { planInstall } from "./plan-changes.js";
 import { encodeReceiptJson, type Receipt, type ReceiptSnapshot, readReceipt } from "./receipt.js";
 import { planStaleRestorations } from "./restore.js";
@@ -46,39 +46,43 @@ const receiptEqual = (left: Receipt, right: Receipt): boolean => encodeReceiptJs
 const configSnapshotFile = (snapshot: ConfigFileSnapshot): FileSnapshot =>
   snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "file", bytes: snapshot.bytes };
 
-const listFeaturesWithDependencies = (request: InstallRequest): Either.Either<ReadonlyArray<FeatureId>, Error> => {
+const listFeaturesWithDependencies = (request: InstallRequest): ReadonlyArray<FeatureId> => {
   const ids = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
 
   const dependencyCheck = addDependencies(ids);
   const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
-    return Either.left(createInstallError(`Unknown feature ${dependencyCheck.featureId}.`));
+    throw createInstallError(`Unknown feature ${dependencyCheck.featureId}.`);
   }
 
-  return Either.right(dependencyCheck.featureIds);
+  return dependencyCheck.featureIds;
 };
 
-const pickSelectedAgents = (ids: ReadonlyArray<string>): Either.Either<ReadonlyArray<AgentDefinition>, Error> => {
+const pickSelectedAgents = (ids: ReadonlyArray<string>): ReadonlyArray<AgentDefinition> => {
   const unknownId = ids.find((id) => !agentCatalog.some((agent) => agent.id === id));
-  if (unknownId !== undefined) {
-    return Either.left(createInstallError(`Unknown agent: ${unknownId}`));
+  const isUnknownIdFound = unknownId != null;
+  if (isUnknownIdFound) {
+    throw createInstallError(`Unknown agent: ${unknownId}`);
   }
 
-  if (ids.length !== new Set(ids).size) {
-    return Either.left(createInstallError("Agent selection contains duplicate IDs."));
+  const hasDuplicateIds = ids.length !== new Set(ids).size;
+  if (hasDuplicateIds) {
+    throw createInstallError("Agent selection contains duplicate IDs.");
   }
 
-  return Either.right(agentCatalog.filter((agent) => ids.includes(agent.id)));
+  return agentCatalog.filter((agent) => ids.includes(agent.id));
 };
 
-const pickAgents = (request: InstallRequest): Either.Either<ReadonlyArray<AgentDefinition>, Error> => {
-  if (request.agents._tag === "selected") {
-    return pickSelectedAgents(request.agents.ids);
+const pickAgents = (request: InstallRequest): ReadonlyArray<AgentDefinition> => {
+  const agentsRequest = request.agents;
+  const isSelectedAgents = agentsRequest._tag === "selected";
+  if (isSelectedAgents) {
+    return pickSelectedAgents(agentsRequest.ids);
   }
 
-  return pickSelectedAgents(
-    detectAgents(request.agents.evidence).flatMap((agent) => (agent.installed ? [agent.id] : [])),
-  );
+  const detectedAgentIds = detectAgents(agentsRequest.evidence).flatMap((agent) => (agent.installed ? [agent.id] : []));
+
+  return pickSelectedAgents(detectedAgentIds);
 };
 
 const receiptTarget: ReceiptTarget = {
@@ -99,7 +103,7 @@ const automaticConfigSelection = (input: {
   if (input.request.destination._tag === "project") {
     return {
       _tag: "firstProjectInstall",
-      globalConfig: input.global === undefined ? { _tag: "missing" } : input.global,
+      globalConfig: input.global == null ? { _tag: "missing" } : input.global,
     };
   }
 
@@ -111,85 +115,95 @@ type ManagedConfigInspection = {
   readonly selection: ManagedConfigRequest["selection"];
 };
 
+// The global config is read only when a project install has no config of its own yet.
+const readInheritedConfig = async (input: {
+  request: InstallRequest;
+  target: ConfigFileSnapshot;
+}): Promise<ConfigFileSnapshot | undefined> => {
+  const isInheritedConfigNeeded = input.request.destination._tag === "project" && input.target._tag === "missing";
+  if (isInheritedConfigNeeded) {
+    return readConfigFile(path.join(input.request.host.homeRoot, managedConfigPath));
+  }
+
+  return undefined;
+};
+
 // Decode config.json only when the automatic selection reuses or inherits it; an explicit or reset
 // configuration needs just its bytes, so a file the schema no longer accepts cannot block replacing it.
-const inspectManagedConfig = (request: InstallRequest) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const configPath = path.join(request.destination.root, managedConfigPath);
-    switch (request.configuration._tag) {
-      case "selected":
-        return {
-          file: yield* Effect.tryPromise({ try: () => readFileSnapshot(configPath), catch: (error) => error }),
-          selection: { _tag: "selected", config: request.configuration.config },
-        } satisfies ManagedConfigInspection;
-      case "reset":
-        return {
-          file: yield* Effect.tryPromise({ try: () => readFileSnapshot(configPath), catch: (error) => error }),
-          selection: { _tag: "selected", config: defaultConfig },
-        } satisfies ManagedConfigInspection;
-      case "automatic": {
-        const target = yield* Effect.tryPromise({ try: () => readConfigFile(configPath), catch: (error) => error });
-        const global =
-          request.destination._tag === "project" && target._tag === "missing"
-            ? yield* Effect.tryPromise({
-                try: () => readConfigFile(path.join(request.host.homeRoot, managedConfigPath)),
-                catch: (error) => error,
-              })
-            : undefined;
-        return {
-          file: configSnapshotFile(target),
-          selection: automaticConfigSelection({ request, target, global }),
-        } satisfies ManagedConfigInspection;
-      }
+const inspectManagedConfig = async (request: InstallRequest): Promise<ManagedConfigInspection> => {
+  const configPath = path.join(request.destination.root, managedConfigPath);
+  switch (request.configuration._tag) {
+    case "selected":
+      return {
+        file: await readFileSnapshot(configPath),
+        selection: { _tag: "selected", config: request.configuration.config },
+      } satisfies ManagedConfigInspection;
+    case "reset":
+      return {
+        file: await readFileSnapshot(configPath),
+        selection: { _tag: "selected", config: defaultConfig },
+      } satisfies ManagedConfigInspection;
+    case "automatic": {
+      const target = await readConfigFile(configPath);
+      const global = await readInheritedConfig({ request, target });
+
+      return {
+        file: configSnapshotFile(target),
+        selection: automaticConfigSelection({ request, target, global }),
+      } satisfies ManagedConfigInspection;
     }
-  });
+  }
+};
 
 // A reset replaces config.json whatever it holds now, so it keeps the receipt's restoration value
 // without requiring the current bytes to still match what was installed.
 const resetPreviousConfigFile = (input: {
   receipt: Receipt | undefined;
   snapshot: FileSnapshot;
-}): Either.Either<PreviousFileValue, Error> => {
+}): PreviousFileValue => {
   const file = previousReceiptFile(input.receipt, managedConfigPath);
-  if (file === undefined) {
-    return Either.right(previousFileValue(input.snapshot));
+  const isConfigNotReceipted = file == null;
+  if (isConfigNotReceipted) {
+    return previousFileValue(input.snapshot);
   }
 
-  return file.ownership._tag === "wholeFile"
-    ? Either.right(file.ownership.previous)
-    : Either.left(createInstallError(`Receipted whole-file file ${managedConfigPath} has incompatible ownership.`));
+  const ownership = file.ownership;
+  const isOwnershipIncompatible = ownership._tag !== "wholeFile";
+  if (isOwnershipIncompatible) {
+    throw createInstallError(`Receipted whole-file file ${managedConfigPath} has incompatible ownership.`);
+  }
+
+  return ownership.previous;
+};
+
+const pickPreviousConfigFile = (input: {
+  request: InstallRequest;
+  inspection: ManagedConfigInspection;
+  previousReceipt: Receipt | undefined;
+}): PreviousFileValue => {
+  const isConfigReset = input.request.configuration._tag === "reset";
+  if (isConfigReset) {
+    return resetPreviousConfigFile({ receipt: input.previousReceipt, snapshot: input.inspection.file });
+  }
+
+  return previousWholeFile({
+    receipt: input.previousReceipt,
+    filePath: managedConfigPath,
+    snapshot: input.inspection.file,
+  });
 };
 
 const createManagedConfigPlan = (input: {
   request: InstallRequest;
   inspection: ManagedConfigInspection;
   previousReceipt: Receipt | undefined;
-}): Either.Either<ManagedConfigPlan, Error> => {
-  const previous =
-    input.request.configuration._tag === "reset"
-      ? resetPreviousConfigFile({ receipt: input.previousReceipt, snapshot: input.inspection.file })
-      : Either.try({
-          try: () =>
-            previousWholeFile({
-              receipt: input.previousReceipt,
-              filePath: managedConfigPath,
-              snapshot: input.inspection.file,
-            }),
-          catch: wrapAsInstallError,
-        });
-  if (Either.isLeft(previous)) {
-    return Either.left(previous.left);
-  }
+}): ManagedConfigPlan => {
+  const previousConfigFile = pickPreviousConfigFile(input);
 
-  return Either.try({
-    try: () =>
-      planManagedConfig({
-        scope: input.request.destination._tag,
-        selection: input.inspection.selection,
-        previousConfigFile: previous.right,
-      }),
-    catch: wrapAsInstallError,
+  return planManagedConfig({
+    scope: input.request.destination._tag,
+    selection: input.inspection.selection,
+    previousConfigFile,
   });
 };
 
@@ -201,7 +215,7 @@ const installSummary = (input: {
 }): InstallSummary => ({
   _tag: input.tag,
   scope: input.request.destination._tag,
-  features: input.featureIds,
+  features: [...input.featureIds],
   agents: input.selectedAgents.map((agent) => agent.id),
   platformRequirements: featureCatalog
     .filter((feature) => input.featureIds.includes(feature.id))
@@ -209,189 +223,201 @@ const installSummary = (input: {
   interaction: input.request.interaction,
 });
 
+interface DecodedSettingsFile {
+  readonly snapshot: FileSnapshot;
+  readonly decoded: DecodedSettings;
+}
+
+// Claude's settings were read and decoded once already, so only the other agents' files are read here.
+const readHookSettingsFile = async (input: {
+  root: string;
+  filePath: string;
+  claudeSettings: DecodedSettingsFile;
+}): Promise<DecodedSettingsFile> => {
+  const isClaudeSettings = input.filePath === settingsPath;
+  if (isClaudeSettings) {
+    return input.claudeSettings;
+  }
+
+  const snapshot = await readFileSnapshot(path.join(input.root, input.filePath));
+
+  return { snapshot, decoded: decodeSettings(snapshot) };
+};
+
 // Claude's settings are always planned, so deselecting Claude restores the hooks it received earlier.
-const planHookSettings = (input: {
+const planHookSettings = async (input: {
   request: InstallRequest;
   featureIds: ReadonlyArray<FeatureId>;
   selectedAgents: ReadonlyArray<AgentDefinition>;
   previousReceipt: Receipt | undefined;
-  claudeSettings: { snapshot: FileSnapshot; decoded: DecodedSettings };
-}) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const claude = agentCatalog.find((agent) => agent.id === "claude-code");
-    if (claude === undefined) {
-      return yield* Effect.fail(createInstallError("Claude Code catalog entry is missing."));
+  claudeSettings: DecodedSettingsFile;
+}): Promise<FileChange[]> => {
+  const claude = agentCatalog.find((agent) => agent.id === "claude-code");
+  const isClaudeCatalogEntryMissing = claude == null;
+  if (isClaudeCatalogEntryMissing) {
+    throw createInstallError("Claude Code catalog entry is missing.");
+  }
+
+  const agents = [claude, ...input.selectedAgents.filter((agent) => agent.id !== claude.id)];
+  const plans: FileChange[] = [];
+  for (const agent of agents) {
+    const nativeHooks = agent.nativeHooks;
+    const isAgentWithoutHooks = nativeHooks._tag === "unsupported";
+    if (isAgentWithoutHooks) {
+      continue;
     }
 
-    const agents = [claude, ...input.selectedAgents.filter((agent) => agent.id !== claude.id)];
-    const plans = yield* Effect.forEach(agents, (agent) =>
-      Effect.gen(function* () {
-        if (agent.nativeHooks._tag === "unsupported") {
-          return undefined;
-        }
+    const filePath = nativeHooks.configPath;
+    const settingsFile = await readHookSettingsFile({
+      root: input.request.destination.root,
+      filePath,
+      claudeSettings: input.claudeSettings,
+    });
+    const previousFile = previousReceiptFile(input.previousReceipt, filePath);
+    const desiredGroups = desiredHookGroups({
+      root: input.request.destination.root,
+      featureIds: input.featureIds,
+      selectedAgents: input.selectedAgents,
+      agent,
+      path,
+    });
+    const installedHooksFolder = path.join(input.request.destination.root, hooksPath);
+    const settingsPlan = planSettings({
+      filePath,
+      snapshot: settingsFile.snapshot,
+      decoded: settingsFile.decoded,
+      previousFile,
+      desiredGroups,
+      installedHooksFolder,
+    });
 
-        const filePath = agent.nativeHooks.configPath;
-        const isClaudeSettings = filePath === settingsPath;
-        const snapshot = isClaudeSettings
-          ? input.claudeSettings.snapshot
-          : yield* Effect.tryPromise({
-              try: () => readFileSnapshot(path.join(input.request.destination.root, filePath)),
-              catch: (error) => error,
-            });
+    const isThereSettingsChange = settingsPlan != null;
 
-        const decoded = isClaudeSettings
-          ? input.claudeSettings.decoded
-          : yield* Effect.try({ try: () => decodeSettings(snapshot), catch: wrapAsInstallError });
+    if (isThereSettingsChange) {
+      plans.push(settingsPlan);
+    }
+  }
 
-        return yield* Effect.try({
-          try: () =>
-            planSettings({
-              filePath,
-              snapshot,
-              decoded,
-              previousFile: previousReceiptFile(input.previousReceipt, filePath),
-              desiredGroups: desiredHookGroups({
-                root: input.request.destination.root,
-                featureIds: input.featureIds,
-                selectedAgents: input.selectedAgents,
-                agent,
-                path,
-              }),
-              installedHooksFolder: path.join(input.request.destination.root, hooksPath),
-            }),
-          catch: wrapAsInstallError,
-        });
-      }),
-    );
+  return plans;
+};
 
-    return plans.filter((plan): plan is FileChange => plan != null);
+const pickReceiptExpectedCurrent = (receiptSnapshot: ReceiptSnapshot): ExpectedCurrent => {
+  const isReceiptMissing = receiptSnapshot._tag === "missing";
+  if (isReceiptMissing) {
+    return { _tag: "missing" };
+  }
+
+  return { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) };
+};
+
+// Plans the install from the bytes on disk right now, then applies it unless nothing would change.
+const planAndApplyInstall = async (
+  input: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
+  signal: AbortSignal,
+): Promise<InstallSummary> => {
+  const { request: requested, receiptSnapshot } = input;
+  const destinationRoot = await realpath(requested.destination.root);
+  const homeRoot = await realpath(requested.host.homeRoot);
+  const requestInput = {
+    ...requested,
+    destination: { ...requested.destination, root: destinationRoot },
+    host: { homeRoot },
+  };
+  const request = installRequestSchema.parse(requestInput);
+
+  const configInspection = await inspectManagedConfig(request);
+  const settingsSnapshot = await readFileSnapshot(path.join(request.destination.root, settingsPath));
+  const settings = decodeSettings(settingsSnapshot);
+  const previousReceipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
+  const isScopeMismatched = previousReceipt != null && previousReceipt.scope !== request.destination._tag;
+  if (isScopeMismatched) {
+    throw createInstallError("Existing receipt scope does not match the requested destination.");
+  }
+
+  const featureIds = listFeaturesWithDependencies(request);
+  const selectedAgents = pickAgents(request);
+  const hookWrites = await createHookWrites({ request, featureIds, previousReceipt });
+  const preparedSkills = await readPreparedSkills({ request, featureIds });
+  const agentWrites = await createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt });
+  const managedConfigPlan = createManagedConfigPlan({
+    request,
+    inspection: configInspection,
+    previousReceipt,
+  });
+  const managedConfigWrite = checkFileChange({
+    ...managedConfigPlan.managedConfigWrite,
+    expectedCurrent: expectedCurrent(configInspection.file),
+  });
+  const settingsPlans = await planHookSettings({
+    request,
+    featureIds,
+    selectedAgents,
+    previousReceipt,
+    claudeSettings: { snapshot: settingsSnapshot, decoded: settings },
   });
 
-export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot }) =>
-  Effect.gen(function* () {
-    const { request: requested, receiptSnapshot } = input;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const destinationRoot = yield* fileSystem.realPath(requested.destination.root);
-    const homeRoot = yield* fileSystem.realPath(requested.host.homeRoot);
-    const requestInput = {
-      ...requested,
-      destination: { ...requested.destination, root: destinationRoot },
-      host: { homeRoot },
-    };
-    const request = yield* Effect.try({
-      try: () => installRequestSchema.parse(requestInput),
-      catch: wrapAsInstallError,
-    });
+  const writes = [
+    ...hookWrites,
+    ...agentWrites,
+    managedConfigWrite,
+    ...settingsPlans.filter((plan) => plan._tag === "write"),
+  ];
+  const restorations = await planStaleRestorations({
+    root: request.destination.root,
+    previousReceipt,
+    desiredWrites: writes,
+    settingsPlans,
+  });
+  const receipt: Receipt = {
+    version: request.preparedPackage.version,
+    scope: request.destination._tag,
+    features: [...featureIds],
+    ownedFiles: writes.map((write) => write.file),
+  };
+  const plan = planInstall({
+    root: request.destination.root,
+    previous: previousReceipt == null ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
+    restorations,
+    desired: { receipt, writes },
+    receiptTarget,
+    receiptExpectedCurrent: pickReceiptExpectedCurrent(receiptSnapshot),
+  });
 
-    const configInspection = yield* inspectManagedConfig(request);
-    const settingsSnapshot = yield* Effect.tryPromise({
-      try: () => readFileSnapshot(path.join(request.destination.root, settingsPath)),
-      catch: (error) => error,
-    });
-    const settings = yield* Effect.try({ try: () => decodeSettings(settingsSnapshot), catch: wrapAsInstallError });
-    const previousReceipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
-    if (previousReceipt !== undefined && previousReceipt.scope !== request.destination._tag) {
-      return yield* Effect.fail(createInstallError("Existing receipt scope does not match the requested destination."));
-    }
+  const isUnchangedInstall =
+    previousReceipt != null &&
+    plan.operations.length === 0 &&
+    plan.receipt._tag === "receiptPublish" &&
+    receiptEqual(previousReceipt, plan.receipt.receipt);
+  if (isUnchangedInstall) {
+    return installSummary({ tag: "unchanged", request, featureIds, selectedAgents });
+  }
 
-    const featureIds = yield* listFeaturesWithDependencies(request);
-    const selectedAgents = yield* pickAgents(request);
-    const hookWrites = yield* Effect.tryPromise({
-      try: () => createHookWrites({ request, featureIds, previousReceipt }),
-      catch: (error) => error,
-    });
-    const preparedSkills = yield* Effect.tryPromise({
-      try: () => readPreparedSkills({ request, featureIds }),
-      catch: (error) => error,
-    });
-    const agentWrites = yield* Effect.tryPromise({
-      try: () => createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt }),
-      catch: (error) => error,
-    });
-    const managedConfigPlan = yield* createManagedConfigPlan({
-      request,
-      inspection: configInspection,
-      previousReceipt,
-    });
-    const managedConfigWrite = yield* Either.try({
-      try: () =>
-        checkFileChange({
-          ...managedConfigPlan.managedConfigWrite,
-          expectedCurrent: expectedCurrent(configInspection.file),
-        }),
-      catch: wrapAsInstallError,
-    });
-    const settingsPlans = yield* planHookSettings({
-      request,
-      featureIds,
-      selectedAgents,
-      previousReceipt,
-      claudeSettings: { snapshot: settingsSnapshot, decoded: settings },
-    });
-    const writes = [
-      ...hookWrites,
-      ...agentWrites,
-      managedConfigWrite,
-      ...settingsPlans.filter((plan) => plan._tag === "write"),
-    ];
-    const restorations = yield* planStaleRestorations({
-      root: request.destination.root,
-      previousReceipt,
-      desiredWrites: writes,
-      settingsPlans,
-    });
-    const receipt: Receipt = {
-      version: request.preparedPackage.version,
-      scope: request.destination._tag,
-      features: featureIds,
-      ownedFiles: writes.map((write) => write.file),
-    };
-    const plan = yield* Effect.try({
-      try: () =>
-        planInstall({
-          root: request.destination.root,
-          previous: previousReceipt === undefined ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
-          restorations,
-          desired: { receipt, writes },
-          receiptTarget,
-          receiptExpectedCurrent:
-            receiptSnapshot._tag === "missing"
-              ? { _tag: "missing" }
-              : { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
-        }),
-      catch: wrapAsInstallError,
-    });
+  await applyPlan(plan, signal);
 
-    const unchanged =
-      previousReceipt !== undefined &&
-      plan.operations.length === 0 &&
-      plan.receipt._tag === "receiptPublish" &&
-      receiptEqual(previousReceipt, plan.receipt.receipt);
-    if (unchanged) {
-      return installSummary({ tag: "unchanged", request, featureIds, selectedAgents });
-    }
+  return installSummary({ tag: "installed", request, featureIds, selectedAgents });
+};
 
-    yield* Effect.tryPromise({ try: (signal) => applyPlan(plan, signal), catch: (error) => error });
+export const syncInstall = async (
+  input: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
+  signal: AbortSignal,
+): Promise<InstallSummary> => {
+  try {
+    return await planAndApplyInstall(input, signal);
+  } catch (error) {
+    throw wrapAsInstallError(error);
+  }
+};
 
-    return installSummary({ tag: "installed", request, featureIds, selectedAgents });
-  }).pipe(Effect.mapError(wrapAsInstallError));
-
-export const install = (input: unknown) =>
-  Effect.gen(function* () {
-    const request = yield* Effect.try({
-      try: () => installRequestSchema.parse(input),
-      catch: wrapAsInstallError,
-    });
-    const path = yield* Path.Path;
-    const receiptSnapshot = yield* Effect.tryPromise({
-      try: () => readReceipt(path.join(request.destination.root, receiptPath)),
-      catch: wrapAsInstallError,
-    });
+export const install = async (input: unknown, signal: AbortSignal): Promise<InstallSummary> => {
+  try {
+    const request = installRequestSchema.parse(input);
+    const receiptSnapshot = await readReceipt(path.join(request.destination.root, receiptPath));
     const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : [];
     const requestedIds = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
-    const features = { _tag: "selected", ids: [...installedIds, ...requestedIds] } as const;
+    const features = { _tag: "selected" as const, ids: [...installedIds, ...requestedIds] };
 
-    return yield* syncInstall({ request: { ...request, features }, receiptSnapshot });
-  }).pipe(Effect.mapError(wrapAsInstallError));
+    return await syncInstall({ request: { ...request, features }, receiptSnapshot }, signal);
+  } catch (error) {
+    throw wrapAsInstallError(error);
+  }
+};

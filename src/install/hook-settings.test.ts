@@ -13,6 +13,12 @@ import { install } from "./install.js";
 import { uninstall } from "./uninstall.js";
 import { update } from "./update.js";
 
+const installEffect = (request: unknown) =>
+  Effect.tryPromise({ try: (signal) => install(request, signal), catch: (error) => error });
+
+const uninstallEffect = (request: unknown) =>
+  Effect.tryPromise({ try: (signal) => uninstall(request, signal), catch: (error) => error });
+
 const packageFiles = {
   "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
   "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
@@ -147,7 +153,7 @@ describe("hook settings", () => {
       features: { _tag: "selected", ids: ["leftover-process-cleanup"] },
     };
 
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
 
     const claudeHooks = (await readJsonFile(root, claudeSettingsPath)).hooks;
     const codexHooks = (await readJsonFile(root, codexHooksPath)).hooks;
@@ -166,7 +172,7 @@ describe("hook settings", () => {
       [claudeSettingsPath]: jsonContents({ hooks: { Stop: [oldInstalledStop, foreignStop] } }),
     });
 
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
 
     const stopGroups = (await readJsonFile(root, claudeSettingsPath)).hooks.Stop;
     const stopCommands = stopGroups.flatMap((group: { hooks: Array<{ command: string }> }) =>
@@ -184,11 +190,11 @@ describe("hook settings", () => {
       [claudeSettingsPath]: jsonContents({ theme: "dark" }),
       [codexHooksPath]: jsonContents({ hooks: { Stop: [userStop] } }),
     });
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
     await appendForeignStop(root, claudeSettingsPath);
     await appendForeignStop(root, codexHooksPath);
 
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
     await runInstaller(update({ ...request, features: { _tag: "preserve" } }));
     await runInstaller(update({ ...request, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } }));
 
@@ -198,7 +204,7 @@ describe("hook settings", () => {
       expect(settings).toContain("ask-scratch-cleanup.js");
     }
 
-    await runInstaller(uninstall(uninstallRequest(root)));
+    await runInstaller(uninstallEffect(uninstallRequest(root)));
 
     expect(await readJsonFile(root, claudeSettingsPath)).toEqual({ theme: "dark", hooks: { Stop: [foreignStop] } });
     expect(await readJsonFile(root, codexHooksPath)).toEqual({ hooks: { Stop: [userStop, foreignStop] } });
@@ -207,14 +213,14 @@ describe("hook settings", () => {
   it("still refuses an install after one of its own hook entries changed", async () => {
     const { root, preparedRoot } = await createWorkspace();
     const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
     const changedSettings = (await readFileContents(root, claudeSettingsPath)).replace(
       "ask-scratch-cleanup.js",
       "ask-scratch-cleanup.js --changed",
     );
     await writeFiles(root, { [claudeSettingsPath]: changedSettings });
 
-    const installError = await runInstaller(Effect.flip(install(request)));
+    const installError = await runInstaller(Effect.flip(installEffect(request)));
 
     expect(installError).toMatchObject({
       message: expect.stringContaining(`Receipted hook entries in ${claudeSettingsPath}`),
@@ -226,7 +232,7 @@ describe("hook settings", () => {
     const { root, preparedRoot } = await createWorkspace();
     const request = installRequest({ root, preparedRoot, agentIds: ["claude-code"] });
     await writeFiles(root, { [claudeSettingsPath]: jsonContents({ theme: "dark", hooks: { Stop: [userStop] } }) });
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
     const receipt = await readJsonFile(root, receiptPath);
     const hooks = (await readJsonFile(root, claudeSettingsPath)).hooks;
     const legacyOwnedFiles = receipt.ownedFiles.map((file: { path: string; ownership: ReceiptHookEntriesOwnership }) =>
@@ -235,7 +241,7 @@ describe("hook settings", () => {
     await writeFiles(root, { [receiptPath]: jsonContents({ ...receipt, ownedFiles: legacyOwnedFiles }) });
     await appendForeignStop(root, claudeSettingsPath);
 
-    await runInstaller(install(request));
+    await runInstaller(installEffect(request));
 
     const migratedReceipt = await readJsonFile(root, receiptPath);
     const settingsEntry = migratedReceipt.ownedFiles.find((file: { path: string }) => file.path === claudeSettingsPath);
@@ -244,7 +250,7 @@ describe("hook settings", () => {
       expect.objectContaining({ pointer: "/hooks/Stop", previouslyPresent: true }),
     );
 
-    await runInstaller(uninstall(uninstallRequest(root)));
+    await runInstaller(uninstallEffect(uninstallRequest(root)));
 
     expect(await readJsonFile(root, claudeSettingsPath)).toEqual({
       theme: "dark",

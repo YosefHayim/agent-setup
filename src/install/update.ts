@@ -96,9 +96,10 @@ export const update = (input: unknown) =>
     }
 
     const featureIdsWithDependencies = dependencyCheck.featureIds;
-    const isRefreshRequest = request.features._tag === "refresh";
+    const requestedFeatures = request.features;
+    const isRefreshRequest = requestedFeatures._tag === "refresh";
     const missingId = isRefreshRequest
-      ? (request.features.ids.find((id) => !featureIdsWithDependencies.some((featureId) => featureId === id)) ?? null)
+      ? (requestedFeatures.ids.find((id) => !featureIdsWithDependencies.some((featureId) => featureId === id)) ?? null)
       : null;
     const isFeatureMissing = missingId !== null;
     if (isFeatureMissing) {
@@ -110,7 +111,10 @@ export const update = (input: unknown) =>
     // Preserved and refreshed selections reuse the receipt's features; agents always come from the request.
     const featureIds = request.features._tag === "selected" ? request.features.ids : installedIds;
     const installRequest: InstallRequest = { ...request, features: { _tag: "selected", ids: featureIds } };
-    const installSummary = yield* syncInstall({ request: installRequest, receiptSnapshot });
+    const installSummary = yield* Effect.tryPromise({
+      try: (signal) => syncInstall({ request: installRequest, receiptSnapshot }, signal),
+      catch: (error) => error,
+    });
     const updateSummary: UpdateSummary = {
       ...installSummary,
       _tag: installSummary._tag === "installed" ? "updated" : "unchanged",
