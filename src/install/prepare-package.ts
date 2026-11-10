@@ -12,7 +12,7 @@ import { findPackageRoot, readPackageVersion } from "./package-root.js";
 const createPreparePackageError = (issue: string, cause?: unknown): Error =>
   new Error(`Cannot prepare agent-setup package: ${issue}`, { cause });
 
-const isPathPresent = async (filePath: string): Promise<boolean> => {
+export const isPathPresent = async (filePath: string): Promise<boolean> => {
   try {
     await stat(filePath);
 

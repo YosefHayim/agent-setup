@@ -28,11 +28,15 @@ export const checkBothScopes = Effect.gen(function* () {
   const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
   const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
   return yield* Effect.forEach(["global", "project"] as const, (scope) =>
-    checkHealth({
-      destination: destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
-      preparedPackage,
-      platform: host.platform,
-      agentEvidence: host.agentEvidence,
+    Effect.tryPromise({
+      try: () =>
+        checkHealth({
+          destination: destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
+          preparedPackage,
+          platform: host.platform,
+          agentEvidence: host.agentEvidence,
+        }),
+      catch: (error) => error,
     }).pipe(Effect.map((report): ScopeHealth => ({ scope, report }))),
   );
 });
