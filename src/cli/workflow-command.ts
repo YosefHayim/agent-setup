@@ -20,15 +20,19 @@ export const showCopiedWorkflows = (copiedWorkflows: {
   readonly written: ReadonlyArray<string>;
   readonly skipped: ReadonlyArray<string>;
 }) =>
-  TerminalUI.note(
-    [
-      ...copiedWorkflows.written.map((name) => `✓ .github/workflows/${name}`),
-      ...copiedWorkflows.skipped.map(
-        (name) => `• .github/workflows/${name} exists — kept (use --overwrite to replace)`,
+  Effect.tryPromise({
+    try: () =>
+      TerminalUI.note(
+        [
+          ...copiedWorkflows.written.map((name) => `✓ .github/workflows/${name}`),
+          ...copiedWorkflows.skipped.map(
+            (name) => `• .github/workflows/${name} exists — kept (use --overwrite to replace)`,
+          ),
+        ].join("\n"),
+        copiedWorkflows.written.length > 0 ? "Scaffolded" : "Nothing written (all present)",
       ),
-    ].join("\n"),
-    copiedWorkflows.written.length > 0 ? "Scaffolded" : "Nothing written (all present)",
-  );
+    catch: (error) => error,
+  });
 
 const overwriteOption = Options.boolean("overwrite").pipe(
   Options.withDefault(false),
@@ -47,8 +51,8 @@ const scaffoldCommand = Command.make(
       const path = yield* Path.Path;
       const targetRoot = path.resolve(Option.getOrElse(args.workspace, () => process.cwd()));
       if (args.format === "text") {
-        yield* TerminalUI.intro("workflow scaffold");
-        yield* TerminalUI.step(`workspace: ${targetRoot}`);
+        yield* Effect.tryPromise({ try: () => TerminalUI.intro("workflow scaffold"), catch: (error) => error });
+        yield* Effect.tryPromise({ try: () => TerminalUI.step(`workspace: ${targetRoot}`), catch: (error) => error });
       }
 
       const templateDirectory = yield* workflowTemplateDirectory;
@@ -57,14 +61,21 @@ const scaffoldCommand = Command.make(
         catch: (error) => error,
       });
       if (args.format === "json") {
-        yield* TerminalUI.json({ workspace: targetRoot, ...copiedWorkflows });
+        yield* Effect.tryPromise({
+          try: () => TerminalUI.showDocument({ workspace: targetRoot, ...copiedWorkflows }),
+          catch: (error) => error,
+        });
         return;
       }
 
       yield* showCopiedWorkflows(copiedWorkflows);
-      yield* TerminalUI.outro(
-        "Next: register the npm trusted publisher (repo + publish.yml) — see the publish.yml header.",
-      );
+      yield* Effect.tryPromise({
+        try: () =>
+          TerminalUI.outro(
+            "Next: register the npm trusted publisher (repo + publish.yml) — see the publish.yml header.",
+          ),
+        catch: (error) => error,
+      });
     }),
 ).pipe(Command.withDescription("Copy the single-gate CI + publish workflow set into a repo"));
 

@@ -1,18 +1,32 @@
 /** The CLI's only presentation layer: every line printed and every prompt asked goes through here. */
 
 import { Prompt } from "@effect/cli";
-import { Terminal } from "@effect/platform";
-import { Effect } from "effect";
+import { NodeContext } from "@effect/platform-node";
+import { Cause, Effect, Exit } from "effect";
 
 import type { OutputFormat } from "./cli-options.js";
 
-type PlanStep = { readonly label: string; readonly detail: string };
+interface PlanStep {
+  readonly label: string;
+  readonly detail: string;
+}
 
-const writeText = (text: string) => Effect.flatMap(Terminal.Terminal, (terminal) => terminal.display(text));
+// Prompts are @effect/cli widgets until the CLI moves off Effect. A failed prompt (Ctrl-C) rethrows its own error, so main still sees it.
+const runPrompt = async <Answer>(prompt: Prompt.Prompt<Answer>): Promise<Answer> => {
+  const promptExit = await Effect.runPromiseExit(Prompt.run(prompt).pipe(Effect.provide(NodeContext.layer)));
+  const didPromptAnswer = Exit.isSuccess(promptExit);
+  if (didPromptAnswer) {
+    return promptExit.value;
+  }
 
-const writeLine = (message: string) => writeText(`${message}\n`);
+  throw Cause.squash(promptExit.cause);
+};
 
-export const isInteractiveTerminal = Effect.flatMap(Terminal.Terminal, (terminal) => terminal.isTTY);
+const writeLine = async (message: string): Promise<void> => {
+  process.stdout.write(`${message}\n`);
+};
+
+export const isInteractiveTerminal = (): boolean => Boolean(process.stdout.isTTY);
 
 export const intro = (title: string) => writeLine(`\n  agent-setup · ${title}\n`);
 
@@ -28,92 +42,134 @@ export const fail = (message: string) => writeLine(`  ✗ ${message}`);
 
 export const detail = (message: string) => writeLine(`  · ${message}`);
 
-export const json = (document: unknown) => writeLine(JSON.stringify(document));
+export const showDocument = (printedDocument: unknown) => writeLine(JSON.stringify(printedDocument));
 
-export const note = (message: string, title?: string) =>
-  Effect.gen(function* () {
-    if (title !== undefined) {
-      yield* writeLine(`\n  ${title}`);
-      yield* writeLine(`  ${"─".repeat(Math.min(title.length, 40))}`);
-    }
-    for (const line of message.split("\n")) {
-      yield* writeLine(`  ${line}`);
-    }
-  });
+export const note = async (message: string, title?: string): Promise<void> => {
+  const hasTitle = title != null;
+  if (hasTitle) {
+    const maximumTitleRuleLength = 40;
+    await writeLine(`\n  ${title}`);
+    await writeLine(`  ${"─".repeat(Math.min(title.length, maximumTitleRuleLength))}`);
+  }
 
-export const showError = (error: unknown) => fail(error instanceof Error ? error.message : String(error));
+  for (const line of message.split("\n")) {
+    await writeLine(`  ${line}`);
+  }
+};
 
-export const cancelled = outro("Cancelled — nothing was changed.");
+export const showError = async (error: unknown): Promise<void> => {
+  const isErrorObject = error instanceof Error;
+  const message = isErrorObject ? error.message : String(error);
+  await fail(message);
+};
 
-export const showCancelled = (request: { readonly format: OutputFormat; readonly scope: string }) =>
-  request.format === "json" ? json({ _tag: "cancelled", scope: request.scope }) : cancelled;
+export const showCancelledOutro = () => outro("Cancelled — nothing was changed.");
+
+export const showCancelled = async (request: {
+  readonly format: OutputFormat;
+  readonly scope: string;
+}): Promise<void> => {
+  const isJsonFormat = request.format === "json";
+  if (isJsonFormat) {
+    await showDocument({ _tag: "cancelled", scope: request.scope });
+    return;
+  }
+
+  await showCancelledOutro();
+};
 
 // Every prompt answers with its fallback when there is no terminal, so non-TTY runs never block.
-export const confirm = (input: { message: string; initialValue: boolean }) =>
-  Effect.gen(function* () {
-    if (!(yield* isInteractiveTerminal)) {
-      return input.initialValue;
-    }
+export const confirm = async ({
+  message,
+  initialValue,
+}: {
+  message: string;
+  initialValue: boolean;
+}): Promise<boolean> => {
+  const isNonInteractive = !isInteractiveTerminal();
+  if (isNonInteractive) {
+    return initialValue;
+  }
 
-    return yield* Prompt.run(Prompt.confirm({ message: input.message, initial: input.initialValue }));
-  });
+  return runPrompt(Prompt.confirm({ message, initial: initialValue }));
+};
 
-export const selectOne = <Value>(input: {
+export const selectOne = async <Value>({
+  message,
+  choices,
+  initial,
+}: {
   message: string;
   choices: ReadonlyArray<{ title: string; value: Value; description?: string }>;
   initial?: Value;
-}) =>
-  Effect.gen(function* () {
-    if (yield* isInteractiveTerminal) {
-      return yield* Prompt.run(Prompt.select({ message: input.message, choices: input.choices }));
-    }
+}): Promise<Value> => {
+  const isInteractive = isInteractiveTerminal();
+  if (isInteractive) {
+    return runPrompt(Prompt.select({ message, choices }));
+  }
 
-    const fallback = input.initial === undefined ? input.choices.at(0)?.value : input.initial;
-    if (fallback === undefined) {
-      return yield* Effect.fail(new Error("No choices available for non-interactive select."));
-    }
+  const hasInitial = initial != null;
+  const fallback = hasInitial ? initial : choices.at(0)?.value;
+  const isThereNoFallback = fallback === undefined;
+  if (isThereNoFallback) {
+    throw new Error("No choices available for non-interactive select.");
+  }
 
-    return fallback;
-  });
+  return fallback;
+};
 
-export const multiSelect = <Value>(input: {
+export const multiSelect = async <Value>({
+  message,
+  choices,
+  initial,
+}: {
   message: string;
   choices: ReadonlyArray<{ title: string; value: Value; description?: string; selected?: boolean }>;
   initial: ReadonlyArray<Value>;
-}) =>
-  Effect.gen(function* () {
-    if (!(yield* isInteractiveTerminal)) {
-      return [...input.initial];
-    }
+}): Promise<Value[]> => {
+  const isNonInteractive = !isInteractiveTerminal();
+  if (isNonInteractive) {
+    return [...initial];
+  }
 
-    const selected = yield* Prompt.run(Prompt.multiSelect({ message: input.message, choices: input.choices }));
-    return selected.length > 0 ? selected : [...input.initial];
-  });
+  const selected = await runPrompt(Prompt.multiSelect({ message, choices }));
+  const isThereSelection = selected.length > 0;
+  return isThereSelection ? selected : [...initial];
+};
 
-export const optionalText = (input: { message: string; fallback: string }) =>
-  Effect.gen(function* () {
-    if (!(yield* isInteractiveTerminal)) {
-      return input.fallback;
-    }
+export const optionalText = async ({ message, fallback }: { message: string; fallback: string }): Promise<string> => {
+  const isNonInteractive = !isInteractiveTerminal();
+  if (isNonInteractive) {
+    return fallback;
+  }
 
-    const value = (yield* Prompt.run(Prompt.text({ message: input.message, default: input.fallback }))).trim();
-    return value === "" ? input.fallback : value;
-  });
+  const typedAnswer = await runPrompt(Prompt.text({ message, default: fallback }));
+  const trimmedAnswer = typedAnswer.trim();
+  const isThereNoAnswer = trimmedAnswer === "";
+  return isThereNoAnswer ? fallback : trimmedAnswer;
+};
 
 export const formatPlan = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string> =>
   steps.map((planStep, index) => `${String(index + 1)}. ${planStep.label}: ${planStep.detail}`);
 
-const showPlan = (input: { readonly title: string; readonly steps: ReadonlyArray<PlanStep> }) =>
-  note(formatPlan(input.steps).join("\n"), input.title);
+const showPlan = async ({ title, steps }: { readonly title: string; readonly steps: ReadonlyArray<PlanStep> }) => {
+  const planLines = formatPlan(steps);
+  await note(planLines.join("\n"), title);
+};
 
 /** Show the numbered plan and ask before applying it; a non-TTY run answers `initialValue` (default no). */
-export const confirmPlan = (input: {
+export const confirmPlan = async ({
+  title,
+  steps,
+  confirmMessage,
+  initialValue,
+}: {
   readonly title: string;
   readonly steps: ReadonlyArray<PlanStep>;
   readonly confirmMessage: string;
   readonly initialValue?: boolean;
-}) =>
-  Effect.gen(function* () {
-    yield* showPlan(input);
-    return yield* confirm({ message: input.confirmMessage, initialValue: input.initialValue === true });
-  });
+}): Promise<boolean> => {
+  await showPlan({ title, steps });
+  const isInitialValueYes = initialValue === true;
+  return confirm({ message: confirmMessage, initialValue: isInitialValueYes });
+};

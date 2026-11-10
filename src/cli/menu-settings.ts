@@ -10,20 +10,24 @@ import {
 } from "../config/config-schema.js";
 import { readConfig, resolveConfigTarget, saveConfig } from "../config/scope-config.js";
 import type { Scope } from "../install/receipt.js";
-import { CliUsageError } from "./cli-options.js";
+import { createCliUsageError } from "./cli-options.js";
 import { formatSettingValue, showConfig } from "./config-command.js";
 import * as TerminalUI from "./terminal-ui.js";
 
 type ConfigSetting = (typeof configSettings)[number];
 
 export const pickScope = (verb: string) =>
-  TerminalUI.selectOne<Scope>({
-    message: `${verb} — which scope?`,
-    choices: [
-      { title: "global", value: "global", description: "home root · every session" },
-      { title: "project", value: "project", description: "this repo · committable" },
-    ],
-    initial: "global",
+  Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne<Scope>({
+        message: `${verb} — which scope?`,
+        choices: [
+          { title: "global", value: "global", description: "home root · every session" },
+          { title: "project", value: "project", description: "this repo · committable" },
+        ],
+        initial: "global",
+      }),
+    catch: (error) => error,
   });
 
 /** Show the plan and run `apply` only once the user approves it. */
@@ -32,17 +36,25 @@ export const applyIfApproved = <E, R>(request: {
   readonly steps: ReadonlyArray<{ readonly label: string; readonly detail: string }>;
   readonly confirmMessage: string;
   readonly apply: Effect.Effect<void, E, R>;
-}) => Effect.if(TerminalUI.confirmPlan(request), { onTrue: () => request.apply, onFalse: () => TerminalUI.cancelled });
+}) =>
+  Effect.if(Effect.tryPromise({ try: () => TerminalUI.confirmPlan(request), catch: (error) => error }), {
+    onTrue: () => request.apply,
+    onFalse: () => Effect.tryPromise({ try: () => TerminalUI.showCancelledOutro(), catch: (error) => error }),
+  });
 
 // Literal settings offer their schema values; an optional setting also offers "" to clear it.
 const settingChoices = (setting: ConfigSetting): ReadonlyArray<string> =>
   setting.optional && setting.choices.length > 0 ? [...setting.choices, ""] : setting.choices;
 
 const pickSetting = (message: string) =>
-  TerminalUI.selectOne<ConfigSetting>({
-    message,
-    choices: configSettings.map((setting) => ({ title: setting.name, value: setting, description: setting.label })),
-    initial: configSettings[0],
+  Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne<ConfigSetting>({
+        message,
+        choices: configSettings.map((setting) => ({ title: setting.name, value: setting, description: setting.label })),
+        initial: configSettings[0],
+      }),
+    catch: (error) => error,
   });
 
 const promptSettingValue = (request: { readonly setting: ConfigSetting; readonly current: string }) => {
@@ -50,28 +62,39 @@ const promptSettingValue = (request: { readonly setting: ConfigSetting; readonly
   const choices = settingChoices(setting);
   if (choices.length === 0) {
     const numberHint = setting.kind === "number" ? " (number)" : "";
-    return TerminalUI.optionalText({ message: `Value for ${setting.name}${numberHint}`, fallback: current });
+    return Effect.tryPromise({
+      try: () => TerminalUI.optionalText({ message: `Value for ${setting.name}${numberHint}`, fallback: current }),
+      catch: (error) => error,
+    });
   }
 
-  return TerminalUI.selectOne({
-    message: `Value for ${setting.name}`,
-    choices: choices.map((value) => ({
-      title: value === "" ? "(not set)" : value,
-      value,
-      description: value === current ? "current" : undefined,
-    })),
-    initial: choices.includes(current) ? current : choices[0],
+  return Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne({
+        message: `Value for ${setting.name}`,
+        choices: choices.map((value) => ({
+          title: value === "" ? "(not set)" : value,
+          value,
+          description: value === current ? "current" : undefined,
+        })),
+        initial: choices.includes(current) ? current : choices[0],
+      }),
+    catch: (error) => error,
   });
 };
 
 const pickAllOrOne = (request: { readonly message: string; readonly initial: "all" | "one" }) =>
-  TerminalUI.selectOne<"all" | "one">({
-    message: request.message,
-    choices: [
-      { title: "All settings", value: "all" },
-      { title: "One setting", value: "one" },
-    ],
-    initial: request.initial,
+  Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne<"all" | "one">({
+        message: request.message,
+        choices: [
+          { title: "All settings", value: "all" },
+          { title: "One setting", value: "one" },
+        ],
+        initial: request.initial,
+      }),
+    catch: (error) => error,
   });
 
 const runConfigShow = Effect.gen(function* () {
@@ -92,7 +115,7 @@ const runConfigSet = Effect.gen(function* () {
       const value = settingValueFromText({ setting, text });
       return withSettingValue({ config: current.config, key: setting.key, value });
     },
-    catch: (error) => new CliUsageError({ issue: String(error) }),
+    catch: (error) => createCliUsageError(String(error)),
   });
   const nextValue = formatSettingValue({ config: nextConfig, setting });
   yield* applyIfApproved({
@@ -107,7 +130,12 @@ const runConfigSet = Effect.gen(function* () {
     ],
     confirmMessage: "Apply this config change?",
     apply: saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }).pipe(
-      Effect.flatMap((owner) => TerminalUI.success(`${setting.label} → ${nextValue} (${owner})`)),
+      Effect.flatMap((owner) =>
+        Effect.tryPromise({
+          try: () => TerminalUI.success(`${setting.label} → ${nextValue} (${owner})`),
+          catch: (error) => error,
+        }),
+      ),
     ),
   });
 });
@@ -128,7 +156,9 @@ const runConfigReset = Effect.gen(function* () {
       ],
       confirmMessage: "Apply this config reset?",
       apply: saveConfig({ target, configuration: { _tag: "reset" } }).pipe(
-        Effect.zipRight(TerminalUI.success(`All ${scope} settings reset.`)),
+        Effect.zipRight(
+          Effect.tryPromise({ try: () => TerminalUI.success(`All ${scope} settings reset.`), catch: (error) => error }),
+        ),
       ),
     });
     return;
@@ -138,7 +168,7 @@ const runConfigReset = Effect.gen(function* () {
   const setting = yield* pickSetting("Setting to reset");
   const nextConfig = yield* Effect.try({
     try: () => withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
-    catch: (error) => new CliUsageError({ issue: String(error) }),
+    catch: (error) => createCliUsageError(String(error)),
   });
   const nextValue = formatSettingValue({ config: nextConfig, setting });
   yield* applyIfApproved({
@@ -153,21 +183,30 @@ const runConfigReset = Effect.gen(function* () {
     ],
     confirmMessage: "Apply this config reset?",
     apply: saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }).pipe(
-      Effect.zipRight(TerminalUI.success(`${setting.name} reset to ${nextValue}`)),
+      Effect.zipRight(
+        Effect.tryPromise({
+          try: () => TerminalUI.success(`${setting.name} reset to ${nextValue}`),
+          catch: (error) => error,
+        }),
+      ),
     ),
   });
 });
 
 export const runConfig = Effect.gen(function* () {
-  const action = yield* TerminalUI.selectOne<"show" | "set" | "reset" | "back">({
-    message: "Config",
-    choices: [
-      { title: "Show", value: "show", description: "inspect managed settings" },
-      { title: "Set", value: "set", description: "change one setting" },
-      { title: "Reset", value: "reset", description: "restore Schema defaults" },
-      { title: "Back", value: "back" },
-    ],
-    initial: "show",
+  const action = yield* Effect.tryPromise({
+    try: () =>
+      TerminalUI.selectOne<"show" | "set" | "reset" | "back">({
+        message: "Config",
+        choices: [
+          { title: "Show", value: "show", description: "inspect managed settings" },
+          { title: "Set", value: "set", description: "change one setting" },
+          { title: "Reset", value: "reset", description: "restore Schema defaults" },
+          { title: "Back", value: "back" },
+        ],
+        initial: "show",
+      }),
+    catch: (error) => error,
   });
   switch (action) {
     case "show":

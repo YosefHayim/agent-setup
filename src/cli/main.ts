@@ -11,7 +11,7 @@ import { Effect, ParseResult } from "effect";
 
 import { readPackageVersion } from "../install/package-root.js";
 import { catalogCommand } from "./catalog-command.js";
-import { CliUsageError } from "./cli-options.js";
+import { isCliUsageError } from "./cli-options.js";
 import { configCommand } from "./config-command.js";
 import { doctorCommand } from "./doctor-command.js";
 import { installCommand } from "./install-command.js";
@@ -37,10 +37,10 @@ const agentSetup = Command.make("agent-setup").pipe(
 
 const showCliFailure = (error: unknown) => {
   const exitCode =
-    ValidationError.isValidationError(error) || ParseResult.isParseError(error) || error instanceof CliUsageError
-      ? 2
-      : 1;
-  const presentation = ValidationError.isValidationError(error) ? Effect.void : TerminalUI.showError(error);
+    ValidationError.isValidationError(error) || ParseResult.isParseError(error) || isCliUsageError(error) ? 2 : 1;
+  const presentation = ValidationError.isValidationError(error)
+    ? Effect.void
+    : Effect.tryPromise({ try: () => TerminalUI.showError(error), catch: (error) => error });
   return presentation.pipe(
     Effect.zipRight(
       Effect.sync(() => {
