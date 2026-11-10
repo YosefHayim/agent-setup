@@ -3,6 +3,7 @@
 import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 import { type AgentDefinition, agentCatalog, agentIdSchema } from "../../catalog/agent-catalog.js";
 import { installedSkillSchema } from "../../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import { bytesEqual, hashBytes } from "../file-bytes.js";
 import { fileKindSchema, fileOwnerSchema, managedBlockOwnershipSchema, relativePathSchema } from "../ownership.js";
 import { stripFrontmatter, withCompleteFrontmatter } from "./skill-text.js";
@@ -106,7 +107,7 @@ const inspectManagedBlock = (bytes: Uint8Array): Either.Either<CurrentBlock, Ins
 };
 
 const instructionSkillSchema = Schema.Struct({
-  installedSkill: installedSkillSchema.annotations({
+  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
     description: "Catalog-owned installed skill rendered into the managed instruction block.",
   }),
   markdown: withCompleteFrontmatter(Schema.NonEmptyString).annotations({
@@ -219,7 +220,7 @@ const instructionFilePlanSchema = Schema.Union(
 export type InstructionFilePlan = Schema.Schema.Type<typeof instructionFilePlanSchema>;
 
 const presentInstructionSchema = Schema.TaggedStruct("present", {
-  agentIds: Schema.NonEmptyArray(agentIdSchema).annotations({
+  agentIds: Schema.NonEmptyArray(zodAsEffectSchema(agentIdSchema)).annotations({
     description: "Catalog-ordered agents that share the desired instruction path.",
   }),
   skills: Schema.NonEmptyArray(instructionSkillSchema).pipe(

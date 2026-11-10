@@ -22,12 +22,13 @@ import { installationDestinationSchema, receiptPath } from "../install/install-p
 import { preparedPackageSchema } from "../install/install-request.js";
 import { relativePathSchema } from "../install/ownership.js";
 import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } from "../install/receipt.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 
 export const healthRequestSchema = Schema.Struct({
   destination: installationDestinationSchema,
   preparedPackage: preparedPackageSchema,
   platform: Schema.Struct({ operatingSystem: Schema.Literal(...hostOperatingSystems) }),
-  agentEvidence: agentEvidenceSchema,
+  agentEvidence: zodAsEffectSchema(agentEvidenceSchema),
 }).annotations({
   description: "Complete read-only doctor request decoded before filesystem inspection.",
 });
@@ -76,11 +77,11 @@ const preparedRuntimeStatusSchema = Schema.Union(
 });
 
 const featureHealthSchema = Schema.Struct({
-  id: featureIdSchema,
+  id: zodAsEffectSchema(featureIdSchema),
   title: Schema.NonEmptyTrimmedString.annotations({
     description: "Catalog title for the installed feature.",
   }),
-  platform: featureDefinitionSchema.fields.platform,
+  platform: zodAsEffectSchema(featureDefinitionSchema.shape.platform),
   platformAvailable: Schema.Boolean.annotations({
     description: "Whether the observed host satisfies the catalog platform requirement.",
   }),
@@ -90,7 +91,7 @@ const featureHealthSchema = Schema.Struct({
 });
 
 const agentHealthSchema = Schema.Struct({
-  id: agentIdSchema,
+  id: zodAsEffectSchema(agentIdSchema),
   displayName: Schema.NonEmptyTrimmedString.annotations({
     description: "Catalog display name for the diagnosed agent.",
   }),
@@ -118,21 +119,21 @@ const discrepancySchema = Schema.Union(
   }),
   Schema.TaggedStruct("missingManagedConfig", {}),
   Schema.TaggedStruct("unsupportedFeaturePlatform", {
-    featureId: featureIdSchema,
-    platform: featureDefinitionSchema.fields.platform,
+    featureId: zodAsEffectSchema(featureIdSchema),
+    platform: zodAsEffectSchema(featureDefinitionSchema.shape.platform),
   }),
   Schema.TaggedStruct("missingPreparedRuntime", {
-    featureId: featureIdSchema,
+    featureId: zodAsEffectSchema(featureIdSchema),
     path: relativePathSchema,
   }),
   Schema.TaggedStruct("detectedAgentNotManaged", {
-    agentId: agentIdSchema,
+    agentId: zodAsEffectSchema(agentIdSchema),
   }),
   Schema.TaggedStruct("managedAgentNotDetected", {
-    agentId: agentIdSchema,
+    agentId: zodAsEffectSchema(agentIdSchema),
   }),
   Schema.TaggedStruct("missingFeatureDependency", {
-    featureId: featureIdSchema,
+    featureId: zodAsEffectSchema(featureIdSchema),
   }),
 ).annotations({
   description: "Read-only discrepancy that never grants repair or deletion authority.",

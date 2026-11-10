@@ -4,6 +4,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect, Either, Option, Schema, ParseResult as SchemaParseIssue } from "effect";
 
 import { addDependencies, featureIdSchema, retiredFeatureIds } from "../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { decodeStrictText, isNotFound } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { type OwnedFile, ownedFileSchema, pathsConflict } from "./ownership.js";
@@ -80,7 +81,7 @@ const withCurrentFeatureIds = (features: ReadonlyArray<string>) => {
 
 const featureListSchema = Schema.transform(
   Schema.Array(Schema.String),
-  Schema.Array(featureIdSchema).pipe(Schema.filter(receiptFeatureIssues)),
+  Schema.Array(zodAsEffectSchema(featureIdSchema)).pipe(Schema.filter(receiptFeatureIssues)),
   { strict: true, decode: withCurrentFeatureIds, encode: (features) => features },
 );
 

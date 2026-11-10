@@ -1,6 +1,7 @@
 import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
-import { agentDefinitionSchema } from "../../catalog/agent-catalog.js";
+import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
 import { installedSkillSchema } from "../../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import { hashBytes } from "../file-bytes.js";
 import {
   fileKindSchema,
@@ -24,13 +25,10 @@ class RuleFilePlanError extends Schema.TaggedError<RuleFilePlanError>()("RuleFil
   }
 }
 
-const ruleFileAgentSchema = Schema.Struct({
-  ...agentDefinitionSchema.fields,
-  target: agentDefinitionSchema.fields.target.members[1],
-});
+const ruleFileAgentSchema = zodAsEffectSchema(agentDefinitionSchema.extend({ target: agentTargetSchema.options[1] }));
 
 const ruleFileSkillSchema = Schema.Struct({
-  installedSkill: installedSkillSchema.annotations({
+  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
     description: "Catalog-owned installed skill identity used for the output filename.",
   }),
   markdown: withCompleteFrontmatter(Schema.String).pipe(
