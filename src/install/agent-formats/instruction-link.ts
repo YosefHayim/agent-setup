@@ -3,6 +3,7 @@
 import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
 import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
+import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import {
   fileKindSchema,
   fileOwnerSchema,

@@ -2,6 +2,7 @@
 
 import { Args, Command } from "@effect/cli";
 import { Effect, Option } from "effect";
+import { ZodError } from "zod";
 
 import {
   type Config,
@@ -13,8 +14,26 @@ import {
 } from "../config/config-schema.js";
 import { readConfig, resolveConfigTarget, saveConfig } from "../config/scope-config.js";
 import type { Scope } from "../install/receipt.js";
-import { confirmDestructive, formatOption, type OutputFormat, scopeOption, yesOption } from "./cli-options.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import {
+  CliUsageError,
+  confirmDestructive,
+  formatOption,
+  type OutputFormat,
+  scopeOption,
+  yesOption,
+} from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
+
+// A rejected setting value is bad usage (exit 2), shown as zod's own messages.
+const describeSettingRejection = (error: unknown): string => {
+  const isZodRejection = error instanceof ZodError;
+  if (isZodRejection) {
+    return joinZodIssueMessages(error);
+  }
+
+  return String(error);
+};
 
 type ConfigSetting = (typeof configSettings)[number];
 
@@ -79,11 +98,11 @@ const setCommand = Command.make(
       const current = yield* readConfig(args.scope);
       const value = yield* Effect.try({
         try: () => settingValueFromText({ setting, text: args.value }),
-        catch: (error) => error,
+        catch: (error) => new CliUsageError({ issue: describeSettingRejection(error) }),
       });
       const nextConfig = yield* Effect.try({
         try: () => withSettingValue({ config: current.config, key: setting.key, value }),
-        catch: (error) => error,
+        catch: (error) => new CliUsageError({ issue: describeSettingRejection(error) }),
       });
       const owner = yield* saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } });
       if (args.format === "text") {

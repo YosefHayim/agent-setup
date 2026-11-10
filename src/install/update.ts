@@ -92,7 +92,7 @@ export const update = (input: unknown) =>
     const featureIdsWithDependencies = dependencyCheck.featureIds;
     const isRefreshRequest = request.features._tag === "refresh";
     const missingId = isRefreshRequest
-      ? (request.features.ids.find((id) => !featureIdsWithDependencies.includes(id)) ?? null)
+      ? (request.features.ids.find((id) => !featureIdsWithDependencies.some((featureId) => featureId === id)) ?? null)
       : null;
     const isFeatureMissing = missingId !== null;
     if (isFeatureMissing) {
