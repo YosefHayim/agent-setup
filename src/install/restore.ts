@@ -100,11 +100,15 @@ const restoreInstructionLink = (target: RestoreTarget): Either.Either<FileChange
 
   return checkFormatRestoration(
     { ...target, format: "Native config" },
-    planInstructionLink({
-      agent,
-      desired: { _tag: "absent" },
-      currentFile: target.snapshot,
-      previousFile: { _tag: "owned", file },
+    Either.try({
+      try: () =>
+        planInstructionLink({
+          agent,
+          desired: { _tag: "absent" },
+          currentFile: target.snapshot,
+          previousFile: { _tag: "owned", file },
+        }),
+      catch: wrapAsInstallError,
     }),
   );
 };

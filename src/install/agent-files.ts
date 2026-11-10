@@ -227,7 +227,11 @@ const createInstructionLinkWrites = (input: AgentWritesRequest) =>
             previousReceipt: input.previousReceipt,
             filePath: agent.target.configPath,
             kind: "instructionLink",
-            plan: (files) => planInstructionLink({ agent, desired: { _tag: "present" }, ...files }),
+            plan: (files) =>
+              Either.try({
+                try: () => planInstructionLink({ agent, desired: { _tag: "present" }, ...files }),
+                catch: wrapAsInstallError,
+              }),
           })
         : Effect.succeed([]),
     );

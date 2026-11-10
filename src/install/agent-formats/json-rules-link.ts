@@ -22,7 +22,7 @@ interface JsonRulesLink {
   readonly currentBytes: Uint8Array | undefined;
   readonly configPath: string;
   readonly instructionPath: string;
-  readonly previousOwnership: JsonValuesOwnership | undefined;
+  readonly previousOwnership: JsonValuesOwnership | null;
 }
 
 interface JsonConfiguration {

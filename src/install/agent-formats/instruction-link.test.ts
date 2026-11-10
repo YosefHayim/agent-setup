@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { Either } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { findAgent } from "../../catalog/agent-catalog.js";
@@ -35,10 +34,18 @@ const request = (input: RequestInput = {}) => ({
   previousFile: input.previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: input.previousFile },
 });
 
-const plan = (input?: RequestInput): InstructionLinkPlan =>
-  Either.getOrThrowWith(planInstructionLink(request(input)), (error) => new Error(error.message));
+const plan = (input?: RequestInput): InstructionLinkPlan => planInstructionLink(request(input));
 
-const rejects = (input: unknown): boolean => Either.isLeft(planInstructionLink(input));
+// True only when planning throws an Error, which is how a rejected request shows up.
+const rejects = (input: unknown): boolean => {
+  try {
+    planInstructionLink(input);
+
+    return false;
+  } catch (error) {
+    return error instanceof Error;
+  }
+};
 
 const write = (input?: RequestInput) => {
   const operation = plan(input);
