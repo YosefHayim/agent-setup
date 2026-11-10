@@ -10,6 +10,7 @@ import { Effect, Either, Schema } from "effect";
 
 import { defaultConfig } from "../config/config-schema.js";
 import { installRequestSchema } from "../install/install-request.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { isBareArgv } from "./main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -151,9 +152,7 @@ describe("install request schema decoding smoke", () => {
         configuration: { _tag: "selected", config: defaultConfig },
       };
 
-      const decoded = yield* Schema.decodeUnknown(installRequestSchema, { onExcessProperty: "error" })(request).pipe(
-        Effect.either,
-      );
+      const decoded = yield* Schema.decodeUnknown(zodAsEffectSchema(installRequestSchema))(request).pipe(Effect.either);
 
       expect(Either.isRight(decoded)).toBe(true);
       if (Either.isRight(decoded)) {

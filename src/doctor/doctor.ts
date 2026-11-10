@@ -19,14 +19,14 @@ import { managedConfigPath, readConfigFile } from "../config/config-file.js";
 import { type Config, isConfig } from "../config/config-schema.js";
 import { hostOperatingSystems } from "../config/host-scan.js";
 import { installationDestinationSchema, receiptPath } from "../install/install-paths.js";
-import { preparedPackageSchema, toInstallError } from "../install/install-request.js";
+import { preparedPackageSchema, wrapAsInstallError } from "../install/install-request.js";
 import { relativePathSchema } from "../install/ownership.js";
 import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } from "../install/receipt.js";
 import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 
 export const healthRequestSchema = Schema.Struct({
-  destination: installationDestinationSchema,
-  preparedPackage: preparedPackageSchema,
+  destination: zodAsEffectSchema(installationDestinationSchema),
+  preparedPackage: zodAsEffectSchema(preparedPackageSchema),
   platform: Schema.Struct({ operatingSystem: Schema.Literal(...hostOperatingSystems) }),
   agentEvidence: zodAsEffectSchema(agentEvidenceSchema),
 }).annotations({
@@ -270,7 +270,7 @@ export const checkHealth = (input: unknown) =>
     });
     const receiptSnapshot = yield* Effect.tryPromise({
       try: () => readReceipt(path.join(request.destination.root, receiptPath)),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
     const receipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     const featureDiagnostics = receipt === undefined ? [] : yield* checkFeatureHealth(request, receipt);

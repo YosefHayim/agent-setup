@@ -16,7 +16,7 @@ import {
   previousWholeFile,
   readFileSnapshot,
 } from "./host-files.js";
-import { InstallError, type InstallRequest, toInstallError } from "./install-request.js";
+import { createInstallError, type InstallRequest, wrapAsInstallError } from "./install-request.js";
 import type { PreparedSkill } from "./package-files.js";
 import type { Receipt } from "./receipt.js";
 
@@ -60,7 +60,7 @@ const withExpectedCurrent = (
       const file = inspected.find((candidate) => candidate.path === write.file.path);
 
       return file === undefined
-        ? Either.left(new InstallError({ issue: `Missing inspected state for ${write.file.path}.` }))
+        ? Either.left(createInstallError(`Missing inspected state for ${write.file.path}.`))
         : checkFileChange({ ...write, expectedCurrent: expectedCurrent(file.snapshot) });
     }),
   );
@@ -90,7 +90,7 @@ const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
           skills: input.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
           previousFiles: files.map(({ path, previous }) => ({ path, previous })),
         }),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
 
     return yield* withExpectedCurrent(plan.writes, files);
@@ -119,7 +119,7 @@ const createRuleFileWrites = (input: FormatWritesRequest) =>
           skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
           previousFiles: files.map(({ path, previous }) => ({ path, previous })),
         }),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
 
     return yield* withExpectedCurrent(plan.writes, files);
@@ -142,9 +142,9 @@ const createSharedFileWrite = (input: {
     if (previousFile !== undefined && previousFile.kind._tag !== input.kind) {
       const label = input.kind === "instruction" ? "instruction" : "native config";
 
-      return yield* new InstallError({
-        issue: `Receipted ${label} path ${input.filePath} has an incompatible file kind.`,
-      });
+      return yield* Effect.fail(
+        createInstallError(`Receipted ${label} path ${input.filePath} has an incompatible file kind.`),
+      );
     }
 
     const plan = yield* Either.mapLeft(
@@ -152,7 +152,7 @@ const createSharedFileWrite = (input: {
         currentFile: snapshot,
         previousFile: previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: previousFile },
       }),
-      toInstallError,
+      wrapAsInstallError,
     );
     if (plan._tag === "none") {
       return [];
@@ -188,7 +188,7 @@ const createInstructionWrites = (input: AgentWritesRequest) =>
                 },
                 ...files,
               }),
-            catch: toInstallError,
+            catch: wrapAsInstallError,
           }),
       }),
     );

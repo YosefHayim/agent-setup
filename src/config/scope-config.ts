@@ -1,11 +1,11 @@
 // The one config.json reader and writer behind the `config` command.
 
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, type Schema } from "effect";
+import { Effect } from "effect";
 
 import { isNotFound } from "../install/file-bytes.js";
-import { type installationDestinationSchema, receiptPath } from "../install/install-paths.js";
-import { toInstallError } from "../install/install-request.js";
+import { type InstallationDestination, receiptPath } from "../install/install-paths.js";
+import { wrapAsInstallError } from "../install/install-request.js";
 import { preparePackage } from "../install/prepare-package.js";
 import { readReceipt, type Scope } from "../install/receipt.js";
 import { update } from "../install/update.js";
@@ -16,7 +16,7 @@ import { destinationForScope, type HostScan, scanHost } from "./host-scan.js";
 type ConfigTarget = {
   readonly scope: Scope;
   readonly host: HostScan;
-  readonly destination: Schema.Schema.Type<typeof installationDestinationSchema>;
+  readonly destination: InstallationDestination;
   readonly configPath: string;
 };
 
@@ -83,7 +83,7 @@ export const saveConfig = (request: { readonly target: ConfigTarget; readonly co
     const fileSystem = yield* FileSystem.FileSystem;
     const receiptSnapshot = yield* Effect.tryPromise({
       try: () => readReceipt(path.join(target.destination.root, receiptPath)),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
     if (receiptSnapshot._tag === "present") {
       if (receiptSnapshot.receipt.scope !== target.scope) {

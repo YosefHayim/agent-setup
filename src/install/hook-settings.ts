@@ -9,7 +9,7 @@ import { decodeStrictText } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { applicationOwner, checkFileChange, expectedCurrent, type FileSnapshot } from "./host-files.js";
 import { settingsPath } from "./install-paths.js";
-import { InstallError } from "./install-request.js";
+import { createInstallError } from "./install-request.js";
 import { appendJsonArrayItem, editJsonValue, hashJsonValue, removeJsonArrayItem } from "./json-edit.js";
 import type { HookEntriesOwnership, OwnedFile, OwnedHookEvent, OwnedJsonValue } from "./ownership.js";
 import { installedHookFile, registrationEntrypoint } from "./package-files.js";
@@ -31,14 +31,13 @@ const decodedSettingsSchema = Schema.Struct({ source: Schema.String, document: s
 
 export type DecodedSettings = Schema.Schema.Type<typeof decodedSettingsSchema>;
 
-const parseSettings = (source: string, label: string): Either.Either<SettingsDocument, InstallError> =>
+const parseSettings = (source: string, label: string): Either.Either<SettingsDocument, Error> =>
   Either.mapLeft(
     Schema.decodeUnknownEither(Schema.parseJson(settingsDocumentSchema), { onExcessProperty: "preserve" })(source),
-    (error) =>
-      new InstallError({ issue: `${label} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}` }),
+    (error) => createInstallError(`${label} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`),
   );
 
-export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSettings, InstallError> => {
+export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSettings, Error> => {
   if (snapshot._tag === "missing") {
     return Either.right({ source: "{}\n", document: {} });
   }
@@ -46,7 +45,7 @@ export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSet
   const textReply = decodeStrictText(snapshot.bytes, "settings.json");
   const isTextInvalid = textReply._tag === "invalid";
   if (isTextInvalid) {
-    return Either.left(new InstallError({ issue: textReply.message }));
+    return Either.left(createInstallError(textReply.message));
   }
 
   const jsonText = textReply.fileContents;
@@ -54,9 +53,7 @@ export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSet
   const isPropertyDuplicated = duplicateProperty !== undefined;
   if (isPropertyDuplicated) {
     return Either.left(
-      new InstallError({
-        issue: `settings.json contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`,
-      }),
+      createInstallError(`settings.json contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`),
     );
   }
 
@@ -69,16 +66,13 @@ const hookEventFromPointer = (pointer: string): string | undefined => {
   return pointer.startsWith("/hooks/") && !event.includes("/") ? event : undefined;
 };
 
-const decodeHookGroups = (value: unknown, event: string): Either.Either<ReadonlyArray<unknown>, InstallError> =>
-  Either.mapLeft(
-    Schema.decodeUnknownEither(Schema.Array(Schema.Unknown))(value),
-    () => new InstallError({ issue: `settings.json hook event ${event} must contain an array.` }),
+const decodeHookGroups = (value: unknown, event: string): Either.Either<ReadonlyArray<unknown>, Error> =>
+  Either.mapLeft(Schema.decodeUnknownEither(Schema.Array(Schema.Unknown))(value), () =>
+    createInstallError(`settings.json hook event ${event} must contain an array.`),
   );
 
 const changedEntriesError = (input: { filePath: string; pointer: string }) =>
-  new InstallError({
-    issue: `Receipted hook entries in ${input.filePath} ${input.pointer} changed after installation.`,
-  });
+  createInstallError(`Receipted hook entries in ${input.filePath} ${input.pointer} changed after installation.`);
 
 const hashGroups = (groups: ReadonlyArray<unknown>): ReadonlyArray<string> =>
   groups.map((group) => hashJsonValue(group));
@@ -89,7 +83,7 @@ const migrateLegacyEvent = (input: {
   filePath: string;
   value: OwnedJsonValue;
   document: SettingsDocument;
-}): Either.Either<OwnedHookEvent, InstallError> => {
+}): Either.Either<OwnedHookEvent, Error> => {
   const pointer = input.value.pointer;
   const event = hookEventFromPointer(pointer);
   const current = event === undefined ? undefined : input.document.hooks?.[event];
@@ -98,7 +92,7 @@ const migrateLegacyEvent = (input: {
   }
 
   const previous = input.value.previous;
-  const userGroups: Either.Either<ReadonlyArray<unknown>, InstallError> = previous._tag === "value"
+  const userGroups: Either.Either<ReadonlyArray<unknown>, Error> = previous._tag === "value"
     ? decodeHookGroups(previous.value, event)
     : Either.right([]);
 
@@ -126,7 +120,7 @@ const migrateLegacyEvent = (input: {
 const previousHookEntries = (input: {
   file: OwnedFile;
   document: SettingsDocument;
-}): Either.Either<HookEntriesOwnership, InstallError> => {
+}): Either.Either<HookEntriesOwnership, Error> => {
   const ownership = input.file.ownership;
   switch (ownership._tag) {
     case "hookEntries":
@@ -151,9 +145,7 @@ const previousHookEntries = (input: {
     case "managedBlock":
     case "yamlSequenceValue":
       return Either.left(
-        new InstallError({
-          issue: `Receipted settings entry ${input.file.path} has invalid ownership ${ownership._tag}.`,
-        }),
+        createInstallError(`Receipted settings entry ${input.file.path} has invalid ownership ${ownership._tag}.`),
       );
   }
 };
@@ -178,7 +170,7 @@ const validateOwnedEntries = (input: {
   filePath: string;
   ownership: HookEntriesOwnership | undefined;
   document: SettingsDocument;
-}): Either.Either<void, InstallError> => {
+}): Either.Either<void, Error> => {
   const changed = input.ownership?.events.find((event) => !ownedEntriesPresent({ event, document: input.document }));
 
   return changed === undefined
@@ -201,9 +193,9 @@ const isExtraOccurrence = (input: {
 const applyEdits = <Item>(input: {
   source: string;
   items: ReadonlyArray<Item>;
-  edit: (source: string, item: Item) => Either.Either<string, InstallError>;
-}): Either.Either<string, InstallError> =>
-  input.items.reduce<Either.Either<string, InstallError>>(
+  edit: (source: string, item: Item) => Either.Either<string, Error>;
+}): Either.Either<string, Error> =>
+  input.items.reduce<Either.Either<string, Error>>(
     (edited, item) => Either.flatMap(edited, (source) => input.edit(source, item)),
     Either.right(input.source),
   );
@@ -254,7 +246,7 @@ const ownedHookEvent = (plan: HookEventPlan): ReadonlyArray<OwnedHookEvent> => {
 };
 
 // Removes agent-setup's stale entries and appends its new ones; every other entry in the array keeps its bytes.
-const editHookEvent = (input: { source: string; plan: HookEventPlan }): Either.Either<string, InstallError> => {
+const editHookEvent = (input: { source: string; plan: HookEventPlan }): Either.Either<string, Error> => {
   const { event, current, owned, desired } = input.plan;
   const path = ["hooks", event];
   if (current === undefined) {
@@ -311,7 +303,7 @@ type HookSettingsEdit = {
 const removeEmptyCreatedHooks = (input: {
   source: string;
   ownsHooksContainer: boolean;
-}): Either.Either<{ source: string; document: SettingsDocument }, InstallError> => {
+}): Either.Either<{ source: string; document: SettingsDocument }, Error> => {
   const document = parseSettings(input.source, "Generated settings.json");
   if (Either.isLeft(document)) {
     return Either.left(document.left);
@@ -381,7 +373,7 @@ const editHookSettings = (input: {
   previous: HookEntriesOwnership | undefined;
   desiredGroups: ReadonlyMap<string, ReadonlyArray<ManagedHookGroup>>;
   installedHooksFolder: string;
-}): Either.Either<HookSettingsEdit, InstallError> => {
+}): Either.Either<HookSettingsEdit, Error> => {
   const document = input.decoded.document;
   const ownedEntries = validateOwnedEntries({ filePath: input.filePath, ownership: input.previous, document });
   if (Either.isLeft(ownedEntries)) {
@@ -505,7 +497,7 @@ export const planSettings = (input: {
   previousFile: OwnedFile | undefined;
   desiredGroups: ReadonlyMap<string, ReadonlyArray<ManagedHookGroup>>;
   installedHooksFolder: string;
-}): Either.Either<FileChange | undefined, InstallError> => {
+}): Either.Either<FileChange | undefined, Error> => {
   const filePath = input.filePath === undefined ? settingsPath : input.filePath;
   const previousFile = input.previousFile;
   if (
@@ -515,15 +507,15 @@ export const planSettings = (input: {
       previousFile.owner._tag !== "application")
   ) {
     return Either.left(
-      new InstallError({ issue: "Receipted settings entry must keep its exact path, kind, and application owner." }),
+      createInstallError("Receipted settings entry must keep its exact path, kind, and application owner."),
     );
   }
 
   if (previousFile !== undefined && input.snapshot._tag === "missing") {
-    return Either.left(new InstallError({ issue: "Receipted settings.json was removed after installation." }));
+    return Either.left(createInstallError("Receipted settings.json was removed after installation."));
   }
 
-  const previous: Either.Either<HookEntriesOwnership | undefined, InstallError> =
+  const previous: Either.Either<HookEntriesOwnership | undefined, Error> =
     previousFile === undefined
       ? Either.right(undefined)
       : previousHookEntries({ file: previousFile, document: input.decoded.document });
@@ -583,16 +575,14 @@ export const restoreSettings = (input: {
   file: OwnedFile;
   snapshot: FileSnapshot;
   installedHooksFolder: string;
-}): Either.Either<FileChange, InstallError> => {
+}): Either.Either<FileChange, Error> => {
   if (input.file.kind._tag !== "settings" || input.file.owner._tag !== "application") {
-    return Either.left(
-      new InstallError({ issue: `Settings restoration for ${input.file.path} has invalid ownership.` }),
-    );
+    return Either.left(createInstallError(`Settings restoration for ${input.file.path} has invalid ownership.`));
   }
 
   if (input.snapshot._tag === "missing") {
     return Either.left(
-      new InstallError({ issue: `Receipted settings file ${input.file.path} was removed after installation.` }),
+      createInstallError(`Receipted settings file ${input.file.path} was removed after installation.`),
     );
   }
 
