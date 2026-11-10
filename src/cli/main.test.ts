@@ -18,7 +18,8 @@ const CLI_TEST_TIMEOUT = 75_000;
 // Async on purpose: a synchronous spawn blocks the vitest worker long enough for its RPC calls to time out.
 const runCli = (argumentList: ReadonlyArray<string>, environment: NodeJS.ProcessEnv = {}) =>
   new Promise<{ readonly stdout: string; readonly exitCode: number }>((fulfill) => {
-    const child = spawn(process.execPath, ["--import", "tsx", CLI_LINE, ...argumentList], {
+    // The source condition resolves #src imports to the TypeScript files, so these tests need no build.
+    const child = spawn(process.execPath, ["--conditions=source", "--import", "tsx", CLI_LINE, ...argumentList], {
       cwd: REPO_ROOT,
       timeout: 60_000,
       stdio: ["ignore", "pipe", "ignore"],

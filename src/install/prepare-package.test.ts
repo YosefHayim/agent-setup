@@ -42,6 +42,7 @@ describe("preparePackage", () => {
 
   it.skipIf(!packageIsBuilt)(
     "prepares runtime entrypoints and commands whose imports resolve inside the prepared tree",
+    { timeout: 30_000 },
     async () => {
       const prepared = await preparePackage();
       expect(prepared.root.endsWith("/dist/prepared") || prepared.root.endsWith("\\dist\\prepared")).toBe(true);
@@ -76,6 +77,5 @@ describe("preparePackage", () => {
         rmSync(hookHome, { recursive: true, force: true });
       }
     },
-    { timeout: 30_000 },
   );
 });
