@@ -1,22 +1,29 @@
-import { isRecord } from "./json-lines.js";
+import { isPlainObject } from "./json-lines.js";
 
 // Claude Code names the shell command "command"; Codex names it "cmd".
-export const shellCommandOf = (hookInput: unknown): string => {
-  if (!isRecord(hookInput) || !isRecord(hookInput.tool_input)) {
+export const readShellCommand = (hookDetails: unknown): string => {
+  const toolDetails = isPlainObject(hookDetails) ? hookDetails.tool_input : null;
+  const isToolDetailsMissing = !isPlainObject(toolDetails);
+  if (isToolDetailsMissing) {
     return "";
   }
 
-  const { command, cmd } = hookInput.tool_input;
-  if (typeof command === "string") {
+  const { command, cmd } = toolDetails;
+
+  const isCommandString = typeof command === "string";
+  if (isCommandString) {
     return command;
   }
 
-  return typeof cmd === "string" ? cmd : "";
+  const isCommandFieldString = typeof cmd === "string";
+  return isCommandFieldString ? cmd : "";
 };
 
-export const startFolderOf = (hookInput: unknown): string => {
-  if (isRecord(hookInput) && typeof hookInput.cwd === "string" && hookInput.cwd !== "") {
-    return hookInput.cwd;
+export const startFolderOf = (hookDetails: unknown): string => {
+  const cwd = isPlainObject(hookDetails) ? hookDetails.cwd : null;
+  const hasWorkingFolder = typeof cwd === "string" && cwd !== "";
+  if (hasWorkingFolder) {
+    return cwd;
   }
 
   return process.cwd();

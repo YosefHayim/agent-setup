@@ -4,10 +4,10 @@ import path from "node:path";
 
 import type { LeftoverProcess } from "./leftover-process-decision.js";
 
-export const leftoverStateFolder = (): string => path.join(os.homedir(), ".local", "state", "agent-setup");
+export const readLeftoverStorageFolder = (): string => path.join(os.homedir(), ".local", "state", "agent-setup");
 
 export const writeStoppedProcesses = (stoppedProcesses: ReadonlyArray<LeftoverProcess>): void => {
-  const logFile = path.join(leftoverStateFolder(), "leftover-process-cleanup.log");
+  const logFile = path.join(readLeftoverStorageFolder(), "leftover-process-cleanup.log");
   const stoppedAt = new Date().toISOString();
   const lines = stoppedProcesses.map(
     (stopped) =>

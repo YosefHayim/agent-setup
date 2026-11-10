@@ -1,5 +1,3 @@
-// Pure policy: which repo a session belongs to, given how often each repo appeared in its work.
-
 import type { SessionEvidence } from "../session-evidence.js";
 
 export type RepoScore = {
@@ -34,7 +32,7 @@ const MAX_HOME_SHARE_WHEN_MOVING = 0.15;
 
 export const scoreSession = (request: {
   readonly evidence: SessionEvidence;
-  readonly folderRepoName: string | undefined;
+  readonly folderRepoName: string | null;
 }): ReadonlyArray<RepoScore> => {
   const weighted = new Map<string, number>();
   for (const [repoName, hits] of request.evidence.pathHits) {
@@ -43,16 +41,19 @@ export const scoreSession = (request: {
   for (const [repoName, hits] of request.evidence.promptHits) {
     weighted.set(repoName, (weighted.get(repoName) || 0) + hits * PROMPT_WEIGHT);
   }
-  if (request.folderRepoName) {
+
+  const hasFolderRepoName = request.folderRepoName;
+  if (hasFolderRepoName) {
     weighted.set(request.folderRepoName, (weighted.get(request.folderRepoName) || 0) + FOLDER_NAME_WEIGHT);
   }
 
   const total = [...weighted.values()].reduce((sum, score) => sum + score, 0);
+  const hasNoTotal = total === 0;
   return [...weighted]
     .map(([repoName, score]) => ({
       repoName,
       score,
-      share: total === 0 ? 0 : score / total,
+      share: hasNoTotal ? 0 : score / total,
       pathHits: request.evidence.pathHits.get(repoName) || 0,
     }))
     .sort((left, right) => right.score - left.score);
@@ -60,7 +61,7 @@ export const scoreSession = (request: {
 
 // Repos named for deletion count as one owner, so a session split between a project and its renamed predecessor
 // still belongs to the deleted project.
-export const deletedReposDominate = (request: {
+export const isDeletedReposDominate = (request: {
   readonly scores: ReadonlyArray<RepoScore>;
   readonly deletedRepoNames: ReadonlySet<string>;
 }): boolean => {
@@ -73,28 +74,35 @@ export const deletedReposDominate = (request: {
 
 export const decideRehome = (request: {
   readonly scores: ReadonlyArray<RepoScore>;
-  /** The repo the session already lives in, or undefined for a generic folder such as ~/Desktop/Code. */
+  /** The repo the session already lives in, or null for a generic folder such as ~/Desktop/Code. */
   readonly homeRepoName: string | undefined;
 }): RehomeDecision => {
   const [top] = request.scores;
   const total = request.scores.reduce((sum, repoScore) => sum + repoScore.score, 0);
-  if (!top) {
+
+  const hasNoTopRepo = !top;
+  if (hasNoTopRepo) {
     return { _tag: "noSignal" };
   }
 
-  if (top.repoName === request.homeRepoName) {
+  const isTopHomeRepo = top.repoName === request.homeRepoName;
+  if (isTopHomeRepo) {
     return { _tag: "stay", repoName: top.repoName };
   }
 
-  if (request.homeRepoName === undefined) {
+  const isRequestHomeRepoNameMissing = request.homeRepoName == null;
+  if (isRequestHomeRepoNameMissing) {
     const enoughSignal = total >= MIN_SCORE || (total >= MIN_SCORE_FROM_GENERIC && top.pathHits > 0);
-    return enoughSignal && top.share >= MOVE_FROM_GENERIC_SHARE
+    const isGenericMove = enoughSignal && top.share >= MOVE_FROM_GENERIC_SHARE;
+    return isGenericMove
       ? { _tag: "move", repoName: top.repoName, share: top.share }
       : { _tag: "uncertain", candidates: request.scores.slice(0, 3) };
   }
 
   const homeShare = request.scores.find((repoScore) => repoScore.repoName === request.homeRepoName)?.share || 0;
-  return total >= MIN_SCORE && top.share >= MOVE_FROM_REPO_SHARE && homeShare <= MAX_HOME_SHARE_WHEN_MOVING
+  const isMovingFromRepo =
+    total >= MIN_SCORE && top.share >= MOVE_FROM_REPO_SHARE && homeShare <= MAX_HOME_SHARE_WHEN_MOVING;
+  return isMovingFromRepo
     ? { _tag: "move", repoName: top.repoName, share: top.share }
     : { _tag: "stay", repoName: request.homeRepoName };
 };

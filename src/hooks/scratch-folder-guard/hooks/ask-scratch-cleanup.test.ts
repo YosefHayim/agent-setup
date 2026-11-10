@@ -17,10 +17,10 @@ const createHomeRoot = (): string => {
   return homeRoot;
 };
 
-const claudeSessionFolder = (homeRoot: string) =>
+const readClaudeSessionFolder = (homeRoot: string) =>
   path.join(homeRoot, "claude-scratch", `claude-${process.getuid?.()}`, "-Users-me-repo", sessionId);
 
-const codexThreadFolder = (homeRoot: string) => path.join(homeRoot, ".codex", "scratchpad", threadId);
+const readCodexThreadFolder = (homeRoot: string) => path.join(homeRoot, ".codex", "scratchpad", threadId);
 
 const writeScratchFile = (folder: string) => {
   mkdirSync(folder, { recursive: true });
@@ -85,7 +85,7 @@ afterEach(() => {
 describe("askScratchCleanup process boundary", () => {
   it("asks Claude Code through additionalContext, naming the scratchpad and the cleanup command", () => {
     const homeRoot = createHomeRoot();
-    const scratchpad = path.join(claudeSessionFolder(homeRoot), "scratchpad");
+    const scratchpad = path.join(readClaudeSessionFolder(homeRoot), "scratchpad");
     writeScratchFile(scratchpad);
 
     const execution = runClaudeHook({
@@ -106,7 +106,7 @@ describe("askScratchCleanup process boundary", () => {
 
   it("asks an interactive Codex thread by continuing its turn", () => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(codexThreadFolder(homeRoot));
+    writeScratchFile(readCodexThreadFolder(homeRoot));
     const rolloutFile = writeRollout({ homeRoot, source: "cli" });
 
     const execution = runCodexHook({ homeRoot, rolloutFile });
@@ -114,7 +114,7 @@ describe("askScratchCleanup process boundary", () => {
     expect(execution.status).toBe(0);
     expect(JSON.parse(execution.stdout)).toEqual({
       decision: "block",
-      reason: expect.stringContaining(`- ${codexThreadFolder(homeRoot)}\n`),
+      reason: expect.stringContaining(`- ${readCodexThreadFolder(homeRoot)}\n`),
     });
   });
 
@@ -122,11 +122,11 @@ describe("askScratchCleanup process boundary", () => {
     ["the turn is already continuing after a Stop hook", { stop_hook_active: true }],
     ["a background task is still in flight", { background_tasks: [{ id: "task-1", status: "running" }] }],
     ["a wakeup is scheduled", { session_crons: [{ id: "cron-1" }] }],
-  ])("stays quiet in Claude Code when %s", (_situation, stopInput) => {
+  ])("stays quiet in Claude Code when %s", (_situation, stopDetails) => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(path.join(claudeSessionFolder(homeRoot), "scratchpad"));
+    writeScratchFile(path.join(readClaudeSessionFolder(homeRoot), "scratchpad"));
 
-    const execution = runClaudeHook({ homeRoot, stopInput });
+    const execution = runClaudeHook({ homeRoot, stopInput: stopDetails });
 
     expect(execution.status).toBe(0);
     expect(execution.stdout).toBe("");
@@ -137,7 +137,7 @@ describe("askScratchCleanup process boundary", () => {
     ["when Claude Code does not say whether a person is at the session", ""],
   ])("stays quiet in Claude Code %s", (_situation, attendedFlag) => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(path.join(claudeSessionFolder(homeRoot), "scratchpad"));
+    writeScratchFile(path.join(readClaudeSessionFolder(homeRoot), "scratchpad"));
 
     const execution = runHook({
       homeRoot,
@@ -152,8 +152,8 @@ describe("askScratchCleanup process boundary", () => {
 
   it("stays quiet when only the harness's task output holds files, or the scratchpad holds empty folders", () => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(path.join(claudeSessionFolder(homeRoot), "tasks"));
-    mkdirSync(path.join(claudeSessionFolder(homeRoot), "scratchpad", "emptied"), { recursive: true });
+    writeScratchFile(path.join(readClaudeSessionFolder(homeRoot), "tasks"));
+    mkdirSync(path.join(readClaudeSessionFolder(homeRoot), "scratchpad", "emptied"), { recursive: true });
 
     const execution = runClaudeHook({ homeRoot, stopInput: { stop_hook_active: false } });
 
@@ -164,10 +164,10 @@ describe("askScratchCleanup process boundary", () => {
   it.each([
     ["a headless exec thread", "exec"],
     ["a subagent thread", { subagent: { thread_spawn: { depth: 1 } } }],
-  ])("stays quiet in Codex for %s", (_situation, source) => {
+  ])("stays quiet in Codex for %s", (_situation, origin) => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(codexThreadFolder(homeRoot));
-    const rolloutFile = writeRollout({ homeRoot, source });
+    writeScratchFile(readCodexThreadFolder(homeRoot));
+    const rolloutFile = writeRollout({ homeRoot, source: origin });
 
     const execution = runCodexHook({ homeRoot, rolloutFile });
 
@@ -177,7 +177,7 @@ describe("askScratchCleanup process boundary", () => {
 
   it("stays quiet in Codex when the thread has no rollout to tell how it was started", () => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(codexThreadFolder(homeRoot));
+    writeScratchFile(readCodexThreadFolder(homeRoot));
 
     const execution = runCodexHook({ homeRoot, rolloutFile: null });
 
@@ -187,7 +187,7 @@ describe("askScratchCleanup process boundary", () => {
 
   it("fails open with clean output on malformed input or a session ID that is not a UUID", () => {
     const homeRoot = createHomeRoot();
-    writeScratchFile(path.join(claudeSessionFolder(homeRoot), "scratchpad"));
+    writeScratchFile(path.join(readClaudeSessionFolder(homeRoot), "scratchpad"));
 
     const malformed = runHook({ homeRoot, agentId: "claude-code", attendedFlag: "1", hookInput: "{" });
     const foreignId = runHook({

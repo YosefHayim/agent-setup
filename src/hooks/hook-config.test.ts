@@ -9,14 +9,14 @@ import { describe, expect, it } from "vitest";
 import { managedConfigPath } from "../config/config-file.js";
 import { defaultConfig } from "../config/config-schema.js";
 import { hooksPath } from "../install/install-paths.js";
-import { decodeHookConfig } from "./hook-config.js";
+import { decodeHookSettings } from "./hook-config.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const configModuleSource = fileURLToPath(new URL("./hook-config.ts", import.meta.url));
+const settingsModuleOrigin = fileURLToPath(new URL("./hook-config.ts", import.meta.url));
 
 describe("hook config resolution", () => {
   it("keeps the dependency-free hook defaults aligned with application defaults", () => {
-    const hookDefaults = decodeHookConfig({});
+    const hookDefaults = decodeHookSettings({});
     for (const [field, value] of Object.entries(hookDefaults)) {
       expect(value).toEqual(Object.getOwnPropertyDescriptor(defaultConfig, field)?.value);
     }
@@ -28,22 +28,26 @@ describe("hook config resolution", () => {
     try {
       // Install copies the shared files in src/hooks into each feature's lib/ under hooksPath.
       const installedModule = path.join(installRoot, hooksPath, "scratch-folder-guard", "lib", "hook-config.ts");
-      const installedConfig = path.join(installRoot, managedConfigPath);
+      const installedSettings = path.join(installRoot, managedConfigPath);
       mkdirSync(path.dirname(installedModule), { recursive: true });
-      copyFileSync(configModuleSource, installedModule);
+      copyFileSync(settingsModuleOrigin, installedModule);
       // Installed hooks are .js that Node detects as ES modules. On Node 22, tsx loads a .ts copy outside any
       // package as CommonJS and drops its named exports, so mark the temp tree as ESM.
       writeFileSync(path.join(installRoot, "package.json"), `${JSON.stringify({ type: "module" })}\n`);
-      writeFileSync(installedConfig, `${JSON.stringify({ debugLogs: true, sessionRehomeRoots: ["Work"] })}\n`);
+      writeFileSync(installedSettings, `${JSON.stringify({ debugLogs: true, sessionRehomeRoots: ["Work"] })}\n`);
 
-      const printConfig = [
+      const printSettings = [
         `const { installRoot, readConfig } = await import(${JSON.stringify(pathToFileURL(installedModule).href)});`,
         "process.stdout.write(JSON.stringify({ installRoot, config: readConfig() }));",
       ].join("\n");
-      const execution = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", printConfig], {
-        cwd: packageRoot,
-        encoding: "utf8",
-      });
+      const execution = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "--input-type=module", "--eval", printSettings],
+        {
+          cwd: packageRoot,
+          encoding: "utf8",
+        },
+      );
 
       expect(execution.stderr).toBe("");
       expect(execution.status).toBe(0);
@@ -58,16 +62,16 @@ describe("hook config resolution", () => {
   });
 
   it("keeps the default for a field whose value has the wrong shape", () => {
-    const config = decodeHookConfig({ debugLogs: "yes" });
-    expect(config.debugLogs).toBe(defaultConfig.debugLogs);
+    const settings = decodeHookSettings({ debugLogs: "yes" });
+    expect(settings.debugLogs).toBe(defaultConfig.debugLogs);
   });
 
   it("trims root folders and drops blank ones, which would scan the whole home folder", () => {
-    const config = decodeHookConfig({
+    const hookSettings = decodeHookSettings({
       sessionRehomeRoots: ["", "  ", "Desktop/Code", 7],
       diskCleanupRoots: [" ", " Projects "],
     });
-    expect(config.sessionRehomeRoots).toEqual(["Desktop/Code"]);
-    expect(config.diskCleanupRoots).toEqual(["Projects"]);
+    expect(hookSettings.sessionRehomeRoots).toEqual(["Desktop/Code"]);
+    expect(hookSettings.diskCleanupRoots).toEqual(["Projects"]);
   });
 });

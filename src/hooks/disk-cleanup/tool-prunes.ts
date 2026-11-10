@@ -17,38 +17,43 @@ const TOOL_PRUNES: ReadonlyArray<ToolPrune> = [
   { tool: "uv", pruneArguments: ["cache", "prune"] },
 ];
 
-const toolCall = (request: {
+const readToolCall = (request: {
   readonly tool: string;
   readonly toolArguments: ReadonlyArray<string>;
   readonly timeoutMilliseconds: number;
 }) => spawnSync(request.tool, request.toolArguments, { stdio: "ignore", timeout: request.timeoutMilliseconds });
 
 const isReady = (prune: ToolPrune): boolean => {
-  const readyCall = toolCall({
+  const readyCall = readToolCall({
     tool: prune.tool,
     toolArguments: READY_ARGUMENTS,
     timeoutMilliseconds: READY_TIMEOUT_MILLISECONDS,
   });
-  return readyCall.error === undefined && readyCall.status === 0;
+  return readyCall.error == null && readyCall.status === 0;
 };
 
 const runPrune = (request: { readonly prune: ToolPrune; readonly dryRun: boolean }): ReadonlyArray<string> => {
   const { prune } = request;
   const command = [prune.tool, ...prune.pruneArguments].join(" ");
-  if (!isReady(prune)) {
+
+  const isPruneNotReady = !isReady(prune);
+  if (isPruneNotReady) {
     return [];
   }
 
-  if (request.dryRun) {
+  const isDryRun = request.dryRun;
+  if (isDryRun) {
     return [reportLine({ action: "would run", detail: "tool prune", target: command })];
   }
 
-  const pruneCall = toolCall({
+  const pruneCall = readToolCall({
     tool: prune.tool,
     toolArguments: prune.pruneArguments,
     timeoutMilliseconds: PRUNE_TIMEOUT_MILLISECONDS,
   });
-  const action = pruneCall.error === undefined && pruneCall.status === 0 ? "ran" : "failed";
+
+  const hasPruneSucceeded = pruneCall.error == null && pruneCall.status === 0;
+  const action = hasPruneSucceeded ? "ran" : "failed";
   return [reportLine({ action, detail: "tool prune", target: command })];
 };
 

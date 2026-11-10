@@ -1,6 +1,3 @@
-// One pass over Claude Code sessions and Codex threads: decide where each belongs, then move, keep, or delete it
-// and write the decision to the ledger.
-
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -8,29 +5,29 @@ import { createPathMatcher } from "../path-matcher.js";
 import { type RepoMatchers, readClaudeEvidence, readCodexEvidence, type SessionEvidence } from "../session-evidence.js";
 import {
   type ClaudeSession,
-  claudeSessionIsLive,
   deleteClaudeSessions,
   findClaudeSession,
+  isClaudeSessionLive,
   listClaudeSessions,
   moveClaudeSession,
   removeEmptyProjectFolder,
 } from "./claude-sessions.js";
 import {
   type CodexThread,
-  codexThreadIsLive,
   deleteCodexThread,
+  isCodexThreadLive,
   listCodexThreads,
   moveCodexThread,
 } from "./codex-threads.js";
-import { createKeywordMatcher, type Repo, repoContaining, repoNamedByFolder } from "./local-repos.js";
-import { decideRehome, deletedReposDominate, type RepoScore, scoreSession } from "./rehome-decision.js";
+import { createKeywordMatcher, type Repo, readRepoContaining, readRepoNamedByFolder } from "./local-repos.js";
+import { decideRehome, isDeletedReposDominate, type RepoScore, scoreSession } from "./rehome-decision.js";
 import {
   type LedgerDecision,
-  type LedgerEntry,
-  ledgerEntryFor,
+  type LedgerLine,
   type RehomeAgent,
   readLedger,
-  recordLedgerEntry,
+  readLedgerLine,
+  saveLedgerLine,
 } from "./rehome-ledger.js";
 
 export type SweepRequest = {
@@ -69,14 +66,14 @@ export type SessionPlan = {
 };
 
 // The ledger and matchers are built once per sweep and shared by every session.
-type SweepContext = SweepRequest & {
+type SweepScope = SweepRequest & {
   readonly matchers: RepoMatchers;
-  readonly ledger: ReadonlyMap<string, LedgerEntry>;
+  readonly ledger: ReadonlyMap<string, LedgerLine>;
 };
 
 type Placement = Pick<SessionPlan, "action" | "toFolder" | "repoName" | "share" | "candidates">;
 
-const placement = (request: Partial<Placement> & Pick<Placement, "action">): Placement => ({
+const readPlacement = (request: Partial<Placement> & Pick<Placement, "action">): Placement => ({
   toFolder: "",
   repoName: "",
   share: 0,
@@ -89,83 +86,95 @@ const placement = (request: Partial<Placement> & Pick<Placement, "action">): Pla
 const isOwnCheckout = (request: { readonly repo: Repo; readonly folder: string }): boolean =>
   request.folder === request.repo.root || existsSync(path.join(request.folder, ".git"));
 
-const assignedRepoFor = (request: { readonly sweep: SweepContext; readonly sessionId: string }): Repo | undefined => {
+const readAssignedRepo = (request: { readonly sweep: SweepScope; readonly sessionId: string }): Repo | null => {
   const assignedName = [...request.sweep.assignments].find(([idPrefix]) => request.sessionId.startsWith(idPrefix))?.[1];
-  return request.sweep.repos.find((repo) => repo.name === assignedName);
+  return request.sweep.repos.find((repo) => repo.name === assignedName) ?? null;
 };
 
 const placeSession = (request: {
-  readonly sweep: SweepContext;
+  readonly sweep: SweepScope;
   readonly sessionId: string;
   readonly homeFolder: string;
   readonly evidence: SessionEvidence;
 }): Placement => {
   const { repos, deletedRepoNames } = request.sweep;
-  const assigned = assignedRepoFor(request);
-  if (assigned) {
-    return placement({ action: "move", toFolder: assigned.root, repoName: assigned.name, share: 1 });
+
+  const isAssigned = readAssignedRepo(request);
+  if (isAssigned) {
+    return readPlacement({ action: "move", toFolder: isAssigned.root, repoName: isAssigned.name, share: 1 });
   }
 
-  const homeRepo = repoContaining({ repos, folder: request.homeFolder });
-  const folderRepo = homeRepo ? undefined : repoNamedByFolder({ repos, folder: request.homeFolder });
-  const scores = scoreSession({ evidence: request.evidence, folderRepoName: folderRepo?.name });
+  const homeRepo = readRepoContaining({ repos, folder: request.homeFolder });
+
+  const isHomeRepoMissing = homeRepo == null;
+  const folderRepo = isHomeRepoMissing ? readRepoNamedByFolder({ repos, folder: request.homeFolder }) : null;
+  const scores = scoreSession({ evidence: request.evidence, folderRepoName: folderRepo?.name ?? null });
   const decision = decideRehome({ scores, homeRepoName: homeRepo?.name });
-  const ownerName =
-    decision._tag === "move" || decision._tag === "stay" ? decision.repoName : (homeRepo || folderRepo)?.name;
-  const deletedOwner = ownerName && deletedRepoNames.has(ownerName) ? ownerName : undefined;
-  const dominantDeleted = deletedReposDominate({ scores, deletedRepoNames })
+  const isDecisionMoveOrStay = decision._tag === "move" || decision._tag === "stay";
+  const ownerName = isDecisionMoveOrStay ? decision.repoName : (homeRepo || folderRepo)?.name;
+
+  const isOwnerDeleted = ownerName && deletedRepoNames.has(ownerName);
+  const deletedOwner = isOwnerDeleted ? ownerName : undefined;
+
+  const dominantDeleted = isDeletedReposDominate({ scores, deletedRepoNames })
     ? scores.find((repoScore) => deletedRepoNames.has(repoScore.repoName))?.repoName
     : undefined;
-  if (deletedOwner || dominantDeleted) {
-    return placement({ action: "delete", repoName: deletedOwner || dominantDeleted, candidates: scores.slice(0, 3) });
+
+  const isDeletedOwnerOrDominant = deletedOwner || dominantDeleted;
+  if (isDeletedOwnerOrDominant) {
+    return readPlacement({
+      action: "delete",
+      repoName: deletedOwner || dominantDeleted,
+      candidates: scores.slice(0, 3),
+    });
   }
 
   switch (decision._tag) {
     case "move": {
       const target = repos.find((repo) => repo.name === decision.repoName);
-      return placement({
+      return readPlacement({
         action: "move",
         toFolder: target?.root || "",
         repoName: decision.repoName,
         share: decision.share,
       });
     }
-    case "stay":
-      return homeRepo && !isOwnCheckout({ repo: homeRepo, folder: request.homeFolder })
-        ? placement({ action: "move", toFolder: homeRepo.root, repoName: homeRepo.name, share: 1 })
-        : placement({ action: "stay", toFolder: request.homeFolder, repoName: decision.repoName });
+    case "stay": {
+      const isHomeRepoElsewhere = homeRepo != null && !isOwnCheckout({ repo: homeRepo, folder: request.homeFolder });
+      return isHomeRepoElsewhere
+        ? readPlacement({ action: "move", toFolder: homeRepo.root, repoName: homeRepo.name, share: 1 })
+        : readPlacement({ action: "stay", toFolder: request.homeFolder, repoName: decision.repoName });
+    }
     case "uncertain":
-      return placement({ action: "uncertain", candidates: decision.candidates });
+      return readPlacement({ action: "uncertain", candidates: decision.candidates });
     case "noSignal":
-      return placement({ action: "no-signal" });
+      return readPlacement({ action: "no-signal" });
   }
 };
 
-const isSettled = (request: {
-  readonly sweep: SweepContext;
-  readonly agent: RehomeAgent;
-  readonly sessionId: string;
-}) =>
+const isSettled = (request: { readonly sweep: SweepScope; readonly agent: RehomeAgent; readonly sessionId: string }) =>
   !request.sweep.reevaluate &&
-  !assignedRepoFor(request) &&
-  ledgerEntryFor({ ledger: request.sweep.ledger, agent: request.agent, sessionId: request.sessionId }) !== undefined;
+  !readAssignedRepo(request) &&
+  readLedgerLine({ ledger: request.sweep.ledger, agent: request.agent, sessionId: request.sessionId }) != null;
 
-const livePlan = (request: {
+const readLivePlan = (request: {
   readonly agent: RehomeAgent;
   readonly sessionId: string;
   readonly homeFolder: string;
 }): SessionPlan => ({
   ...request,
-  ...placement({ action: "live" }),
+  ...readPlacement({ action: "live" }),
   title: "",
   fromFolder: request.homeFolder,
   status: "skipped",
 });
 
-const planClaudeSession = (request: { readonly sweep: SweepContext; readonly session: ClaudeSession }) => {
+const planClaudeSession = (request: { readonly sweep: SweepScope; readonly session: ClaudeSession }) => {
   const { session, sweep } = request;
-  if (claudeSessionIsLive({ homeRoot: sweep.homeRoot, session, quietSeconds: sweep.quietSeconds })) {
-    return livePlan({ agent: "claude-code", sessionId: session.sessionId, homeFolder: session.homeFolder });
+
+  const isClaudeLive = isClaudeSessionLive({ homeRoot: sweep.homeRoot, session, quietSeconds: sweep.quietSeconds });
+  if (isClaudeLive) {
+    return readLivePlan({ agent: "claude-code", sessionId: session.sessionId, homeFolder: session.homeFolder });
   }
 
   const evidence = readClaudeEvidence({
@@ -183,10 +192,12 @@ const planClaudeSession = (request: { readonly sweep: SweepContext; readonly ses
   };
 };
 
-const planCodexThread = async (request: { readonly sweep: SweepContext; readonly thread: CodexThread }) => {
+const planCodexThread = async (request: { readonly sweep: SweepScope; readonly thread: CodexThread }) => {
   const { thread, sweep } = request;
-  if (await codexThreadIsLive({ homeRoot: sweep.homeRoot, thread, quietSeconds: sweep.quietSeconds })) {
-    return livePlan({ agent: "codex", sessionId: thread.threadId, homeFolder: thread.homeFolder });
+
+  const isCodexLive = await isCodexThreadLive({ homeRoot: sweep.homeRoot, thread, quietSeconds: sweep.quietSeconds });
+  if (isCodexLive) {
+    return readLivePlan({ agent: "codex", sessionId: thread.threadId, homeFolder: thread.homeFolder });
   }
 
   const evidence = readCodexEvidence({
@@ -204,9 +215,9 @@ const planCodexThread = async (request: { readonly sweep: SweepContext; readonly
   };
 };
 
-const recordPlan = (request: { readonly plan: SessionPlan; readonly decision: LedgerDecision }): SessionPlan => {
+const savePlan = (request: { readonly plan: SessionPlan; readonly decision: LedgerDecision }): SessionPlan => {
   const { plan } = request;
-  recordLedgerEntry({
+  saveLedgerLine({
     agent: plan.agent,
     sessionId: plan.sessionId,
     decision: request.decision,
@@ -228,7 +239,7 @@ const KEPT_DECISIONS: Readonly<Record<"stay" | "uncertain" | "no-signal", Ledger
 };
 
 const applyClaudePlan = (request: {
-  readonly sweep: SweepContext;
+  readonly sweep: SweepScope;
   readonly session: ClaudeSession;
   readonly plan: SessionPlan;
 }): SessionPlan => {
@@ -238,22 +249,24 @@ const applyClaudePlan = (request: {
       return plan;
     case "delete":
       deleteClaudeSessions({ homeRoot: request.sweep.homeRoot, sessions: [request.session] });
-      return recordPlan({ plan, decision: "deleted" });
+      return savePlan({ plan, decision: "deleted" });
     case "move": {
       const move = moveClaudeSession({
         homeRoot: request.sweep.homeRoot,
         session: request.session,
         targetFolder: plan.toFolder,
       });
-      return recordPlan({ plan, decision: move._tag === "moved" ? "moved" : "conflict" });
+
+      const isMoveDone = move._tag === "moved";
+      return savePlan({ plan, decision: isMoveDone ? "moved" : "conflict" });
     }
     default:
-      return recordPlan({ plan, decision: KEPT_DECISIONS[plan.action] });
+      return savePlan({ plan, decision: KEPT_DECISIONS[plan.action] });
   }
 };
 
 const applyCodexPlan = async (request: {
-  readonly sweep: SweepContext;
+  readonly sweep: SweepScope;
   readonly thread: CodexThread;
   readonly plan: SessionPlan;
 }): Promise<SessionPlan> => {
@@ -263,15 +276,14 @@ const applyCodexPlan = async (request: {
       return plan;
     case "delete": {
       const deletions = await deleteCodexThread({ homeRoot: request.sweep.homeRoot, thread: request.thread });
-      return deletions.every((deletion) => deletion.deleted)
-        ? recordPlan({ plan, decision: "deleted" })
-        : { ...plan, status: "failed" };
+      const hasEveryDeletionSucceeded = deletions.every((deletion) => deletion.deleted);
+      return hasEveryDeletionSucceeded ? savePlan({ plan, decision: "deleted" }) : { ...plan, status: "failed" };
     }
     case "move":
       await moveCodexThread({ homeRoot: request.sweep.homeRoot, thread: request.thread, targetFolder: plan.toFolder });
-      return recordPlan({ plan, decision: "moved" });
+      return savePlan({ plan, decision: "moved" });
     default:
-      return recordPlan({ plan, decision: KEPT_DECISIONS[plan.action] });
+      return savePlan({ plan, decision: KEPT_DECISIONS[plan.action] });
   }
 };
 
@@ -292,80 +304,107 @@ const applyCodexPlanSafely = async (request: Parameters<typeof applyCodexPlan>[0
   }
 };
 
-const claudeSessionsToSweep = (sweep: SweepContext): ReadonlyArray<ClaudeSession> => {
-  if (!sweep.sessionId) {
+const listClaudeSessionsToSweep = (sweep: SweepScope): ReadonlyArray<ClaudeSession> => {
+  const isSweepSessionIdMissing = !sweep.sessionId;
+  if (isSweepSessionIdMissing) {
     return listClaudeSessions(sweep.homeRoot);
   }
 
   const session = findClaudeSession({ homeRoot: sweep.homeRoot, sessionId: sweep.sessionId });
-  return session ? [session] : [];
+
+  const isSessionFound = session != null;
+  return isSessionFound ? [session] : [];
 };
 
-const sweepClaude = (sweep: SweepContext): ReadonlyArray<SessionPlan> =>
-  claudeSessionsToSweep(sweep)
+const listSweepClaude = (sweep: SweepScope): ReadonlyArray<SessionPlan> =>
+  listClaudeSessionsToSweep(sweep)
     .filter((session) => !isSettled({ sweep, agent: "claude-code", sessionId: session.sessionId }))
     .map((session) => {
       const plan = planClaudeSession({ sweep, session });
-      return sweep.dryRun ? plan : applyClaudePlanSafely({ sweep, session, plan });
+
+      const isDryRun = sweep.dryRun;
+      return isDryRun ? plan : applyClaudePlanSafely({ sweep, session, plan });
     });
 
 // A thread the ledger moved can drift back when Codex rebuilds its row from an older rollout; put it back.
-const driftedCodexPlan = (request: { readonly sweep: SweepContext; readonly thread: CodexThread }) => {
-  const entry = ledgerEntryFor({ ledger: request.sweep.ledger, agent: "codex", sessionId: request.thread.threadId });
-  if (entry?.decision !== "moved" || entry.toFolder === request.thread.homeFolder) {
-    return undefined;
+const readDriftedCodexPlan = (request: { readonly sweep: SweepScope; readonly thread: CodexThread }) => {
+  const line = readLedgerLine({ ledger: request.sweep.ledger, agent: "codex", sessionId: request.thread.threadId });
+
+  const hasNoMoveToHome = line?.decision !== "moved" || line.toFolder === request.thread.homeFolder;
+  if (hasNoMoveToHome) {
+    return null;
   }
 
   return {
     agent: "codex" as const,
     sessionId: request.thread.threadId,
-    title: entry.title,
+    title: line.title,
     fromFolder: request.thread.homeFolder,
-    ...placement({ action: "move", toFolder: entry.toFolder, repoName: entry.repoName, share: entry.share }),
+    ...readPlacement({ action: "move", toFolder: line.toFolder, repoName: line.repoName, share: line.share }),
     status: "planned" as const,
   };
 };
 
-const planCodexSweepEntry = async (request: { readonly sweep: SweepContext; readonly thread: CodexThread }) => {
-  const drifted = request.sweep.reevaluate ? undefined : driftedCodexPlan(request);
-  const live = drifted
-    ? await codexThreadIsLive({ homeRoot: request.sweep.homeRoot, thread: request.thread, quietSeconds: 0 })
+const planCodexSweepLine = async (request: { readonly sweep: SweepScope; readonly thread: CodexThread }) => {
+  const shouldReevaluate = request.sweep.reevaluate;
+  const isDrifted = shouldReevaluate ? null : readDriftedCodexPlan(request);
+
+  const live = isDrifted
+    ? await isCodexThreadLive({ homeRoot: request.sweep.homeRoot, thread: request.thread, quietSeconds: 0 })
     : false;
-  if (drifted && !live) {
-    return drifted;
+
+  const isDriftedAndNotLive = isDrifted && !live;
+  if (isDriftedAndNotLive) {
+    return isDrifted;
   }
 
   return isSettled({ sweep: request.sweep, agent: "codex", sessionId: request.thread.threadId })
-    ? undefined
+    ? null
     : planCodexThread(request);
 };
 
-const sweepCodex = async (sweep: SweepContext): Promise<ReadonlyArray<SessionPlan>> => {
+const listSweepCodex = async (sweep: SweepScope): Promise<ReadonlyArray<SessionPlan>> => {
   const threads = (await listCodexThreads(sweep.homeRoot)).filter(
     (thread) => !sweep.sessionId || thread.threadId === sweep.sessionId,
   );
   const plans: Array<SessionPlan> = [];
   for (const thread of threads) {
-    const plan = await planCodexSweepEntry({ sweep, thread });
-    if (plan) {
-      plans.push(sweep.dryRun ? plan : await applyCodexPlanSafely({ sweep, thread, plan }));
+    const plan = await planCodexSweepLine({ sweep, thread });
+
+    const isPlanMissing = plan == null;
+    if (isPlanMissing) continue;
+
+    const isDryRun = sweep.dryRun;
+    if (isDryRun) {
+      plans.push(plan);
+      continue;
     }
+
+    const appliedPlan = await applyCodexPlanSafely({ sweep, thread, plan });
+    plans.push(appliedPlan);
   }
   return plans;
 };
 
 export const runSweep = async (request: SweepRequest): Promise<ReadonlyArray<SessionPlan>> => {
-  const sweep: SweepContext = {
+  const sweep: SweepScope = {
     ...request,
     matchers: { matchPaths: createPathMatcher(request.repos), matchKeywords: createKeywordMatcher(request.repos) },
     ledger: readLedger(),
   };
-  const claudePlans = sweep.agents.includes("claude-code") ? sweepClaude(sweep) : [];
-  const codexPlans = sweep.agents.includes("codex") ? await sweepCodex(sweep) : [];
-  if (!sweep.dryRun) {
+
+  const isClaudeCodeSwept = sweep.agents.includes("claude-code");
+  const claudePlans = isClaudeCodeSwept ? listSweepClaude(sweep) : [];
+
+  const isCodexSwept = sweep.agents.includes("codex");
+  const codexPlans = isCodexSwept ? await listSweepCodex(sweep) : [];
+
+  const isSweepDryRunMissing = !sweep.dryRun;
+  if (isSweepDryRunMissing) {
     for (const repo of sweep.repos.filter((candidate) => sweep.deletedRepoNames.has(candidate.name))) {
       removeEmptyProjectFolder({ homeRoot: sweep.homeRoot, folder: repo.root });
     }
   }
+
   return [...claudePlans, ...codexPlans];
 };

@@ -1,23 +1,24 @@
-// Transcripts, rollouts, the ledger, and Claude's history file are all one JSON object per line.
-
 import { appendFileSync, closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 
-export const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+export const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
 // A blank, cut-short, or non-object line decodes to an empty record.
-export const decodeJsonLine = (line: string): Record<string, unknown> => {
+export const decodeLine = (line: string): Record<string, unknown> => {
   try {
     const candidate: unknown = JSON.parse(line);
-    return isRecord(candidate) ? candidate : {};
+    return isPlainObject(candidate) ? candidate : {};
   } catch {
     return {};
   }
 };
 
-const endsWithNewline = (file: string): boolean => {
-  const size = existsSync(file) ? statSync(file).size : 0;
-  if (size === 0) {
+const isEndingWithNewline = (file: string): boolean => {
+  const isFilePresent = existsSync(file);
+  const size = isFilePresent ? statSync(file).size : 0;
+
+  const isEmptyFile = size === 0;
+  if (isEmptyFile) {
     return true;
   }
 
@@ -32,6 +33,6 @@ const endsWithNewline = (file: string): boolean => {
 };
 
 // A writer that died mid-line leaves no trailing newline; starting a fresh line keeps both records parseable.
-export const appendJsonLine = (request: { readonly file: string; readonly line: Record<string, unknown> }): void => {
-  appendFileSync(request.file, `${endsWithNewline(request.file) ? "" : "\n"}${JSON.stringify(request.line)}\n`);
+export const appendLine = (request: { readonly file: string; readonly line: Record<string, unknown> }): void => {
+  appendFileSync(request.file, `${isEndingWithNewline(request.file) ? "" : "\n"}${JSON.stringify(request.line)}\n`);
 };

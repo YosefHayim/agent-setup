@@ -1,12 +1,8 @@
-// Codex lists `codex resume` threads by threads.cwd in ~/.codex/state_<n>.sqlite and resumes them in that folder.
-// A full reconcile recomputes cwd from the rollout's last `thread_settings_applied` line, so a move appends such a
-// line (append-only: the thread-history index stores byte offsets into the rollout) and then updates the row.
-
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { codexHome } from "../codex-home.js";
-import { appendJsonLine, decodeJsonLine, isRecord } from "../json-lines.js";
+import { readCodexHome } from "../codex-home.js";
+import { appendLine, decodeLine, isPlainObject } from "../json-lines.js";
 import { readTranscriptTail } from "../transcript-reader.js";
 
 export type CodexThread = {
@@ -16,7 +12,7 @@ export type CodexThread = {
   readonly title: string;
 };
 
-type ThreadRow = {
+type StoredThread = {
   readonly threadId: string;
   readonly rolloutFile: string;
   readonly cwd: string;
@@ -24,24 +20,30 @@ type ThreadRow = {
 };
 
 // e.g. "state_5.sqlite" — Codex bumps the number when the schema changes.
-const STATE_DATABASE_PATTERN = /^state_(\d+)\.sqlite$/u;
+const STATUS_DATABASE_PATTERN = /^state_(\d+)\.sqlite$/u;
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
 const BUSY_TIMEOUT_MILLISECONDS = 5_000;
 
-const stateDatabaseFile = (homeRoot: string): string | undefined => {
-  const home = codexHome(homeRoot);
-  const newest = (existsSync(home) ? readdirSync(home) : [])
-    .map((name) => ({ name, version: Number(STATE_DATABASE_PATTERN.exec(name)?.[1] || -1) }))
+const readStorageDatabaseFile = (homeRoot: string): string | null => {
+  const home = readCodexHome(homeRoot);
+
+  const isCodexHomePresent = existsSync(home);
+  const newest = (isCodexHomePresent ? readdirSync(home) : [])
+    .map((name) => ({ name, version: Number(STATUS_DATABASE_PATTERN.exec(name)?.[1] || -1) }))
     .filter((database) => database.version >= 0)
     .sort((left, right) => right.version - left.version)[0];
-  return newest ? path.join(home, newest.name) : undefined;
+
+  const isDatabaseFound = newest != null;
+  return isDatabaseFound ? path.join(home, newest.name) : null;
 };
 
 // node:sqlite is unflagged from Node 22.13; on an older Node the Codex half of the feature stays off.
-const openStateDatabase = async (request: { readonly homeRoot: string; readonly readOnly: boolean }) => {
-  const databaseFile = stateDatabaseFile(request.homeRoot);
-  if (!databaseFile) {
-    return undefined;
+const openStorageDatabase = async (request: { readonly homeRoot: string; readonly readOnly: boolean }) => {
+  const databaseFile = readStorageDatabaseFile(request.homeRoot);
+
+  const hasNoDatabaseFile = !databaseFile;
+  if (hasNoDatabaseFile) {
+    return null;
   }
 
   const { DatabaseSync } = await import("node:sqlite");
@@ -50,16 +52,18 @@ const openStateDatabase = async (request: { readonly homeRoot: string; readonly 
   return database;
 };
 
-const textColumn = (row: Record<string, unknown>, column: string): string => {
-  const value = row[column];
-  return typeof value === "string" ? value : "";
+const readStringColumn = (threadFields: Record<string, unknown>, column: string): string => {
+  const field = threadFields[column];
+
+  const isStringField = typeof field === "string";
+  return isStringField ? field : "";
 };
 
-const decodeThreadRow = (row: Record<string, unknown>): ThreadRow => ({
-  threadId: textColumn(row, "id"),
-  rolloutFile: textColumn(row, "rollout_path"),
-  cwd: textColumn(row, "cwd"),
-  title: textColumn(row, "title") || textColumn(row, "first_user_message"),
+const decodeThread = (threadFields: Record<string, unknown>): StoredThread => ({
+  threadId: readStringColumn(threadFields, "id"),
+  rolloutFile: readStringColumn(threadFields, "rollout_path"),
+  cwd: readStringColumn(threadFields, "cwd"),
+  title: readStringColumn(threadFields, "title") || readStringColumn(threadFields, "first_user_message"),
 });
 
 const USER_THREADS_SQL = `
@@ -68,8 +72,10 @@ WHERE archived = 0 AND (thread_source IS NULL OR thread_source != 'subagent')
   AND id NOT IN (SELECT child_thread_id FROM thread_spawn_edges)`;
 
 export const listCodexThreads = async (homeRoot: string): Promise<ReadonlyArray<CodexThread>> => {
-  const database = await openStateDatabase({ homeRoot, readOnly: true });
-  if (!database) {
+  const database = await openStorageDatabase({ homeRoot, readOnly: true });
+
+  const hasNoDatabase = !database;
+  if (hasNoDatabase) {
     return [];
   }
 
@@ -77,10 +83,15 @@ export const listCodexThreads = async (homeRoot: string): Promise<ReadonlyArray<
     return database
       .prepare(USER_THREADS_SQL)
       .all()
-      .filter(isRecord)
-      .map(decodeThreadRow)
-      .filter((row) => row.rolloutFile && existsSync(row.rolloutFile))
-      .map((row) => ({ threadId: row.threadId, rolloutFile: row.rolloutFile, homeFolder: row.cwd, title: row.title }));
+      .filter(isPlainObject)
+      .map(decodeThread)
+      .filter((threadFields) => threadFields.rolloutFile && existsSync(threadFields.rolloutFile))
+      .map((threadFields) => ({
+        threadId: threadFields.threadId,
+        rolloutFile: threadFields.rolloutFile,
+        homeFolder: threadFields.cwd,
+        title: threadFields.title,
+      }));
   } finally {
     database.close();
   }
@@ -97,14 +108,16 @@ SELECT threads.id, threads.rollout_path, threads.cwd, threads.title, threads.fir
 FROM descendants JOIN threads ON threads.id = descendants.id
 ORDER BY descendants.depth DESC`;
 
-const familyOf = async (request: { readonly homeRoot: string; readonly thread: CodexThread }) => {
-  const database = await openStateDatabase({ homeRoot: request.homeRoot, readOnly: true });
-  if (!database) {
+const readFamilyOf = async (request: { readonly homeRoot: string; readonly thread: CodexThread }) => {
+  const database = await openStorageDatabase({ homeRoot: request.homeRoot, readOnly: true });
+
+  const hasNoDatabase = !database;
+  if (hasNoDatabase) {
     return [];
   }
 
   try {
-    return database.prepare(DESCENDANTS_SQL).all(request.thread.threadId).filter(isRecord).map(decodeThreadRow);
+    return database.prepare(DESCENDANTS_SQL).all(request.thread.threadId).filter(isPlainObject).map(decodeThread);
   } finally {
     database.close();
   }
@@ -112,15 +125,23 @@ const familyOf = async (request: { readonly homeRoot: string; readonly thread: C
 
 // Each writer holds an flock on thread-writer-locks/<id>.lock (named by thread or rollout segment id) for as long
 // as it can append, and lsof sees that open file.
-const writerLockHeld = (request: { readonly homeRoot: string; readonly rows: ReadonlyArray<ThreadRow> }): boolean => {
+const isWriterLockHeld = (request: {
+  readonly homeRoot: string;
+  readonly rows: ReadonlyArray<StoredThread>;
+}): boolean => {
   const lockFiles = [
     ...new Set(
-      request.rows.flatMap((row) => [row.threadId, ...(path.basename(row.rolloutFile).match(UUID_PATTERN) || [])]),
+      request.rows.flatMap((threadFields) => [
+        threadFields.threadId,
+        ...(path.basename(threadFields.rolloutFile).match(UUID_PATTERN) || []),
+      ]),
     ),
   ]
-    .map((lockId) => path.join(codexHome(request.homeRoot), "thread-writer-locks", `${lockId}.lock`))
+    .map((lockId) => path.join(readCodexHome(request.homeRoot), "thread-writer-locks", `${lockId}.lock`))
     .filter(existsSync);
-  if (lockFiles.length === 0) {
+
+  const isLockFilesEmpty = lockFiles.length === 0;
+  if (isLockFilesEmpty) {
     return false;
   }
 
@@ -129,72 +150,82 @@ const writerLockHeld = (request: { readonly homeRoot: string; readonly rows: Rea
     env: { ...process.env, PATH: `${process.env.PATH || ""}:/usr/sbin:/usr/bin` },
   });
   // Without lsof the lock cannot be ruled out, so the thread counts as live.
-  return lsof.error !== undefined || lsof.stdout.trim() !== "";
+  return lsof.error != null || lsof.stdout.trim() !== "";
 };
 
-export const codexThreadIsLive = async (request: {
+export const isCodexThreadLive = async (request: {
   readonly homeRoot: string;
   readonly thread: CodexThread;
   readonly quietSeconds: number;
 }): Promise<boolean> => {
-  const ownRow = { threadId: request.thread.threadId, rolloutFile: request.thread.rolloutFile, cwd: "", title: "" };
-  const rows = [ownRow, ...(await familyOf(request))];
-  const recentlyWritten = rows.some(
-    (row) =>
-      existsSync(row.rolloutFile) && Date.now() - statSync(row.rolloutFile).mtimeMs < request.quietSeconds * 1_000,
+  const storedOwn = { threadId: request.thread.threadId, rolloutFile: request.thread.rolloutFile, cwd: "", title: "" };
+  const databaseRows = [storedOwn, ...(await readFamilyOf(request))];
+  const recentlyWritten = databaseRows.some(
+    (threadFields) =>
+      existsSync(threadFields.rolloutFile) &&
+      Date.now() - statSync(threadFields.rolloutFile).mtimeMs < request.quietSeconds * 1_000,
   );
-  return recentlyWritten || writerLockHeld({ homeRoot: request.homeRoot, rows });
+  return recentlyWritten || isWriterLockHeld({ homeRoot: request.homeRoot, rows: databaseRows });
 };
 
 const isSettingsLine = (line: Record<string, unknown>): boolean =>
-  isRecord(line.payload) && line.payload.type === "thread_settings_applied" && isRecord(line.payload.thread_settings);
+  isPlainObject(line.payload) &&
+  line.payload.type === "thread_settings_applied" &&
+  isPlainObject(line.payload.thread_settings);
 
-const lastSettingsLine = (rolloutFile: string): Record<string, unknown> | undefined => {
-  const fromTail = readTranscriptTail(rolloutFile).map(decodeJsonLine).filter(isSettingsLine).at(-1);
-  return fromTail || readFileSync(rolloutFile, "utf8").split("\n").map(decodeJsonLine).filter(isSettingsLine).at(-1);
+const readLastSettingsLine = (rolloutFile: string): Record<string, unknown> | null => {
+  const fromTail = readTranscriptTail(rolloutFile).map(decodeLine).filter(isSettingsLine).at(-1);
+  return (
+    fromTail || readFileSync(rolloutFile, "utf8").split("\n").map(decodeLine).filter(isSettingsLine).at(-1) || null
+  );
 };
 
-const lastOrdinal = (rolloutFile: string): number | undefined =>
+const readLastOrdinal = (rolloutFile: string): number | null =>
   readTranscriptTail(rolloutFile)
-    .map(decodeJsonLine)
+    .map(decodeLine)
     .map((line) => line.ordinal)
     .filter((candidate): candidate is number => typeof candidate === "number")
-    .at(-1);
+    .at(-1) ?? null;
 
 // A resumed writer continues from the rollout's last ordinal, so the copied line takes the next one; legacy rollouts
 // carry no ordinals at all.
-const rehomedSettingsLine = (request: {
+const readRehomedSettingsLine = (request: {
   readonly settingsLine: Record<string, unknown>;
   readonly targetFolder: string;
-  readonly ordinal: number | undefined;
+  readonly ordinal: number | null;
 }): Record<string, unknown> => {
-  const lineContent = isRecord(request.settingsLine.payload) ? request.settingsLine.payload : {};
-  const settings = isRecord(lineContent.thread_settings) ? lineContent.thread_settings : {};
+  const lineMessage = isPlainObject(request.settingsLine.payload) ? request.settingsLine.payload : {};
+  const settings = isPlainObject(lineMessage.thread_settings) ? lineMessage.thread_settings : {};
+  const isRuntimeRootsArray = Array.isArray(settings.runtime_workspace_roots);
   const relocatedSettings = {
     ...settings,
     cwd: request.targetFolder,
-    ...(Array.isArray(settings.runtime_workspace_roots) ? { runtime_workspace_roots: [request.targetFolder] } : {}),
+    ...(isRuntimeRootsArray ? { runtime_workspace_roots: [request.targetFolder] } : {}),
   };
+  const hasOrdinal = request.ordinal != null;
   return {
     ...request.settingsLine,
     timestamp: new Date().toISOString(),
-    ...(request.ordinal === undefined ? {} : { ordinal: request.ordinal + 1 }),
-    payload: { ...lineContent, thread_settings: relocatedSettings },
+    ...(hasOrdinal ? { ordinal: request.ordinal + 1 } : {}),
+    payload: { ...lineMessage, thread_settings: relocatedSettings },
   };
 };
 
 const appendRehomedSettings = (request: { readonly rolloutFile: string; readonly targetFolder: string }) => {
-  const settingsLine = existsSync(request.rolloutFile) ? lastSettingsLine(request.rolloutFile) : undefined;
-  if (!settingsLine) {
+  const isRolloutPresent = existsSync(request.rolloutFile);
+  const settingsLine = isRolloutPresent ? readLastSettingsLine(request.rolloutFile) : null;
+
+  const hasNoSettingsLine = !settingsLine;
+  if (hasNoSettingsLine) {
     return;
   }
 
-  const relocated = rehomedSettingsLine({
+  const relocated = readRehomedSettingsLine({
     settingsLine,
     targetFolder: request.targetFolder,
-    ordinal: lastOrdinal(request.rolloutFile),
+    ordinal: readLastOrdinal(request.rolloutFile),
   });
-  appendJsonLine({ file: request.rolloutFile, line: relocated });
+  appendLine({ file: request.rolloutFile, line: relocated });
 };
 
 export const moveCodexThread = async (request: {
@@ -202,22 +233,24 @@ export const moveCodexThread = async (request: {
   readonly thread: CodexThread;
   readonly targetFolder: string;
 }): Promise<void> => {
-  const ownRow = { threadId: request.thread.threadId, rolloutFile: request.thread.rolloutFile, cwd: "", title: "" };
-  const rows = [ownRow, ...(await familyOf(request))];
-  for (const row of rows) {
-    appendRehomedSettings({ rolloutFile: row.rolloutFile, targetFolder: request.targetFolder });
+  const storedOwn = { threadId: request.thread.threadId, rolloutFile: request.thread.rolloutFile, cwd: "", title: "" };
+  const databaseRows = [storedOwn, ...(await readFamilyOf(request))];
+  for (const threadFields of databaseRows) {
+    appendRehomedSettings({ rolloutFile: threadFields.rolloutFile, targetFolder: request.targetFolder });
   }
 
-  const database = await openStateDatabase({ homeRoot: request.homeRoot, readOnly: false });
-  if (!database) {
+  const database = await openStorageDatabase({ homeRoot: request.homeRoot, readOnly: false });
+
+  const hasNoDatabase = !database;
+  if (hasNoDatabase) {
     return;
   }
 
   try {
     const updateCwd = database.prepare("UPDATE threads SET cwd = ? WHERE id = ?");
     database.exec("BEGIN IMMEDIATE");
-    for (const row of rows) {
-      updateCwd.run(request.targetFolder, row.threadId);
+    for (const threadFields of databaseRows) {
+      updateCwd.run(request.targetFolder, threadFields.threadId);
     }
     database.exec("COMMIT");
   } finally {
@@ -226,9 +259,11 @@ export const moveCodexThread = async (request: {
 };
 
 // The packaged binary skips the shell wrappers some terminals put in front of `codex`, which can wait for a TTY.
-const codexExecutable = (homeRoot: string): string => {
-  const packaged = path.join(codexHome(homeRoot), "packages", "standalone", "current", "bin", "codex");
-  return existsSync(packaged) ? packaged : "codex";
+const readCodexExecutable = (homeRoot: string): string => {
+  const packaged = path.join(readCodexHome(homeRoot), "packages", "standalone", "current", "bin", "codex");
+
+  const isPackagedPresent = existsSync(packaged);
+  return isPackagedPresent ? packaged : "codex";
 };
 
 export type CodexDeletion = { readonly threadId: string; readonly deleted: boolean; readonly detail: string };
@@ -239,9 +274,9 @@ export const deleteCodexThread = async (request: {
   readonly homeRoot: string;
   readonly thread: CodexThread;
 }): Promise<ReadonlyArray<CodexDeletion>> => {
-  const descendants = (await familyOf(request)).map((row) => row.threadId);
+  const descendants = (await readFamilyOf(request)).map((threadFields) => threadFields.threadId);
   return [...descendants, request.thread.threadId].map((threadId) => {
-    const deletion = spawnSync(codexExecutable(request.homeRoot), ["delete", threadId, "--force"], {
+    const deletion = spawnSync(readCodexExecutable(request.homeRoot), ["delete", threadId, "--force"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 60_000,

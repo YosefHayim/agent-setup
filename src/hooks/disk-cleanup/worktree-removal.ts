@@ -1,4 +1,4 @@
-import { gitAnswerLines, gitFindsNothing, gitSucceeds } from "../git-answers.js";
+import { isGitFindingNothing, isGitSuccessful, readGitAnswerLines } from "../git-answers.js";
 import { pushBranch } from "./branch-push.js";
 import type { LinkedWorktree } from "./linked-worktrees.js";
 
@@ -13,12 +13,14 @@ const HEAD_COMMIT_QUERY = ["rev-parse", "--verify", "HEAD"];
 
 // --no-verify skips commit hooks: the commit only keeps work safe, and a lint failure must not lose it.
 const saveChanges = (folder: string): boolean =>
-  gitSucceeds({ folder, query: ["add", "--all"] }) &&
-  gitSucceeds({ folder, query: ["commit", "--no-verify", "--quiet", "--message", SAVE_COMMIT_MESSAGE] });
+  isGitSuccessful({ folder, query: ["add", "--all"] }) &&
+  isGitSuccessful({ folder, query: ["commit", "--no-verify", "--quiet", "--message", SAVE_COMMIT_MESSAGE] });
 
-const headCommit = (folder: string): string => {
-  const headLines = gitAnswerLines({ folder, query: HEAD_COMMIT_QUERY });
-  if (!headLines) {
+const readHeadCommit = (folder: string): string => {
+  const headLines = readGitAnswerLines({ folder, query: HEAD_COMMIT_QUERY });
+
+  const hasNoHeadLines = !headLines;
+  if (hasNoHeadLines) {
     return "";
   }
 
@@ -26,25 +28,28 @@ const headCommit = (folder: string): string => {
 };
 
 const isSavedAndPushed = (worktree: LinkedWorktree): boolean => {
-  const isSaved = gitFindsNothing({ folder: worktree.folder, query: NOT_SAVED_QUERY });
-  const isPushed = worktree.branch === "" || gitFindsNothing({ folder: worktree.folder, query: NOT_PUSHED_QUERY });
+  const isSaved = isGitFindingNothing({ folder: worktree.folder, query: NOT_SAVED_QUERY });
+  const isPushed = worktree.branch === "" || isGitFindingNothing({ folder: worktree.folder, query: NOT_PUSHED_QUERY });
   return isSaved && isPushed;
 };
 
-const failedPushDetail = (request: {
+const readFailedPushDetail = (request: {
   readonly worktree: LinkedWorktree;
   readonly remote: string;
   readonly push: boolean;
-}): string | undefined => {
-  if (!request.push) {
-    return undefined;
+}): string | null => {
+  const isRequestPushMissing = !request.push;
+  if (isRequestPushMissing) {
+    return null;
   }
 
   const { worktree } = request;
-  const commit = headCommit(worktree.folder);
+  const commit = readHeadCommit(worktree.folder);
   const pushStatus = pushBranch({ folder: worktree.folder, remote: request.remote, branch: worktree.branch, commit });
-  if (pushStatus._tag === "pushed") {
-    return undefined;
+
+  const isPushStatus_tagPushed = pushStatus._tag === "pushed";
+  if (isPushStatus_tagPushed) {
+    return null;
   }
 
   return `push failed: ${pushStatus.reason}`;
@@ -58,21 +63,28 @@ export const removeWorktree = (request: {
   readonly push: boolean;
 }): WorktreeRemoval => {
   const { worktree } = request;
-  if (request.saveChanges && !saveChanges(worktree.folder)) {
+
+  const hasSaveFailed = request.saveChanges && !saveChanges(worktree.folder);
+  if (hasSaveFailed) {
     return { _tag: "failed", detail: "save failed" };
   }
 
-  const pushFailure = failedPushDetail(request);
-  if (pushFailure !== undefined) {
+  const pushFailure = readFailedPushDetail(request);
+
+  const hasPushFailure = pushFailure != null;
+  if (hasPushFailure) {
     return { _tag: "failed", detail: pushFailure };
   }
 
-  if (!isSavedAndPushed(worktree)) {
+  const isNotSavedAndPushed = !isSavedAndPushed(worktree);
+  if (isNotSavedAndPushed) {
     return { _tag: "failed", detail: "recheck failed" };
   }
 
   const removeQuery = ["worktree", "remove", worktree.folder];
-  if (!gitSucceeds({ folder: worktree.mainFolder, query: removeQuery })) {
+
+  const isRemoveFailed = !isGitSuccessful({ folder: worktree.mainFolder, query: removeQuery });
+  if (isRemoveFailed) {
     return { _tag: "failed", detail: "remove failed" };
   }
 

@@ -24,7 +24,7 @@ const REPOSITORY_VARIABLES = new Set([
   "GIT_COMMON_DIR",
 ]);
 
-const gitEnvironment = (): NodeJS.ProcessEnv => {
+const readGitEnvironment = (): NodeJS.ProcessEnv => {
   const variables = Object.entries(process.env).filter(([name]) => !REPOSITORY_VARIABLES.has(name));
   return { ...Object.fromEntries(variables), ...NO_PASSWORD_QUESTIONS };
 };
@@ -40,36 +40,42 @@ const runGit = (question: GitQuestion) =>
   // --no-optional-locks keeps this read from blocking an agent that is using the same work tree.
   spawnSync("git", ["--no-optional-locks", "-C", question.folder, ...question.query], {
     encoding: "utf8",
-    env: gitEnvironment(),
+    env: readGitEnvironment(),
     timeout: question.timeoutMilliseconds,
   });
 
 // A git call that fails or runs out of time has no answer, which is not the same as an empty one.
-export const gitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | undefined => {
+export const readGitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | null => {
   const git = runGit(question);
-  if (git.status !== 0) {
-    return undefined;
+
+  const hasGitFailed = git.status !== 0;
+  if (hasGitFailed) {
+    return null;
   }
 
   return git.stdout.split("\n").filter((line) => line !== "");
 };
 
-// What git said on stderr when the call failed, "" when it said nothing, and undefined when the call succeeded.
-export const gitFailureText = (question: GitQuestion): string | undefined => {
+// What git said on stderr when the call failed, "" when it said nothing, and null when the call succeeded.
+export const readGitFailureString = (question: GitQuestion): string | null => {
   const git = runGit(question);
-  if (git.status === 0) {
-    return undefined;
+
+  const isGitSuccessful = git.status === 0;
+  if (isGitSuccessful) {
+    return null;
   }
 
   return git.stderr || "";
 };
 
-export const gitSucceeds = (question: GitQuestion): boolean => gitAnswerLines(question) !== undefined;
+export const isGitSuccessful = (question: GitQuestion): boolean => readGitAnswerLines(question) != null;
 
 // A git call that fails cannot vouch for the work tree, so only a successful empty answer counts as nothing.
-export const gitFindsNothing = (question: GitQuestion): boolean => {
-  const answerLines = gitAnswerLines(question);
-  if (!answerLines) {
+export const isGitFindingNothing = (question: GitQuestion): boolean => {
+  const answerLines = readGitAnswerLines(question);
+
+  const hasNoAnswerLines = !answerLines;
+  if (hasNoAnswerLines) {
     return false;
   }
 

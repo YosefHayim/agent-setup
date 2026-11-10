@@ -7,7 +7,7 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 // Two weeks without a touch: long enough to cover a holiday, short enough that caches never pile up.
 const STALE_AFTER_DAYS = 14;
 
-export const childEntries = (folder: string): ReadonlyArray<string> => {
+export const listChildNames = (folder: string): ReadonlyArray<string> => {
   try {
     return readdirSync(folder).map((name) => path.join(folder, name));
   } catch {
@@ -23,24 +23,25 @@ const isUntouchedForDays = (request: { readonly entry: string; readonly days: nu
   }
 };
 
-export const isStale = (entry: string): boolean => isUntouchedForDays({ entry, days: STALE_AFTER_DAYS });
+export const isStale = (line: string): boolean => isUntouchedForDays({ entry: line, days: STALE_AFTER_DAYS });
 
-const deleteEntry = (entry: string): string => {
+const deleteLine = (line: string): string => {
   try {
-    rmSync(entry, { recursive: true, force: true });
-    return reportLine({ action: "deleted", detail: "stale cache", target: entry });
+    rmSync(line, { recursive: true, force: true });
+    return reportLine({ action: "deleted", detail: "stale cache", target: line });
   } catch {
-    return reportLine({ action: "kept", detail: "delete failed", target: entry });
+    return reportLine({ action: "kept", detail: "delete failed", target: line });
   }
 };
 
-export const deleteEntries = (request: {
+export const deleteLines = (request: {
   readonly entries: ReadonlyArray<string>;
   readonly dryRun: boolean;
 }): ReadonlyArray<string> => {
-  if (request.dryRun) {
-    return request.entries.map((entry) => reportLine({ action: "would delete", detail: "stale cache", target: entry }));
+  const isDryRun = request.dryRun;
+  if (isDryRun) {
+    return request.entries.map((line) => reportLine({ action: "would delete", detail: "stale cache", target: line }));
   }
 
-  return request.entries.map(deleteEntry);
+  return request.entries.map(deleteLine);
 };

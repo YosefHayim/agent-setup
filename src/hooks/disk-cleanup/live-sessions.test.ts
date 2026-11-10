@@ -50,8 +50,10 @@ const writeLsofStub = (request: { readonly home: CodexHome; readonly openFiles: 
   chmodSync(stub, 0o755);
 };
 
-const lsofCallCount = (home: CodexHome): number =>
-  existsSync(home.lsofCallsFile) ? readFileSync(home.lsofCallsFile, "utf8").trim().split("\n").length : 0;
+const readLsofCallCount = (home: CodexHome): number => {
+  const hasLsofCallsFile = existsSync(home.lsofCallsFile);
+  return hasLsofCallsFile ? readFileSync(home.lsofCallsFile, "utf8").trim().split("\n").length : 0;
+};
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -67,7 +69,7 @@ describe("isSessionLive", () => {
     writeLsofStub({ home, openFiles: [otherLock] });
 
     expect(isSessionLive({ homeRoot: home.homeRoot, sessionId: endedThreadId })).toBe(false);
-    expect(lsofCallCount(home)).toBe(0);
+    expect(readLsofCallCount(home)).toBe(0);
   });
 
   it("counts a Codex session live while a process holds its lock, and ended once none does", () => {

@@ -29,20 +29,20 @@ const createRepo = (): string => {
   return repoFolder;
 };
 
-const runHookWith = (hookInput: unknown) =>
+const runHookWith = (hookDetails: unknown) =>
   spawnSync(process.execPath, ["--import", "tsx", hookPath], {
-    input: JSON.stringify(hookInput),
+    input: JSON.stringify(hookDetails),
     encoding: "utf8",
     env: environmentWithoutGit,
   });
 
 const runHook = (command: string, cwd: string) => runHookWith({ tool_name: "Bash", cwd, tool_input: { command } });
 
-const denialReason = (stdout: string): string => {
-  const output: { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } } =
+const readDenialReason = (stdout: string): string => {
+  const printout: { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } } =
     JSON.parse(stdout);
-  expect(output.hookSpecificOutput.permissionDecision).toBe("deny");
-  return output.hookSpecificOutput.permissionDecisionReason;
+  expect(printout.hookSpecificOutput.permissionDecision).toBe("deny");
+  return printout.hookSpecificOutput.permissionDecisionReason;
 };
 
 afterEach(() => {
@@ -67,7 +67,7 @@ describe("gitHookGuard process boundary", () => {
     const execution = runHook("git push", repoFolder);
 
     expect(execution.status).toBe(0);
-    expect(denialReason(execution.stdout)).toBe(
+    expect(readDenialReason(execution.stdout)).toBe(
       `git-hook-guard: Git hooks are not installed in this worktree. Run \`pnpm install\` in ${repoFolder} first, then retry.`,
     );
   });
@@ -79,7 +79,7 @@ describe("gitHookGuard process boundary", () => {
 
     const execution = runHook("git commit -m fix", repoFolder);
 
-    expect(denialReason(execution.stdout)).toContain(`Run \`npm install\` in ${repoFolder}`);
+    expect(readDenialReason(execution.stdout)).toContain(`Run \`npm install\` in ${repoFolder}`);
   });
 
   it("allows a push once the husky folder exists", () => {
@@ -116,7 +116,7 @@ describe("gitHookGuard process boundary", () => {
 
     const execution = runHook("git push", repoFolder);
 
-    expect(denialReason(execution.stdout)).toContain(`Run \`pnpm install\` in ${repoFolder} first, then retry.`);
+    expect(readDenialReason(execution.stdout)).toContain(`Run \`pnpm install\` in ${repoFolder} first, then retry.`);
   });
 
   it("denies a push when .githooks exists but core.hooksPath is unset, and allows it once set", () => {
@@ -125,7 +125,7 @@ describe("gitHookGuard process boundary", () => {
 
     const execution = runHook("git push", repoFolder);
 
-    expect(denialReason(execution.stdout)).toBe(
+    expect(readDenialReason(execution.stdout)).toBe(
       `git-hook-guard: Run \`git config core.hooksPath .githooks\` in ${repoFolder} first, then retry.`,
     );
 
@@ -138,8 +138,8 @@ describe("gitHookGuard process boundary", () => {
     mkdirSync(path.join(repoFolder, ".githooks"));
     const elsewhere = createFolder();
 
-    expect(denialReason(runHook(`git -C ${repoFolder} push`, elsewhere).stdout)).toContain(repoFolder);
-    expect(denialReason(runHook(`cd ${repoFolder} && git push`, elsewhere).stdout)).toContain(repoFolder);
+    expect(readDenialReason(runHook(`git -C ${repoFolder} push`, elsewhere).stdout)).toContain(repoFolder);
+    expect(readDenialReason(runHook(`cd ${repoFolder} && git push`, elsewhere).stdout)).toContain(repoFolder);
   });
 
   it("denies --no-verify in a repo whose hooks are installed", () => {
@@ -147,7 +147,7 @@ describe("gitHookGuard process boundary", () => {
 
     const execution = runHook("git push --no-verify", repoFolder);
 
-    expect(denialReason(execution.stdout)).toContain("Fix what they report instead of skipping them.");
+    expect(readDenialReason(execution.stdout)).toContain("Fix what they report instead of skipping them.");
   });
 
   it("reads the Codex cmd field", () => {
@@ -155,6 +155,6 @@ describe("gitHookGuard process boundary", () => {
 
     const execution = runHookWith({ cwd: repoFolder, tool_input: { cmd: "git commit -n -m fix" } });
 
-    expect(denialReason(execution.stdout)).toContain("skipping them");
+    expect(readDenialReason(execution.stdout)).toContain("skipping them");
   });
 });

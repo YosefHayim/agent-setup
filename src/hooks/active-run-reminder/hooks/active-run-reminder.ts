@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// SessionStart and SubagentStart hook that tells the agent to re-read its repo's active run spec; fails open.
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-
-import { gitAnswerLines } from "../../git-answers.js";
+import { readXdgStateHome } from "../../environment.js";
+import { readGitAnswerLines } from "../../git-answers.js";
 import { printDecisionAndExit } from "../../hook-output.js";
 import { type ActiveRun, createReminderLine } from "../create-reminder-line.js";
 
@@ -16,20 +15,22 @@ type HookEventName = (typeof SUPPORTED_HOOK_EVENT_NAMES)[number];
 
 type HookEvent = { readonly cwd: string; readonly hookEventName: HookEventName };
 
-const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const readStringProperty = (record: Record<string, unknown>, property: string): string | null => {
-  const candidate = record[property];
-  return typeof candidate === "string" ? candidate : null;
+const readStringProperty = (fields: Record<string, unknown>, property: string): string | null => {
+  const candidate = fields[property];
+
+  const isCandidateString = typeof candidate === "string";
+  return isCandidateString ? candidate : null;
 };
 
 const isHookEventName = (candidate: unknown): candidate is HookEventName =>
   SUPPORTED_HOOK_EVENT_NAMES.some((eventName) => eventName === candidate);
 
 const decodeHookEvent = (candidate: unknown): HookEvent | null => {
-  const isNotRecord = !isRecord(candidate);
-  if (isNotRecord) return null;
+  const isNotPlainObject = !isPlainObject(candidate);
+  if (isNotPlainObject) return null;
 
   const cwd = readStringProperty(candidate, "cwd");
   const hookEventName = candidate.hook_event_name;
@@ -44,8 +45,8 @@ const decodeHookEvent = (candidate: unknown): HookEvent | null => {
 };
 
 const decodeActiveRun = (candidate: unknown): ActiveRun | null => {
-  const isNotRecord = !isRecord(candidate);
-  if (isNotRecord) return null;
+  const isNotPlainObject = !isPlainObject(candidate);
+  if (isNotPlainObject) return null;
 
   const title = readStringProperty(candidate, "title");
   const specPath = readStringProperty(candidate, "specPath");
@@ -59,15 +60,15 @@ const decodeActiveRun = (candidate: unknown): ActiveRun | null => {
 
 const readRunsFolderPath = (): string => {
   const homeFolder = homedir();
-  const defaultStateHome = join(homeFolder, ".local", "state");
-  const stateHome = process.env.XDG_STATE_HOME || defaultStateHome;
+  const defaultStorageHome = join(homeFolder, ".local", "state");
+  const storageHome = readXdgStateHome() ?? defaultStorageHome;
 
-  return join(stateHome, "agent-setup", "runs");
+  return join(storageHome, "agent-setup", "runs");
 };
 
 // A worktree maps to its main repository, because the common git folder belongs to the main checkout.
 const readRepositoryName = (folder: string): string | null => {
-  const gitCommonFolderLines = gitAnswerLines({
+  const gitCommonFolderLines = readGitAnswerLines({
     folder,
     query: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
   });
@@ -92,15 +93,15 @@ const readActiveRun = (repositoryName: string): ActiveRun | null => {
   const isThereNoActiveRunFile = !existsSync(activeRunPath);
   if (isThereNoActiveRunFile) return null;
 
-  const activeRunFileContents = readFileSync(activeRunPath, "utf8");
-  const activeRunFile = JSON.parse(activeRunFileContents);
+  const activeRunFileMessages = readFileSync(activeRunPath, "utf8");
+  const activeRunFile = JSON.parse(activeRunFileMessages);
 
   return decodeActiveRun(activeRunFile);
 };
 
-const remindActiveRunSpec = (): void => {
-  const hookEventFileContents = readFileSync(0, "utf8");
-  const hookEventFile = JSON.parse(hookEventFileContents);
+const runRemindActiveRunSpec = (): void => {
+  const hookEventFileMessages = readFileSync(0, "utf8");
+  const hookEventFile = JSON.parse(hookEventFileMessages);
   const hookEvent = decodeHookEvent(hookEventFile);
 
   const isNoHookEvent = hookEvent === null;
@@ -126,7 +127,7 @@ const remindActiveRunSpec = (): void => {
 };
 
 try {
-  remindActiveRunSpec();
+  runRemindActiveRunSpec();
 } catch {
   process.exit(0);
 }

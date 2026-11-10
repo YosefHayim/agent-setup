@@ -8,23 +8,23 @@ import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from
 
 const DEAD_PID = 2_147_483_646;
 const OTHER_LIVE_PID = String(process.ppid);
-const stateFolders: Array<string> = [];
+const storageFolders: Array<string> = [];
 
-const newLockFile = (): string => {
-  const stateFolder = mkdtempSync(path.join(tmpdir(), "scratch-watcher-lock-"));
-  stateFolders.push(stateFolder);
-  return path.join(stateFolder, "watcher.lock");
+const readNewLockFile = (): string => {
+  const storageFolder = mkdtempSync(path.join(tmpdir(), "scratch-watcher-lock-"));
+  storageFolders.push(storageFolder);
+  return path.join(storageFolder, "watcher.lock");
 };
 
 afterEach(() => {
-  for (const stateFolder of stateFolders.splice(0)) {
-    rmSync(stateFolder, { recursive: true, force: true });
+  for (const storageFolder of storageFolders.splice(0)) {
+    rmSync(storageFolder, { recursive: true, force: true });
   }
 });
 
 describe("acquireWatcherLock", () => {
   it("writes the pid with the lock and leaves no other file behind", () => {
-    const lockFile = newLockFile();
+    const lockFile = readNewLockFile();
 
     expect(acquireWatcherLock(lockFile)).toBe(true);
     expect(readFileSync(lockFile, "utf8")).toBe(String(process.pid));
@@ -33,7 +33,7 @@ describe("acquireWatcherLock", () => {
   });
 
   it("waits while a live watcher holds the lock", () => {
-    const lockFile = newLockFile();
+    const lockFile = readNewLockFile();
     writeFileSync(lockFile, OTHER_LIVE_PID);
 
     expect(acquireWatcherLock(lockFile)).toBe(false);
@@ -42,7 +42,7 @@ describe("acquireWatcherLock", () => {
   });
 
   it("takes over a lock left by a dead watcher, and releases it", () => {
-    const lockFile = newLockFile();
+    const lockFile = readNewLockFile();
     writeFileSync(lockFile, String(DEAD_PID));
 
     expect(acquireWatcherLock(lockFile)).toBe(true);
@@ -54,7 +54,7 @@ describe("acquireWatcherLock", () => {
 
 describe("isWatcherLockHeldByOther", () => {
   it("is true only while another live watcher holds the lock, and never takes it", () => {
-    const lockFile = newLockFile();
+    const lockFile = readNewLockFile();
 
     expect(isWatcherLockHeldByOther(lockFile)).toBe(false);
     writeFileSync(lockFile, OTHER_LIVE_PID);

@@ -10,8 +10,8 @@ const sendSignal = (processId: number, signal: "SIGTERM" | "SIGKILL"): void => {
   try {
     process.kill(processId, signal);
   } catch (failure) {
-    const isAlreadyGone = failure instanceof Error && "code" in failure && failure.code === "ESRCH";
-    if (!isAlreadyGone) {
+    const isNotAlreadyGone = !(failure instanceof Error) || !("code" in failure) || failure.code !== "ESRCH";
+    if (isNotAlreadyGone) {
       throw failure;
     }
   }
@@ -19,8 +19,11 @@ const sendSignal = (processId: number, signal: "SIGTERM" | "SIGKILL"): void => {
 
 const waitUntilGoneOrGraceEnds = async (processIds: ReadonlyArray<number>, pollsLeft: number): Promise<void> => {
   const isAnyStillUp = processIds.some(isProcessAlive);
+
   const isGraceOver = pollsLeft === 0;
-  if (!isAnyStillUp || isGraceOver) {
+
+  const isStillUpAndNotOver = !isAnyStillUp || isGraceOver;
+  if (isStillUpAndNotOver) {
     return;
   }
 

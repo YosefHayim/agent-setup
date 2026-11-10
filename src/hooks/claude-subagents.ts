@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { claudeConfigRoots } from "./claude-live-sessions.js";
-import { folderEntries } from "./folder-entries.js";
-import { isRecord } from "./json-lines.js";
+import { listClaudeSettingsRoots } from "./claude-live-sessions.js";
+import { listFolderNames } from "./folder-entries.js";
+import { isPlainObject } from "./json-lines.js";
 import { decodeTranscriptLine, readTranscriptTail } from "./transcript-reader.js";
 
 const isMarkedFinished = (metaFile: string): boolean => {
   try {
     const subagentMeta: unknown = JSON.parse(readFileSync(metaFile, "utf8"));
-    return isRecord(subagentMeta) && subagentMeta.finished === true;
+    return isPlainObject(subagentMeta) && subagentMeta.finished === true;
   } catch {
     // Claude Code rewrites the file while the subagent runs, so it can be half-written while it is read.
     return false;
@@ -21,7 +21,7 @@ const isMarkedFinished = (metaFile: string): boolean => {
 const isCutOffMidRun = (transcriptFile: string): boolean => {
   const assistantTurns = readTranscriptTail(transcriptFile)
     .map(decodeTranscriptLine)
-    .filter((entry) => entry?.type === "assistant");
+    .filter((line) => line?.type === "assistant");
   const lastTurn = assistantTurns.at(-1);
   return lastTurn?.stopReason !== "end_turn";
 };
@@ -35,13 +35,13 @@ const isRunning = (metaFile: string): boolean => {
   return isCutOffMidRun(transcriptFile);
 };
 
-const subagentMetaFilesIn = (request: { readonly configRoot: string; readonly sessionId: string }) => {
+const listSubagentMetaFilesIn = (request: { readonly configRoot: string; readonly sessionId: string }) => {
   const projectsFolder = path.join(request.configRoot, "projects");
-  const subagentFolders = folderEntries({ folder: projectsFolder, recursive: false }).map((projectName) =>
+  const subagentFolders = listFolderNames({ folder: projectsFolder, recursive: false }).map((projectName) =>
     path.join(projectsFolder, projectName, request.sessionId, "subagents"),
   );
   return subagentFolders.flatMap((subagentFolder) =>
-    folderEntries({ folder: subagentFolder, recursive: false })
+    listFolderNames({ folder: subagentFolder, recursive: false })
       .filter((name) => name.endsWith(".meta.json"))
       .map((name) => path.join(subagentFolder, name)),
   );
@@ -51,6 +51,6 @@ const subagentMetaFilesIn = (request: { readonly configRoot: string; readonly se
 // agent-<id>.meta.json. The meta file says "finished" for only some of the subagents that ended, so the transcript
 // decides the rest. A folder that cannot be listed throws, since any subagent in it could be running.
 export const hasRunningSubagents = (request: { readonly homeRoot: string; readonly sessionId: string }): boolean =>
-  claudeConfigRoots(request.homeRoot)
-    .flatMap((configRoot) => subagentMetaFilesIn({ configRoot, sessionId: request.sessionId }))
+  listClaudeSettingsRoots(request.homeRoot)
+    .flatMap((settingsRoot) => listSubagentMetaFilesIn({ configRoot: settingsRoot, sessionId: request.sessionId }))
     .some(isRunning);

@@ -16,39 +16,48 @@ const DOUBLE_QUOTED_PIECE = /\\([\\"$`\n])|\$(?:\{[^}]*\}|\([^)]*\)|[A-Za-z_]\w*
 const WORD_BREAK = "\u0000";
 const SEGMENT_BREAK = "\u0001";
 // Stands for the unknown text a shell expansion produces when the command runs.
-export const SHELL_VALUE = "\u0002";
+export const SHELL_FIELD = "\u0002";
 // Marks quoted text, so an empty quoted word such as '' stays a word, then is removed.
 const QUOTED_MARK = "\u0003";
 
-const doubleQuotedText = (quoted: string): string =>
+const readDoubleQuotedString = (quoted: string): string =>
   quoted.replace(DOUBLE_QUOTED_PIECE, (_piece, escapedCharacter: string | undefined) => {
-    if (escapedCharacter === undefined) {
-      return SHELL_VALUE;
+    const isEscapedCharacterMissing = escapedCharacter == null;
+    if (isEscapedCharacterMissing) {
+      return SHELL_FIELD;
     }
 
-    return escapedCharacter === "\n" ? "" : escapedCharacter;
+    const isEscapedNewlineCharacter = escapedCharacter === "\n";
+    return isEscapedNewlineCharacter ? "" : escapedCharacter;
   });
 
-const pieceText = (piece: RegExpExecArray): string => {
+const readPieceString = (piece: RegExpExecArray): string => {
   const pieceGroups: Readonly<Record<string, string | undefined>> = { ...piece.groups };
   const { singleQuoted, doubleQuoted, escaped, plainWord, segmentBreak } = pieceGroups;
-  if (singleQuoted !== undefined) {
+
+  const hasSingleQuoted = singleQuoted != null;
+  if (hasSingleQuoted) {
     return `${QUOTED_MARK}${singleQuoted}`;
   }
 
-  if (doubleQuoted !== undefined) {
-    return `${QUOTED_MARK}${doubleQuotedText(doubleQuoted)}`;
+  const hasDoubleQuoted = doubleQuoted != null;
+  if (hasDoubleQuoted) {
+    return `${QUOTED_MARK}${readDoubleQuotedString(doubleQuoted)}`;
   }
 
-  if (escaped !== undefined) {
-    return escaped === "\n" ? "" : escaped;
+  const hasEscaped = escaped != null;
+  if (hasEscaped) {
+    const isEscapedNewline = escaped === "\n";
+    return isEscapedNewline ? "" : escaped;
   }
 
-  if (plainWord !== undefined) {
-    return plainWord.replace(PLAIN_EXPANSION, SHELL_VALUE);
+  const hasPlainWord = plainWord != null;
+  if (hasPlainWord) {
+    return plainWord.replace(PLAIN_EXPANSION, SHELL_FIELD);
   }
 
-  if (segmentBreak === undefined) {
+  const isSegmentBreakMissing = segmentBreak == null;
+  if (isSegmentBreakMissing) {
     return WORD_BREAK;
   }
 
@@ -57,11 +66,14 @@ const pieceText = (piece: RegExpExecArray): string => {
 
 // Parts alternate between segment text and the break between segments, padded with "" at both ends, so the part at an
 // odd index is a segment's text, with the break that opened it before it and the break that closed it after it.
-const segmentAt = (parts: ReadonlyArray<string>, index: number): ReadonlyArray<ShellSegment> => {
-  const [openedBy = "", segmentText = "", closedBy = ""] = parts.slice(index - 1, index + 2);
-  const markedWords = segmentText.split(WORD_BREAK).filter((word) => word !== "");
+const listSegmentAt = (parts: ReadonlyArray<string>, index: number): ReadonlyArray<ShellSegment> => {
+  const [openedBy = "", segmentString = "", closedBy = ""] = parts.slice(index - 1, index + 2);
+  const markedWords = segmentString.split(WORD_BREAK).filter((word) => word !== "");
+
   const words = markedWords.map((word) => word.replaceAll(QUOTED_MARK, ""));
-  if (index % 2 === 0 || words.length === 0) {
+
+  const isEvenOrNoWords = index % 2 === 0 || words.length === 0;
+  if (isEvenOrNoWords) {
     return [];
   }
 
@@ -70,9 +82,9 @@ const segmentAt = (parts: ReadonlyArray<string>, index: number): ReadonlyArray<S
 
 // Splits a shell command into the words of each simple command, e.g. "kill $(pgrep -f vite)" into ["kill", "$"]
 // closed by "(" and ["pgrep", "-f", "vite"] opened by "(".
-export const shellSegments = (command: string): ReadonlyArray<ShellSegment> => {
-  const pieces = Array.from(command.matchAll(SHELL_PIECE), pieceText);
+export const listShellSegments = (command: string): ReadonlyArray<ShellSegment> => {
+  const pieces = Array.from(command.matchAll(SHELL_PIECE), readPieceString);
   const joinedPieces = pieces.join("");
   const parts = ["", ...joinedPieces.split(SEGMENT_BREAK), ""];
-  return parts.flatMap((_part, index) => segmentAt(parts, index));
+  return parts.flatMap((_part, index) => listSegmentAt(parts, index));
 };

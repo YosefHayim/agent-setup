@@ -12,10 +12,12 @@ const isLinux = process.platform === "linux";
 const DELETED_FOLDER_SUFFIX = " (deleted)";
 
 // One block per process, e.g. "130\nfcwd\nn/Users/me/repo": the process id line, then the folder line.
-const workingFolderEntryOf = (block: string): ReadonlyArray<readonly [number, string]> => {
+const listWorkingFolderLine = (block: string): ReadonlyArray<readonly [number, string]> => {
   const [processIdLine = "", ...fieldLines] = block.split("\n");
   const folderLine = fieldLines.find((line) => line.startsWith("n"));
-  return folderLine === undefined ? [] : [[Number(processIdLine), folderLine.slice(1)]];
+
+  const isFolderLineMissing = folderLine == null;
+  return isFolderLineMissing ? [] : [[Number(processIdLine), folderLine.slice(1)]];
 };
 
 const readLsofWorkingFolders = (processIds: ReadonlyArray<number>): ReadonlyArray<readonly [number, string]> => {
@@ -23,16 +25,18 @@ const readLsofWorkingFolders = (processIds: ReadonlyArray<number>): ReadonlyArra
     encoding: "utf8",
     maxBuffer: WORKING_FOLDER_LISTING_LIMIT,
   });
-  if (listing.error) {
+
+  const hasListingError = listing.error;
+  if (hasListingError) {
     throw listing.error;
   }
 
   const processBlocks = listing.stdout.split(/^p/mu).filter(Boolean);
-  return processBlocks.flatMap(workingFolderEntryOf);
+  return processBlocks.flatMap(listWorkingFolderLine);
 };
 
 // A process that ended, or belongs to another user, has no readable link; lsof leaves it out the same way.
-const readProcWorkingFolderEntry = (processId: number): ReadonlyArray<readonly [number, string]> => {
+const readProcWorkingFolderLine = (processId: number): ReadonlyArray<readonly [number, string]> => {
   const folderLinkPath = `/proc/${processId}/cwd`;
   try {
     const linkedFolder = readlinkSync(folderLinkPath);
@@ -40,9 +44,9 @@ const readProcWorkingFolderEntry = (processId: number): ReadonlyArray<readonly [
     const folder = isFolderDeleted ? linkedFolder.slice(0, -DELETED_FOLDER_SUFFIX.length) : linkedFolder;
     return [[processId, folder]];
   } catch (failure) {
-    const isLinkUnreadable =
-      failure instanceof Error && "code" in failure && (failure.code === "ENOENT" || failure.code === "EACCES");
-    if (!isLinkUnreadable) {
+    const isNotLinkUnreadable =
+      !(failure instanceof Error) || !("code" in failure) || (failure.code !== "ENOENT" && failure.code !== "EACCES");
+    if (isNotLinkUnreadable) {
       throw failure;
     }
 
@@ -50,9 +54,9 @@ const readProcWorkingFolderEntry = (processId: number): ReadonlyArray<readonly [
   }
 };
 
-const readWorkingFolderEntries = (processIds: ReadonlyArray<number>): ReadonlyArray<readonly [number, string]> => {
+const readWorkingFolderLines = (processIds: ReadonlyArray<number>): ReadonlyArray<readonly [number, string]> => {
   if (isLinux) {
-    return processIds.flatMap(readProcWorkingFolderEntry);
+    return processIds.flatMap(readProcWorkingFolderLine);
   }
 
   return readLsofWorkingFolders(processIds);
@@ -65,5 +69,5 @@ export const listWorkingFolders = (processIds: ReadonlyArray<number>): ReadonlyM
     return new Map();
   }
 
-  return new Map(readWorkingFolderEntries(processIds));
+  return new Map(readWorkingFolderLines(processIds));
 };

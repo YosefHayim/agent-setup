@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { RunningProcess } from "../process-table.js";
 import {
-  ancestorProcessIds,
   decideLeftoverProcesses,
   isNeverStopped,
   type LeftoverProcessCheck,
+  readAncestorProcessIds,
 } from "./leftover-process-decision.js";
 
 const CODE_ROOT = "/Users/me/Code";
@@ -231,9 +231,9 @@ describe("isNeverStopped", () => {
       "node /Users/me/agent-voice/server.js",
     ];
 
-    const results = protectedCommandLines.map((commandLine) => isStopProtected({ commandLine }));
+    const reports = protectedCommandLines.map((commandLine) => isStopProtected({ commandLine }));
 
-    expect(results.every(Boolean)).toBe(true);
+    expect(reports.every(Boolean)).toBe(true);
   });
 
   it("leaves an ordinary dev server open to the rules", () => {
@@ -249,11 +249,11 @@ describe("ancestorProcessIds", () => {
   ];
 
   it("lists the process and every parent up to launchd", () => {
-    expect([...ancestorProcessIds({ processes: chain, startProcessId: 300 })]).toEqual([300, 200, 100]);
+    expect([...readAncestorProcessIds({ processes: chain, startProcessId: 300 })]).toEqual([300, 200, 100]);
   });
 
   it("stops at a parent missing from the table", () => {
-    expect([...ancestorProcessIds({ processes: chain, startProcessId: 999 })]).toEqual([999]);
+    expect([...readAncestorProcessIds({ processes: chain, startProcessId: 999 })]).toEqual([999]);
   });
 
   it("stops when the parents loop", () => {
@@ -262,6 +262,6 @@ describe("ancestorProcessIds", () => {
       createProcess({ processId: 6, parentProcessId: 5 }),
     ];
 
-    expect([...ancestorProcessIds({ processes: loop, startProcessId: 5 })]).toEqual([5, 6]);
+    expect([...readAncestorProcessIds({ processes: loop, startProcessId: 5 })]).toEqual([5, 6]);
   });
 });

@@ -1,4 +1,4 @@
-import { gitAnswerLines } from "../git-answers.js";
+import { readGitAnswerLines } from "../git-answers.js";
 import { LARGE_FILE_BYTES } from "./risky-files.js";
 
 // Lists every object the commits in a range bring, and "~<id>" for each blob it leaves out for its size. Committed
@@ -16,8 +16,8 @@ const OMITTED_OBJECT_MARK = "~";
 export const readLargeBlobLines = (request: {
   readonly folder: string;
   readonly range: ReadonlyArray<string>;
-}): ReadonlyArray<string> | undefined =>
-  gitAnswerLines({ folder: request.folder, query: [...LARGE_BLOB_QUERY, ...request.range] });
+}): ReadonlyArray<string> | null =>
+  readGitAnswerLines({ folder: request.folder, query: [...LARGE_BLOB_QUERY, ...request.range] });
 
 export const hasLargeBlob = (largeBlobLines: ReadonlyArray<string>): boolean =>
   largeBlobLines.some((line) => line.startsWith(OMITTED_OBJECT_MARK));

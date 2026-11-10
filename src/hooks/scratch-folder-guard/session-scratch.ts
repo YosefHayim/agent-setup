@@ -1,18 +1,18 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
-import { claudeScratchRoots } from "../claude-scratch-roots.js";
-import { codexHome } from "../codex-home.js";
+import { listClaudeScratchRoots } from "../claude-scratch-roots.js";
+import { readCodexHome } from "../codex-home.js";
 import { SESSION_ID_PATTERN } from "../session-ids.js";
 
 // Codex has no scratch folder of its own; a thread told to use "the session scratchpad" makes one under these names.
 const CODEX_SCRATCH_NAMES = ["scratch", "scratchpad", "scratchpads"];
 
-const foldersIn = (folder: string): ReadonlyArray<string> => {
+const listFoldersIn = (folder: string): ReadonlyArray<string> => {
   try {
     return readdirSync(folder, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(folder, entry.name));
+      .filter((line) => line.isDirectory())
+      .map((child) => path.join(folder, child.name));
   } catch {
     // A scratch root that no agent has used yet does not exist.
     return [];
@@ -20,35 +20,35 @@ const foldersIn = (folder: string): ReadonlyArray<string> => {
 };
 
 // Every <scratch root>/<project>/<session> folder; each holds the agent's scratchpad/ and the harness's tasks/.
-export const claudeSessionFolders = (homeRoot: string): ReadonlyArray<string> =>
-  claudeScratchRoots(homeRoot)
-    .flatMap(foldersIn)
-    .flatMap(foldersIn)
+export const listClaudeSessionFolders = (homeRoot: string): ReadonlyArray<string> =>
+  listClaudeScratchRoots(homeRoot)
+    .flatMap(listFoldersIn)
+    .flatMap(listFoldersIn)
     .filter((folder) => SESSION_ID_PATTERN.test(path.basename(folder)));
 
 // A folder is named after its thread, or after whatever the agent chose, e.g. "oly-canonical-20261006".
-export const codexScratchFolders = (homeRoot: string): ReadonlyArray<string> => {
-  const codexFolder = codexHome(homeRoot);
-  return CODEX_SCRATCH_NAMES.map((name) => path.join(codexFolder, name)).flatMap(foldersIn);
+export const listCodexScratchFolders = (homeRoot: string): ReadonlyArray<string> => {
+  const codexFolder = readCodexHome(homeRoot);
+  return CODEX_SCRATCH_NAMES.map((name) => path.join(codexFolder, name)).flatMap(listFoldersIn);
 };
 
 // The folders one session's agent writes its own scratch files to. Claude Code's tasks/ is left out: the harness
 // keeps its command output there.
-export const agentScratchFolders = (request: {
+export const listAgentScratchFolders = (request: {
   readonly homeRoot: string;
   readonly sessionId: string;
 }): ReadonlyArray<string> => {
-  const claudeScratchpads = claudeSessionFolders(request.homeRoot)
+  const claudeScratchpads = listClaudeSessionFolders(request.homeRoot)
     .filter((sessionFolder) => path.basename(sessionFolder) === request.sessionId)
-    .flatMap(foldersIn)
+    .flatMap(listFoldersIn)
     .filter((folder) => path.basename(folder) === "scratchpad");
-  const codexThreadFolders = codexScratchFolders(request.homeRoot).filter(
+  const codexThreadFolders = listCodexScratchFolders(request.homeRoot).filter(
     (folder) => path.basename(folder) === request.sessionId,
   );
   return [...claudeScratchpads, ...codexThreadFolders];
 };
 
-export const holdsFiles = (folder: string): boolean =>
+export const hasFiles = (folder: string): boolean =>
   readdirSync(folder, { withFileTypes: true }).some(
-    (entry) => !entry.isDirectory() || holdsFiles(path.join(folder, entry.name)),
+    (line) => !line.isDirectory() || hasFiles(path.join(folder, line.name)),
   );

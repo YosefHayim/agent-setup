@@ -1,23 +1,19 @@
 #!/usr/bin/env node
-// Detached watcher behind the session-rehome hooks, and the command for a manual pass:
-//   node rehome-watcher.js --sweep [--all] [--dry-run] [--json] [--agent claude-code|codex|all]
-//   node rehome-watcher.js --session <id> --agent <agent> [--wait]
-//   node rehome-watcher.js --sweep --delete-repo aria --assign 5cc2fa97=vybekiit
-// Fails open: a crash leaves every session where it was.
 
 import { existsSync, writeSync } from "node:fs";
 import os from "node:os";
 import { parseArgs } from "node:util";
+import { readFailureText } from "../../failure-text.js";
 
-import { readConfig } from "../../hook-config.js";
+import { readSettings } from "../../hook-config.js";
 import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../watcher-lock.js";
-import { type ClaudeSession, claudeSessionIsLive, findClaudeSession } from "../claude-sessions.js";
-import { codexThreadIsLive, listCodexThreads } from "../codex-threads.js";
+import { type ClaudeSession, findClaudeSession, isClaudeSessionLive } from "../claude-sessions.js";
+import { isCodexThreadLive, listCodexThreads } from "../codex-threads.js";
 import { discoverRepos } from "../local-repos.js";
-import { type RehomeAgent, rehomeLockFile } from "../rehome-ledger.js";
+import { type RehomeAgent, readRehomeLockFile } from "../rehome-ledger.js";
 import { runSweep, type SessionPlan } from "../session-sweep.js";
 
-type WatcherOptions = {
+type WatcherSettings = {
   readonly agents: ReadonlyArray<RehomeAgent>;
   readonly sessionId: string;
   readonly wait: boolean;
@@ -40,7 +36,7 @@ const USAGE = `usage: rehomeWatcher --sweep [--all] [--dry-run] [--json] [--agen
        rehomeWatcher --session <id> [--agent <agent>] [--wait]
        options: --delete-repo <name>[,<name>] --assign <session-id-prefix>=<repo>\n`;
 
-const agentsFor = (agentOption: string): ReadonlyArray<RehomeAgent> => {
+const listAgentsFor = (agentOption: string): ReadonlyArray<RehomeAgent> => {
   switch (agentOption) {
     case "claude-code":
       return ["claude-code"];
@@ -52,23 +48,25 @@ const agentsFor = (agentOption: string): ReadonlyArray<RehomeAgent> => {
 };
 
 // e.g. ["aria,tend", "extension-installer"] → {"aria", "tend", "extension-installer"}
-const splitNames = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
-  values
-    .flatMap((value) => value.split(","))
+const splitNames = (fields: ReadonlyArray<string>): ReadonlyArray<string> =>
+  fields
+    .flatMap((field) => field.split(","))
     .map((name) => name.trim())
     .filter(Boolean);
 
 // e.g. "5cc2fa97=vybekiit" → ["5cc2fa97", "vybekiit"]
-const decodeAssignments = (values: ReadonlyArray<string>): ReadonlyMap<string, string> =>
+const decodeAssignments = (fields: ReadonlyArray<string>): ReadonlyMap<string, string> =>
   new Map(
-    values.flatMap((value) => {
-      const [sessionPrefix, repoName] = value.split("=").map((part) => part.trim());
-      return sessionPrefix && repoName ? [[sessionPrefix, repoName] as const] : [];
+    fields.flatMap((field) => {
+      const [sessionPrefix, repoName] = field.split("=").map((part) => part.trim());
+
+      const hasSessionPrefixAndRepoName = sessionPrefix && repoName;
+      return hasSessionPrefixAndRepoName ? [[sessionPrefix, repoName] as const] : [];
     }),
   );
 
-const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
-  const { values } = parseArgs({
+const decodeWatcherSettings = (argv: ReadonlyArray<string>): WatcherSettings => {
+  const { values: fields } = parseArgs({
     args: [...argv],
     options: {
       agent: { type: "string", default: "all" },
@@ -84,73 +82,84 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
     strict: true,
   });
   return {
-    agents: agentsFor(values.agent),
-    sessionId: values.session,
-    wait: values.wait,
-    sweep: values.sweep,
-    reevaluate: values.all || values.session !== "",
-    dryRun: values["dry-run"],
-    json: values.json,
-    deletedRepoNames: new Set(splitNames(values["delete-repo"])),
-    assignments: decodeAssignments(values.assign),
+    agents: listAgentsFor(fields.agent),
+    sessionId: fields.session,
+    wait: fields.wait,
+    sweep: fields.sweep,
+    reevaluate: fields.all || fields.session !== "",
+    dryRun: fields["dry-run"],
+    json: fields.json,
+    deletedRepoNames: new Set(splitNames(fields["delete-repo"])),
+    assignments: decodeAssignments(fields.assign),
   };
 };
 
-const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const pause = (milliseconds: number): Promise<void> => new Promise((fulfill) => setTimeout(fulfill, milliseconds));
 
 const NOT_LIVE = (): boolean => false;
 
 // Another watcher may move the session while this one waits, so a transcript that is gone is looked up again.
-const currentClaudeSession = (request: { readonly homeRoot: string; readonly session: ClaudeSession }) =>
-  existsSync(request.session.transcriptFile)
+const readCurrentClaudeSession = (request: { readonly homeRoot: string; readonly session: ClaudeSession }) => {
+  const isTranscriptPresent = existsSync(request.session.transcriptFile);
+  return isTranscriptPresent
     ? request.session
     : findClaudeSession({ homeRoot: request.homeRoot, sessionId: request.session.sessionId });
+};
 
 // Finding the session reads every project folder and listing Codex threads opens its database, so the ended session
 // is looked up once and each poll only asks whether its agent has let go.
-const liveCheckFor = async (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
-  const { homeRoot, options } = request;
-  const claudeSession = options.agents.includes("claude-code")
-    ? findClaudeSession({ homeRoot, sessionId: options.sessionId })
-    : undefined;
-  if (claudeSession) {
+const readLiveCheck = async (request: { readonly homeRoot: string; readonly options: WatcherSettings }) => {
+  const { homeRoot, options: settings } = request;
+
+  const isClaudeCodeSelected = settings.agents.includes("claude-code");
+  const claudeSession = isClaudeCodeSelected ? findClaudeSession({ homeRoot, sessionId: settings.sessionId }) : null;
+
+  const isClaudeSessionFound = claudeSession != null;
+  if (isClaudeSessionFound) {
     return () => {
-      const session = currentClaudeSession({ homeRoot, session: claudeSession });
-      return (
-        session !== undefined && claudeSessionIsLive({ homeRoot, session, quietSeconds: ENDED_SESSION_QUIET_SECONDS })
-      );
+      const session = readCurrentClaudeSession({ homeRoot, session: claudeSession });
+      return session != null && isClaudeSessionLive({ homeRoot, session, quietSeconds: ENDED_SESSION_QUIET_SECONDS });
     };
   }
 
-  const codexThread = options.agents.includes("codex")
-    ? (await listCodexThreads(homeRoot)).find((thread) => thread.threadId === options.sessionId)
-    : undefined;
-  if (!codexThread) {
+  const isCodexSelected = settings.agents.includes("codex");
+  const codexThread = isCodexSelected
+    ? (await listCodexThreads(homeRoot)).find((thread) => thread.threadId === settings.sessionId)
+    : null;
+
+  const hasNoCodexThread = !codexThread;
+  if (hasNoCodexThread) {
     return NOT_LIVE;
   }
 
-  return () => codexThreadIsLive({ homeRoot, thread: codexThread, quietSeconds: ENDED_SESSION_QUIET_SECONDS });
+  return () => isCodexThreadLive({ homeRoot, thread: codexThread, quietSeconds: ENDED_SESSION_QUIET_SECONDS });
 };
 
 // SessionEnd runs before the agent's last writes and exit, so the hand-over waits for the agent to let go. While
 // another watcher holds the lock this one cannot act anyway, so it does not look at the session until the lock frees.
-const waitUntilReady = async (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
+const waitUntilReady = async (request: { readonly homeRoot: string; readonly options: WatcherSettings }) => {
   const deadline = Date.now() + WAIT_LIMIT_MILLISECONDS;
-  const isSessionLive = await liveCheckFor(request);
+  const isSessionLive = await readLiveCheck(request);
   while (Date.now() < deadline) {
-    const isLockFree = !isWatcherLockHeldByOther(rehomeLockFile());
-    if (isLockFree && !(await isSessionLive()) && acquireWatcherLock(rehomeLockFile())) {
+    const isLockFree = !isWatcherLockHeldByOther(readRehomeLockFile());
+
+    const isLockFreeAndNotLive = isLockFree && !(await isSessionLive()) && acquireWatcherLock(readRehomeLockFile());
+    if (isLockFreeAndNotLive) {
       return true;
     }
+
     await pause(WAIT_POLL_MILLISECONDS);
   }
   return false;
 };
 
-const formatPlan = (plan: SessionPlan): string => {
-  const target = plan.action === "move" ? `→ ${plan.repoName} (${Math.round(plan.share * 100)}%)` : plan.repoName;
+const describePlan = (plan: SessionPlan): string => {
+  const isMoveAction = plan.action === "move";
+  const target = isMoveAction ? `→ ${plan.repoName} (${Math.round(plan.share * 100)}%)` : plan.repoName;
   const candidates = plan.candidates.map((candidate) => `${candidate.repoName} ${Math.round(candidate.share * 100)}%`);
-  const detail = plan.action === "uncertain" ? `candidates: ${candidates.join(", ") || "none"}` : target;
+
+  const isUncertainAction = plan.action === "uncertain";
+  const detail = isUncertainAction ? `candidates: ${candidates.join(", ") || "none"}` : target;
   return [
     plan.agent.padEnd(11),
     plan.sessionId,
@@ -163,51 +172,63 @@ const formatPlan = (plan: SessionPlan): string => {
 };
 
 const printPlans = (request: { readonly plans: ReadonlyArray<SessionPlan>; readonly json: boolean }): void => {
-  const report = request.json
+  const isMachineReadable = request.json;
+  const report = isMachineReadable
     ? `${JSON.stringify(request.plans, null, 2)}\n`
-    : request.plans.map((plan) => `${formatPlan(plan)}\n`).join("");
+    : request.plans.map((plan) => `${describePlan(plan)}\n`).join("");
   writeSync(1, report);
 };
 
 const runWatcher = async (): Promise<void> => {
-  const options = decodeWatcherOptions(process.argv.slice(2));
-  if (!options.sweep && !options.sessionId) {
+  const settings = decodeWatcherSettings(process.argv.slice(2));
+
+  const hasNoSweepOrSession = !settings.sweep && !settings.sessionId;
+  if (hasNoSweepOrSession) {
     writeSync(2, USAGE);
     return;
   }
 
-  const homeRoot = process.env.HOME || os.homedir();
-  const ready = options.wait ? await waitUntilReady({ homeRoot, options }) : acquireWatcherLock(rehomeLockFile());
-  if (!ready) {
+  const homeRoot = os.homedir();
+
+  const isWaitRequested = settings.wait;
+  const ready = isWaitRequested
+    ? await waitUntilReady({ homeRoot, options: settings })
+    : acquireWatcherLock(readRehomeLockFile());
+
+  const isNotReady = !ready;
+  if (isNotReady) {
     return;
   }
 
+  const hasSessionId = settings.sessionId !== "";
   try {
     const repos = discoverRepos({
       homeRoot,
-      rootFolders: readConfig().sessionRehomeRoots,
-      deletedRepoNames: [...options.deletedRepoNames],
+      rootFolders: readSettings().sessionRehomeRoots,
+      deletedRepoNames: [...settings.deletedRepoNames],
     });
     const plans = await runSweep({
       homeRoot,
       repos,
-      agents: options.agents,
-      sessionId: options.sessionId,
-      reevaluate: options.reevaluate,
-      dryRun: options.dryRun,
-      deletedRepoNames: options.deletedRepoNames,
-      assignments: options.assignments,
-      quietSeconds: options.sessionId ? ENDED_SESSION_QUIET_SECONDS : SWEEP_QUIET_SECONDS,
+      agents: settings.agents,
+      sessionId: settings.sessionId,
+      reevaluate: settings.reevaluate,
+      dryRun: settings.dryRun,
+      deletedRepoNames: settings.deletedRepoNames,
+      assignments: settings.assignments,
+      quietSeconds: hasSessionId ? ENDED_SESSION_QUIET_SECONDS : SWEEP_QUIET_SECONDS,
     });
-    printPlans({ plans, json: options.json });
+    printPlans({ plans, json: settings.json });
   } finally {
-    releaseWatcherLock(rehomeLockFile());
+    releaseWatcherLock(readRehomeLockFile());
   }
 };
 
 runWatcher().catch((failure: unknown) => {
-  if (readConfig().debugLogs) {
-    writeSync(2, `session-rehome error: ${failure instanceof Error ? failure.stack : String(failure)}\n`);
+  const isDebugLogging = readSettings().debugLogs;
+  if (isDebugLogging) {
+    writeSync(2, `session-rehome error: ${readFailureText(failure)}\n`);
   }
+
   process.exit(0);
 });

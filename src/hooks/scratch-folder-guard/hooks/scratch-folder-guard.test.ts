@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 
 const hookPath = fileURLToPath(new URL("./scratch-folder-guard.ts", import.meta.url));
 
-const runHook = (hookInput: string) =>
-  spawnSync(process.execPath, ["--import", "tsx", hookPath], { input: hookInput, encoding: "utf8" });
+const runHook = (hookDetails: string) =>
+  spawnSync(process.execPath, ["--import", "tsx", hookPath], { input: hookDetails, encoding: "utf8" });
 
 describe("scratchFolderGuard process boundary", () => {
   it("fails open with clean stdout when hook input is malformed", () => {

@@ -1,37 +1,42 @@
 import { readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { unsavedWorkTrees } from "./unsaved-git-work.js";
+import { listUnsavedWorkTrees } from "./unsaved-git-work.js";
 
 const removeAround = (request: { readonly folder: string; readonly keptWorkTrees: ReadonlyArray<string> }): void => {
-  const entries = readdirSync(request.folder).map((name) => path.join(request.folder, name));
-  const entriesAroundKeptWork = entries.filter((entry) =>
-    request.keptWorkTrees.some((workTree) => workTree.startsWith(`${entry}${path.sep}`)),
+  const lines = readdirSync(request.folder).map((name) => path.join(request.folder, name));
+  const linesAroundKeptWork = lines.filter((line) =>
+    request.keptWorkTrees.some((workTree) => workTree.startsWith(`${line}${path.sep}`)),
   );
-  const removableEntries = entries.filter(
-    (entry) => !entriesAroundKeptWork.includes(entry) && !request.keptWorkTrees.includes(entry),
+  const removableLines = lines.filter(
+    (line) => !linesAroundKeptWork.includes(line) && !request.keptWorkTrees.includes(line),
   );
-  for (const entry of removableEntries) {
-    rmSync(entry, { recursive: true, force: true });
+  for (const line of removableLines) {
+    rmSync(line, { recursive: true, force: true });
   }
-  for (const entry of entriesAroundKeptWork) {
-    removeAround({ folder: entry, keptWorkTrees: request.keptWorkTrees });
+  for (const line of linesAroundKeptWork) {
+    removeAround({ folder: line, keptWorkTrees: request.keptWorkTrees });
   }
 };
 
 // Deletes everything inside a scratch folder except git work trees holding work that is not committed and pushed,
 // and returns the work trees it kept.
-export const emptyScratchFolder = (folder: string): ReadonlyArray<string> => {
-  const keptWorkTrees = unsavedWorkTrees(folder);
-  if (!keptWorkTrees.includes(folder)) {
+export const listEmptyScratchFolder = (folder: string): ReadonlyArray<string> => {
+  const keptWorkTrees = listUnsavedWorkTrees(folder);
+
+  const isNotKeptWorkTree = !keptWorkTrees.includes(folder);
+  if (isNotKeptWorkTree) {
     removeAround({ folder, keptWorkTrees });
   }
+
   return keptWorkTrees;
 };
 
 const removeScratchFolder = (folder: string): void => {
-  const keptWorkTrees = emptyScratchFolder(folder);
-  if (keptWorkTrees.length === 0) {
+  const keptWorkTrees = listEmptyScratchFolder(folder);
+
+  const isKeptWorkTreesEmpty = keptWorkTrees.length === 0;
+  if (isKeptWorkTreesEmpty) {
     rmSync(folder, { recursive: true, force: true });
   }
 };

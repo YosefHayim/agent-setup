@@ -1,1 +1,2 @@
-export const escapeForPattern = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+export const escapeForPattern = (literalString: string): string =>
+  literalString.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");

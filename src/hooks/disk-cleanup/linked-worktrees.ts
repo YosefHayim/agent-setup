@@ -1,4 +1,4 @@
-import { gitAnswerLines } from "../git-answers.js";
+import { readGitAnswerLines } from "../git-answers.js";
 
 export type LinkedWorktree = {
   readonly folder: string;
@@ -16,15 +16,18 @@ const BRANCH_LINE_START = "branch refs/heads/";
 
 // Each worktree starts with "worktree <folder>", followed by lines such as "branch refs/heads/feature", "detached",
 // "locked <reason>", and "prunable <reason>". The main worktree comes first.
-const worktreeBlocks = (listLines: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> => {
-  const blockStarts = listLines.flatMap((line, position) => (line.startsWith(FOLDER_LINE_START) ? [position] : []));
+const listWorktreeBlocks = (listLines: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> => {
+  const blockStarts = listLines.flatMap((line, position) => {
+    const isFolderLine = line.startsWith(FOLDER_LINE_START);
+    return isFolderLine ? [position] : [];
+  });
   return blockStarts.map((blockStart, order) => listLines.slice(blockStart, blockStarts[order + 1]));
 };
 
 const hasFlag = (request: { readonly block: ReadonlyArray<string>; readonly flag: string }): boolean =>
   request.block.some((line) => line === request.flag || line.startsWith(`${request.flag} `));
 
-const linkedWorktreeFrom = (request: { readonly block: ReadonlyArray<string>; readonly mainFolder: string }) => {
+const readLinkedWorktreeFrom = (request: { readonly block: ReadonlyArray<string>; readonly mainFolder: string }) => {
   const branchLine = request.block.find((line) => line.startsWith(BRANCH_LINE_START)) || BRANCH_LINE_START;
   return {
     folder: request.block[0].slice(FOLDER_LINE_START.length),
@@ -35,7 +38,7 @@ const linkedWorktreeFrom = (request: { readonly block: ReadonlyArray<string>; re
   };
 };
 
-type RepoWorktreeList = { readonly repoRoot: string; readonly listLines: ReadonlyArray<string> | undefined };
+type RepoWorktreeList = { readonly repoRoot: string; readonly listLines: ReadonlyArray<string> | null };
 
 // A repo git cannot list is named, rather than taken for one without worktrees.
 export type LinkedWorktreeListing = {
@@ -44,24 +47,26 @@ export type LinkedWorktreeListing = {
 };
 
 const readWorktreeList = (repoRoot: string): RepoWorktreeList => {
-  const listLines = gitAnswerLines({ folder: repoRoot, query: WORKTREE_LIST_QUERY });
+  const listLines = readGitAnswerLines({ folder: repoRoot, query: WORKTREE_LIST_QUERY });
   return { repoRoot, listLines };
 };
 
-const linkedWorktreesOf = (worktreeList: RepoWorktreeList): ReadonlyArray<LinkedWorktree> => {
-  const [mainBlock, ...linkedBlocks] = worktreeBlocks(worktreeList.listLines || []);
-  if (!mainBlock) {
+const readLinkedWorktrees = (worktreeList: RepoWorktreeList): ReadonlyArray<LinkedWorktree> => {
+  const [mainBlock, ...linkedBlocks] = listWorktreeBlocks(worktreeList.listLines || []);
+
+  const hasNoMainBlock = !mainBlock;
+  if (hasNoMainBlock) {
     return [];
   }
 
   const mainFolder = mainBlock[0].slice(FOLDER_LINE_START.length);
-  return linkedBlocks.map((block) => linkedWorktreeFrom({ block, mainFolder }));
+  return linkedBlocks.map((block) => readLinkedWorktreeFrom({ block, mainFolder }));
 };
 
 // A repo root can itself be a linked worktree, so the same worktree can come up from several roots.
 export const listLinkedWorktrees = (repoRoots: ReadonlyArray<string>): LinkedWorktreeListing => {
   const worktreeLists = repoRoots.map(readWorktreeList);
-  const worktrees = worktreeLists.flatMap(linkedWorktreesOf);
+  const worktrees = worktreeLists.flatMap(readLinkedWorktrees);
   const worktreeByFolder = new Map(worktrees.map((worktree) => [worktree.folder, worktree]));
   const unreadableLists = worktreeLists.filter((worktreeList) => !worktreeList.listLines);
   const unreadableRepoRoots = unreadableLists.map((worktreeList) => worktreeList.repoRoot);

@@ -11,7 +11,7 @@ export type StopCheck = {
 
 export type ScratchCleanupDecision = { readonly _tag: "quiet" } | { readonly _tag: "ask"; readonly question: string };
 
-const cleanupQuestion = (check: StopCheck): string =>
+const readCleanupQuestion = (check: StopCheck): string =>
   [
     "Scratch cleanup check. This session left files in its scratch folder:",
     ...check.scratchFoldersWithFiles.map((folder) => `- ${folder}`),
@@ -27,9 +27,11 @@ const cleanupQuestion = (check: StopCheck): string =>
 
 export const decideScratchCleanup = (check: StopCheck): ScratchCleanupDecision => {
   const turnMayEnd = check.alreadyContinuing || check.workPending || !check.attended;
-  if (turnMayEnd || check.scratchFoldersWithFiles.length === 0) {
+  const hasNoScratchFolders = check.scratchFoldersWithFiles.length === 0;
+  const isQuietTurn = turnMayEnd || hasNoScratchFolders;
+  if (isQuietTurn) {
     return { _tag: "quiet" };
   }
 
-  return { _tag: "ask", question: cleanupQuestion(check) };
+  return { _tag: "ask", question: readCleanupQuestion(check) };
 };

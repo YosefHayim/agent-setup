@@ -1,57 +1,70 @@
 #!/usr/bin/env node
-// PreToolUse hook that blocks agent writes into system temporary folders such as /tmp; fails open.
 
 import { readFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { readFailureText } from "../../failure-text.js";
 
-import { readConfig } from "../../hook-config.js";
+import { readSettings } from "../../hook-config.js";
 import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
 import { decideScratchWrite, type ToolCall } from "../scratch-write-decision.js";
 
-const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const stringField = (record: Record<string, unknown>, property: string): string | undefined => {
-  const candidate = record[property];
-  return typeof candidate === "string" ? candidate : undefined;
+const readStringField = (fields: Record<string, unknown>, property: string): string | null => {
+  const candidate = fields[property];
+
+  const isCandidateString = typeof candidate === "string";
+  return isCandidateString ? candidate : null;
 };
 
-const workingDirectoryOf = (hookInput: Record<string, unknown>): string | undefined => {
-  const hookDirectory = stringField(hookInput, "cwd");
-  if (hookDirectory !== undefined) {
+const readWorkingDirectory = (hookDetails: Record<string, unknown>): string | null => {
+  const hookDirectory = readStringField(hookDetails, "cwd");
+
+  const hasHookDirectory = hookDirectory != null;
+  if (hasHookDirectory) {
     return hookDirectory;
   }
 
   // Codex shell calls carry their directory in the tool input instead of the hook input.
-  const toolInput = hookInput.tool_input;
-  if (!isRecord(toolInput)) {
-    return undefined;
+  const toolDetails = hookDetails.tool_input;
+
+  const isToolDetailsInvalid = !isPlainObject(toolDetails);
+  if (isToolDetailsInvalid) {
+    return null;
   }
 
-  return stringField(toolInput, "cwd") || stringField(toolInput, "workdir");
+  return readStringField(toolDetails, "cwd") || readStringField(toolDetails, "workdir");
 };
 
-const decodeToolCall = (candidate: unknown): ToolCall | undefined => {
-  if (!isRecord(candidate)) {
-    return undefined;
+const decodeToolCall = (candidate: unknown): ToolCall | null => {
+  const isCandidateInvalid = !isPlainObject(candidate);
+  if (isCandidateInvalid) {
+    return null;
   }
 
-  const toolName = stringField(candidate, "tool_name");
-  if (toolName === undefined) {
-    return undefined;
+  const toolName = readStringField(candidate, "tool_name");
+
+  const isToolNameMissing = toolName == null;
+  if (isToolNameMissing) {
+    return null;
   }
 
-  return { toolName, toolInput: candidate.tool_input, workingDirectory: workingDirectoryOf(candidate) };
+  return { toolName, toolInput: candidate.tool_input, workingDirectory: readWorkingDirectory(candidate) };
 };
 
 const runScratchFolderGuard = (): never => {
   const toolCall = decodeToolCall(JSON.parse(readFileSync(0, "utf8")));
-  if (!toolCall) {
+
+  const hasNoToolCall = !toolCall;
+  if (hasNoToolCall) {
     return allowAndExit();
   }
 
   const decision = decideScratchWrite({ ...toolCall, systemScratchFolder: tmpdir() });
-  if (decision._tag === "allow") {
+
+  const isDecision_tagAllow = decision._tag === "allow";
+  if (isDecision_tagAllow) {
     return allowAndExit();
   }
 
@@ -67,8 +80,10 @@ const runScratchFolderGuard = (): never => {
 try {
   runScratchFolderGuard();
 } catch (failure) {
-  if (readConfig().debugLogs) {
-    writeSync(2, `scratch-folder-guard error: ${failure instanceof Error ? failure.stack : String(failure)}\n`);
+  const isDebugLogging = readSettings().debugLogs;
+  if (isDebugLogging) {
+    writeSync(2, `scratch-folder-guard error: ${readFailureText(failure)}\n`);
   }
+
   process.exit(0);
 }

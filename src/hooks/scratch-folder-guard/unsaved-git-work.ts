@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { gitAnswerLines, gitFindsNothing } from "../git-answers.js";
+import { isGitFindingNothing, readGitAnswerLines } from "../git-answers.js";
 
 // A repository can tell git status to skip its submodules ("ignore = all" in .gitmodules) or its new files
 // ("status.showUntrackedFiles = no"); the flags ask anyway.
@@ -48,38 +48,42 @@ const GIT_FOLDER_QUERY = ["rev-parse", "--absolute-git-dir"];
 // halfway leaves a clone full of these, and no content is lost with them: git already has every such file.
 const MISSING_TRACKED_FILE = /^ D /u;
 
-const subfoldersOf = (folder: string): ReadonlyArray<string> =>
+const listSubfoldersOf = (folder: string): ReadonlyArray<string> =>
   readdirSync(folder, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(folder, entry.name));
+    .filter((line) => line.isDirectory())
+    .map((child) => path.join(folder, child.name));
 
 // A submodule keeps its repository inside its parent's git folder, e.g. .git/modules/vendor/library, and a nested
 // submodule under that repository's own modules folder. The parent's log does not see these commits.
-const submoduleRepositoriesIn = (folder: string): ReadonlyArray<string> => {
-  if (!existsSync(folder)) {
+const listSubmoduleRepositoriesIn = (folder: string): ReadonlyArray<string> => {
+  const isFolderMissing = !existsSync(folder);
+  if (isFolderMissing) {
     return [];
   }
 
-  if (existsSync(path.join(folder, "HEAD")) && existsSync(path.join(folder, "objects"))) {
-    return [folder, ...submoduleRepositoriesIn(path.join(folder, "modules"))];
+  const isGitDirectory = existsSync(path.join(folder, "HEAD")) && existsSync(path.join(folder, "objects"));
+  if (isGitDirectory) {
+    return [folder, ...listSubmoduleRepositoriesIn(path.join(folder, "modules"))];
   }
 
-  return subfoldersOf(folder).flatMap(submoduleRepositoriesIn);
+  return listSubfoldersOf(folder).flatMap(listSubmoduleRepositoriesIn);
 };
 
 // The tag objects a repository has in common with its remotes: every commit under one of them is kept there.
 const tagObjectsOnRemotes = (repository: string): ReadonlyArray<string> => {
-  const localTagObjects = gitAnswerLines({ folder: repository, query: LOCAL_TAG_QUERY }) || [];
-  if (localTagObjects.length === 0) {
+  const localTagObjects = readGitAnswerLines({ folder: repository, query: LOCAL_TAG_QUERY }) || [];
+
+  const isLocalTagObjectsEmpty = localTagObjects.length === 0;
+  if (isLocalTagObjectsEmpty) {
     return [];
   }
 
-  const remoteNames = gitAnswerLines({ folder: repository, query: REMOTE_NAME_QUERY }) || [];
+  const remoteNames = readGitAnswerLines({ folder: repository, query: REMOTE_NAME_QUERY }) || [];
   const remoteTagObjects = remoteNames
     .flatMap((remoteName) => {
       const remoteTagQuery = [...REMOTE_TAG_QUERY, remoteName];
       const timeoutMilliseconds = REMOTE_ANSWER_TIMEOUT_MILLISECONDS;
-      return gitAnswerLines({ folder: repository, query: remoteTagQuery, timeoutMilliseconds }) || [];
+      return readGitAnswerLines({ folder: repository, query: remoteTagQuery, timeoutMilliseconds }) || [];
     })
     .flatMap((remoteTagLine) => remoteTagLine.split("\t").slice(0, 1));
   const objectsOnRemotes = new Set(remoteTagObjects);
@@ -89,34 +93,40 @@ const tagObjectsOnRemotes = (repository: string): ReadonlyArray<string> => {
 // A clone copies every tag of its remote, also one on commits that no remote branch holds, e.g. the tag of a deleted
 // release branch. Only the remote can tell such a tag from one made here, so it is asked, and only when a tag is all
 // that still holds a commit.
-const commitsKeptOnRemotes = (repository: string): boolean => {
-  if (gitFindsNothing({ folder: repository, query: UNPUSHED_COMMIT_QUERY })) {
+const isCommitKeptOnRemotes = (repository: string): boolean => {
+  if (isGitFindingNothing({ folder: repository, query: UNPUSHED_COMMIT_QUERY })) {
     return true;
   }
 
-  if (!gitFindsNothing({ folder: repository, query: UNPUSHED_COMMIT_QUERY_PAST_TAGS })) {
+  const hasUnpushedCommits = !isGitFindingNothing({ folder: repository, query: UNPUSHED_COMMIT_QUERY_PAST_TAGS });
+  if (hasUnpushedCommits) {
     return false;
   }
 
   const tagObjects = tagObjectsOnRemotes(repository);
   const queryPastRemoteTags = [...UNPUSHED_COMMIT_QUERY, ...tagObjects];
-  return tagObjects.length > 0 && gitFindsNothing({ folder: repository, query: queryPastRemoteTags });
+  return tagObjects.length > 0 && isGitFindingNothing({ folder: repository, query: queryPastRemoteTags });
 };
 
-const everythingCommittedIn = (workTree: string): boolean =>
-  gitFindsNothing({ folder: workTree, query: UNCOMMITTED_CHANGE_QUERY, ignoredLine: MISSING_TRACKED_FILE });
+const isEverythingCommittedIn = (workTree: string): boolean =>
+  isGitFindingNothing({ folder: workTree, query: UNCOMMITTED_CHANGE_QUERY, ignoredLine: MISSING_TRACKED_FILE });
 
-const holdsUnsavedWork = (workTree: string): boolean => {
-  const [gitFolder] = gitAnswerLines({ folder: workTree, query: GIT_FOLDER_QUERY }) || [];
-  if (!gitFolder || !everythingCommittedIn(workTree)) {
+const hasUnsavedWork = (workTree: string): boolean => {
+  const [gitFolder] = readGitAnswerLines({ folder: workTree, query: GIT_FOLDER_QUERY }) || [];
+
+  const isNotCommittedOrMissing = !gitFolder || !isEverythingCommittedIn(workTree);
+  if (isNotCommittedOrMissing) {
     return true;
   }
 
-  const standaloneClone = statSync(path.join(workTree, ".git")).isDirectory();
-  const commitsKeptElsewhere = standaloneClone
-    ? commitsKeptOnRemotes(workTree)
-    : gitFindsNothing({ folder: workTree, query: DETACHED_COMMIT_QUERY });
-  if (!commitsKeptElsewhere) {
+  const isStandaloneClone = statSync(path.join(workTree, ".git")).isDirectory();
+
+  const commitsKeptElsewhere = isStandaloneClone
+    ? isCommitKeptOnRemotes(workTree)
+    : isGitFindingNothing({ folder: workTree, query: DETACHED_COMMIT_QUERY });
+
+  const isNotKeptElsewhere = !commitsKeptElsewhere;
+  if (isNotKeptElsewhere) {
     return true;
   }
 
@@ -124,14 +134,16 @@ const holdsUnsavedWork = (workTree: string): boolean => {
   // worktrees under .git/worktrees/<name>.
   const submoduleRepositories = ["modules", "worktrees"].flatMap((name) => {
     const submoduleParent = path.join(gitFolder, name);
-    return submoduleRepositoriesIn(submoduleParent);
+    return listSubmoduleRepositoriesIn(submoduleParent);
   });
-  if (!submoduleRepositories.every(commitsKeptOnRemotes)) {
+
+  const hasSubmoduleNotKept = !submoduleRepositories.every(isCommitKeptOnRemotes);
+  if (hasSubmoduleNotKept) {
     return true;
   }
 
   // A remote can take long to answer, and a file written here in that time is work too.
-  return !everythingCommittedIn(workTree);
+  return !isEverythingCommittedIn(workTree);
 };
 
 const isWorkTree = (folder: string): boolean => existsSync(path.join(folder, ".git"));
@@ -141,13 +153,13 @@ const workTreesIn = (folder: string): ReadonlyArray<string> => {
     return [folder];
   }
 
-  return subfoldersOf(folder).flatMap(workTreesIn);
+  return listSubfoldersOf(folder).flatMap(workTreesIn);
 };
 
 // A work tree can hold another one that its own git status does not show, e.g. a linked worktree in an ignored
 // .worktrees folder. Its .git folder holds none.
 const workTreesInside = (workTree: string): ReadonlyArray<string> =>
-  subfoldersOf(workTree)
+  listSubfoldersOf(workTree)
     .filter((subfolder) => path.basename(subfolder) !== ".git")
     .flatMap((subfolder) => {
       const deeperWorkTrees = workTreesInside(subfolder);
@@ -155,10 +167,10 @@ const workTreesInside = (workTree: string): ReadonlyArray<string> =>
     });
 
 // Unsaved work in a nested work tree keeps the outer one whole, since the nested one may live off its repository.
-const holdsUnsavedWorkAtAnyDepth = (workTree: string): boolean =>
-  holdsUnsavedWork(workTree) || workTreesInside(workTree).some(holdsUnsavedWork);
+const hasUnsavedWorkAtAnyDepth = (workTree: string): boolean =>
+  hasUnsavedWork(workTree) || workTreesInside(workTree).some(hasUnsavedWork);
 
 // Agents sometimes work on a repo from a clone or worktree inside a scratch folder. One with changes that are not
 // committed, or with commits that exist nowhere else, holds work that deleting the folder would erase.
-export const unsavedWorkTrees = (folder: string): ReadonlyArray<string> =>
-  workTreesIn(folder).filter(holdsUnsavedWorkAtAnyDepth);
+export const listUnsavedWorkTrees = (folder: string): ReadonlyArray<string> =>
+  workTreesIn(folder).filter(hasUnsavedWorkAtAnyDepth);

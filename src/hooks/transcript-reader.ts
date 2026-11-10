@@ -1,6 +1,3 @@
-// Agent transcripts hold one JSON object per line; scratch-folder-guard and session-rehome decode
-// them here.
-
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 
 // The newest turns sit at the end, so per-check readers look only at this much of a long transcript.
@@ -16,73 +13,83 @@ export type TokenUsage = {
   readonly outputTokens: number;
 };
 
-export type TranscriptEntry = {
+export type TranscriptLine = {
   readonly isSidechain: boolean;
   /** Claude Code writes `type` ("user", "assistant", …); other agents write only `role`. */
   readonly type: string;
   readonly role: string;
   readonly model: string;
-  readonly usage: TokenUsage | undefined;
+  readonly usage: TokenUsage | null;
   /** `message.content` when the entry wraps a message, else the entry's own `content`. */
   readonly content: unknown;
   readonly stopReason: string | null;
 };
 
-const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const numberProperty = (record: Record<string, unknown>, property: string): number => {
-  const candidate = record[property];
-  return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : 0;
+const readNumberProperty = (fields: Record<string, unknown>, property: string): number => {
+  const candidate = fields[property];
+
+  const isFiniteNumber = typeof candidate === "number" && Number.isFinite(candidate);
+  return isFiniteNumber ? candidate : 0;
 };
 
-const stringProperty = (record: Record<string, unknown>, property: string): string => {
-  const candidate = record[property];
-  return typeof candidate === "string" ? candidate : "";
+const readStringProperty = (fields: Record<string, unknown>, property: string): string => {
+  const candidate = fields[property];
+
+  const isStringCandidate = typeof candidate === "string";
+  return isStringCandidate ? candidate : "";
 };
 
-const decodeTokenUsage = (candidate: unknown): TokenUsage | undefined => {
-  if (!isRecord(candidate)) {
-    return undefined;
+const decodeTokenUsage = (candidate: unknown): TokenUsage | null => {
+  const isNotPlainObject = !isPlainObject(candidate);
+  if (isNotPlainObject) {
+    return null;
   }
 
   return {
-    inputTokens: numberProperty(candidate, "input_tokens"),
-    cacheCreationInputTokens: numberProperty(candidate, "cache_creation_input_tokens"),
-    cacheReadInputTokens: numberProperty(candidate, "cache_read_input_tokens"),
-    outputTokens: numberProperty(candidate, "output_tokens"),
+    inputTokens: readNumberProperty(candidate, "input_tokens"),
+    cacheCreationInputTokens: readNumberProperty(candidate, "cache_creation_input_tokens"),
+    cacheReadInputTokens: readNumberProperty(candidate, "cache_read_input_tokens"),
+    outputTokens: readNumberProperty(candidate, "output_tokens"),
   };
 };
 
-const decodeTranscriptEntry = (candidate: unknown): TranscriptEntry | undefined => {
-  if (!isRecord(candidate)) {
-    return undefined;
+const decodeTranscriptObject = (candidate: unknown): TranscriptLine | null => {
+  const isNotPlainObject = !isPlainObject(candidate);
+  if (isNotPlainObject) {
+    return null;
   }
 
-  const message = isRecord(candidate.message) ? candidate.message : undefined;
+  const message = isPlainObject(candidate.message) ? candidate.message : null;
+  const hasMessage = message != null;
   const stopReason = message?.stop_reason;
+  const isStopReasonString = typeof stopReason === "string";
   return {
     isSidechain: candidate.isSidechain === true,
-    type: stringProperty(candidate, "type"),
-    role: stringProperty(candidate, "role"),
-    model: message ? stringProperty(message, "model") : "",
-    usage: message ? decodeTokenUsage(message.usage) : undefined,
-    content: message ? message.content : candidate.content,
-    stopReason: typeof stopReason === "string" ? stopReason : null,
+    type: readStringProperty(candidate, "type"),
+    role: readStringProperty(candidate, "role"),
+    model: hasMessage ? readStringProperty(message, "model") : "",
+    usage: hasMessage ? decodeTokenUsage(message.usage) : null,
+    content: hasMessage ? message.content : candidate.content,
+    stopReason: isStopReasonString ? stopReason : null,
   };
 };
 
-// A blank or malformed line gives undefined.
-export const decodeTranscriptLine = (line: string): TranscriptEntry | undefined => {
+// A blank or malformed line gives null.
+export const decodeTranscriptLine = (line: string): TranscriptLine | null => {
   const trimmed = line.trim();
-  if (!trimmed) {
-    return undefined;
+
+  const isTrimmedBlank = !trimmed;
+  if (isTrimmedBlank) {
+    return null;
   }
 
   try {
-    return decodeTranscriptEntry(JSON.parse(trimmed));
+    return decodeTranscriptObject(JSON.parse(trimmed));
   } catch {
-    return undefined;
+    return null;
   }
 };
 
@@ -96,18 +103,22 @@ const readHeadChunk = (read: HeadRead): Buffer => {
   return bytes.subarray(0, byteCount);
 };
 
-const restOfOpenLine = (read: HeadRead): ReadonlyArray<Buffer> => {
+const listRestOfOpenLine = (read: HeadRead): ReadonlyArray<Buffer> => {
   const chunk = readHeadChunk(read);
+
   const lineEnd = chunk.indexOf(LINE_FEED);
-  if (lineEnd !== -1) {
+
+  const hasLineEnd = lineEnd !== -1;
+  if (hasLineEnd) {
     return [chunk.subarray(0, lineEnd)];
   }
 
-  if (chunk.length < TRANSCRIPT_HEAD_BYTES) {
+  const isShortChunk = chunk.length < TRANSCRIPT_HEAD_BYTES;
+  if (isShortChunk) {
     return [chunk];
   }
 
-  const laterChunks = restOfOpenLine({ ...read, position: read.position + chunk.length });
+  const laterChunks = listRestOfOpenLine({ ...read, position: read.position + chunk.length });
   return [chunk, ...laterChunks];
 };
 
@@ -116,8 +127,8 @@ export const readTranscriptHead = (file: string): ReadonlyArray<string> => {
   const descriptor = openSync(file, "r");
   try {
     const head = readHeadChunk({ descriptor, position: 0 });
-    const openLineRest =
-      head.length < TRANSCRIPT_HEAD_BYTES ? [] : restOfOpenLine({ descriptor, position: head.length });
+    const isHeadShort = head.length < TRANSCRIPT_HEAD_BYTES;
+    const openLineRest = isHeadShort ? [] : listRestOfOpenLine({ descriptor, position: head.length });
     return Buffer.concat([head, ...openLineRest])
       .toString("utf8")
       .split("\n");
@@ -129,7 +140,9 @@ export const readTranscriptHead = (file: string): ReadonlyArray<string> => {
 // The first line of the tail may be cut short.
 export const readTranscriptTail = (file: string): ReadonlyArray<string> => {
   const fileSize = statSync(file).size;
-  const start = fileSize > TRANSCRIPT_TAIL_BYTES ? fileSize - TRANSCRIPT_TAIL_BYTES : 0;
+
+  const isFileLargerThanTail = fileSize > TRANSCRIPT_TAIL_BYTES;
+  const start = isFileLargerThanTail ? fileSize - TRANSCRIPT_TAIL_BYTES : 0;
   const byteCount = fileSize - start;
   const bytes = Buffer.allocUnsafe(byteCount);
   const descriptor = openSync(file, "r");

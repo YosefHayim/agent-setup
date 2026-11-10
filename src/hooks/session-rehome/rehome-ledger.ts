@@ -1,21 +1,20 @@
-// The ledger remembers every decision, so a sweep never re-reads a settled session and SessionStart can say where
-// a resumed session went. One JSON record per line; the newest record for a session wins.
-
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-
+import { readRehomeStateFolder } from "../environment.js";
 import { installRoot } from "../hook-config.js";
 import { claimIntervalSlot } from "../interval-stamp.js";
-import { appendJsonLine, decodeJsonLine } from "../json-lines.js";
+import { appendLine, decodeLine } from "../json-lines.js";
 
 export type RehomeAgent = "claude-code" | "codex";
 
-export const rehomeAgentFrom = (agentId: string | undefined): RehomeAgent | undefined =>
-  agentId === "claude-code" || agentId === "codex" ? agentId : undefined;
+export const readRehomeAgentFrom = (agentId: string | null): RehomeAgent | null => {
+  const isKnownAgent = agentId === "claude-code" || agentId === "codex";
+  return isKnownAgent ? agentId : null;
+};
 
 export type LedgerDecision = "moved" | "stayed" | "uncertain" | "no-signal" | "deleted" | "conflict";
 
-export type LedgerEntry = {
+export type LedgerLine = {
   readonly agent: RehomeAgent;
   readonly sessionId: string;
   readonly decision: LedgerDecision;
@@ -38,73 +37,83 @@ const LEDGER_DECISIONS: ReadonlyArray<LedgerDecision> = [
   "conflict",
 ];
 
-const stateFolder = (): string =>
-  process.env.AGENT_SETUP_REHOME_STATE_DIR || path.join(installRoot, "state", "session-rehome");
+const readStorageFolder = (): string => readRehomeStateFolder() ?? path.join(installRoot, "state", "session-rehome");
 
-const ledgerFile = (): string => path.join(stateFolder(), "ledger.jsonl");
+const readLedgerFile = (): string => path.join(readStorageFolder(), "ledger.jsonl");
 
-const ledgerKey = (request: { readonly agent: RehomeAgent; readonly sessionId: string }): string =>
+const readLedgerKey = (request: { readonly agent: RehomeAgent; readonly sessionId: string }): string =>
   `${request.agent}:${request.sessionId}`;
 
-const textOf = (record: Record<string, unknown>, property: string): string => {
-  const candidate = record[property];
-  return typeof candidate === "string" ? candidate : "";
+const readStringOf = (fields: Record<string, unknown>, property: string): string => {
+  const candidate = fields[property];
+
+  const isStringCandidate = typeof candidate === "string";
+  return isStringCandidate ? candidate : "";
 };
 
-const decodeLedgerEntry = (record: Record<string, unknown>): LedgerEntry | undefined => {
-  const agent = record.agent === "claude-code" || record.agent === "codex" ? record.agent : undefined;
-  const decision = LEDGER_DECISIONS.find((candidate) => candidate === record.decision);
-  if (!agent || !decision || !textOf(record, "sessionId")) {
-    return undefined;
+const decodeLedgerLine = (fields: Record<string, unknown>): LedgerLine | null => {
+  const agent = readRehomeAgentFrom(readStringOf(fields, "agent"));
+
+  const decision = LEDGER_DECISIONS.find((candidate) => candidate === fields.decision);
+
+  const hasNoRequiredField = !agent || !decision || !readStringOf(fields, "sessionId");
+  if (hasNoRequiredField) {
+    return null;
   }
+
+  const share = fields.share;
+  const isShareNumber = typeof share === "number";
 
   return {
     agent,
-    sessionId: textOf(record, "sessionId"),
+    sessionId: readStringOf(fields, "sessionId"),
     decision,
-    title: textOf(record, "title"),
-    fromFolder: textOf(record, "fromFolder"),
-    toFolder: textOf(record, "toFolder"),
-    repoName: textOf(record, "repoName"),
-    share: typeof record.share === "number" ? record.share : 0,
-    decidedAt: textOf(record, "decidedAt"),
-    notifiedAt: textOf(record, "notifiedAt"),
+    title: readStringOf(fields, "title"),
+    fromFolder: readStringOf(fields, "fromFolder"),
+    toFolder: readStringOf(fields, "toFolder"),
+    repoName: readStringOf(fields, "repoName"),
+    share: isShareNumber ? share : 0,
+    decidedAt: readStringOf(fields, "decidedAt"),
+    notifiedAt: readStringOf(fields, "notifiedAt"),
   };
 };
 
-const newestPerSession = (request: { readonly keep: (entry: LedgerEntry) => boolean }) => {
-  const entries = new Map<string, LedgerEntry>();
-  const lines = existsSync(ledgerFile()) ? readFileSync(ledgerFile(), "utf8").split("\n") : [];
-  for (const entry of lines.map(decodeJsonLine).map(decodeLedgerEntry)) {
-    if (entry && request.keep(entry)) {
-      entries.set(ledgerKey(entry), entry);
+const readNewestPerSession = (request: { readonly keep: (line: LedgerLine) => boolean }) => {
+  const entries = new Map<string, LedgerLine>();
+
+  const isLedgerPresent = existsSync(readLedgerFile());
+  const lines = isLedgerPresent ? readFileSync(readLedgerFile(), "utf8").split("\n") : [];
+  for (const ledgerLine of lines.map(decodeLine).map(decodeLedgerLine)) {
+    const isLedgerLineKept = ledgerLine && request.keep(ledgerLine);
+    if (isLedgerLineKept) {
+      entries.set(readLedgerKey(ledgerLine), ledgerLine);
     }
   }
   return entries;
 };
 
-export const readLedger = (): ReadonlyMap<string, LedgerEntry> => newestPerSession({ keep: () => true });
+export const readLedger = (): ReadonlyMap<string, LedgerLine> => readNewestPerSession({ keep: () => true });
 
 // A moved session that later ends in its new home is recorded as kept there; where it moved from still matters
 // when it is resumed from the old folder.
-export const readLastMoves = (): ReadonlyMap<string, LedgerEntry> =>
-  newestPerSession({ keep: (entry) => entry.decision === "moved" });
+export const readLastMoves = (): ReadonlyMap<string, LedgerLine> =>
+  readNewestPerSession({ keep: (line) => line.decision === "moved" });
 
-export const ledgerEntryFor = (request: {
-  readonly ledger: ReadonlyMap<string, LedgerEntry>;
+export const readLedgerLine = (request: {
+  readonly ledger: ReadonlyMap<string, LedgerLine>;
   readonly agent: RehomeAgent;
   readonly sessionId: string;
-}): LedgerEntry | undefined => request.ledger.get(ledgerKey(request));
+}): LedgerLine | null => request.ledger.get(readLedgerKey(request)) ?? null;
 
-export const recordLedgerEntry = (entry: LedgerEntry): void => {
-  mkdirSync(stateFolder(), { recursive: true });
-  appendJsonLine({ file: ledgerFile(), line: entry });
+export const saveLedgerLine = (ledgerLine: LedgerLine): void => {
+  mkdirSync(readStorageFolder(), { recursive: true });
+  appendLine({ file: readLedgerFile(), line: ledgerLine });
 };
 
-const sweepStampFile = (): string => path.join(stateFolder(), "last-sweep");
+const readSweepStampFile = (): string => path.join(readStorageFolder(), "last-sweep");
 
 // SessionStart fires on every launch; a full sweep reads every transcript, so it runs at most this often.
 export const claimSweepSlot = (minimumSeconds: number): boolean =>
-  claimIntervalSlot({ stampFile: sweepStampFile(), minimumSeconds });
+  claimIntervalSlot({ stampFile: readSweepStampFile(), minimumSeconds });
 
-export const rehomeLockFile = (): string => path.join(stateFolder(), "watcher.lock");
+export const readRehomeLockFile = (): string => path.join(readStorageFolder(), "watcher.lock");

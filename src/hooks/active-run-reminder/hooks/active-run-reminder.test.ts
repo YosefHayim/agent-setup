@@ -36,11 +36,11 @@ const createScenario = (): Scenario => {
 };
 
 // Git variables such as GIT_DIR come from an outer git hook and would point these calls at another repository.
-const testEnvironment = (): NodeJS.ProcessEnv =>
+const readTestEnvironment = (): NodeJS.ProcessEnv =>
   Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
 
 const runGit = (request: { readonly folder: string; readonly args: ReadonlyArray<string> }) =>
-  spawnSync("git", ["-C", request.folder, ...request.args], { encoding: "utf8", env: testEnvironment() });
+  spawnSync("git", ["-C", request.folder, ...request.args], { encoding: "utf8", env: readTestEnvironment() });
 
 const createRepository = (folder: string): void => {
   mkdirSync(folder, { recursive: true });
@@ -53,12 +53,12 @@ const writeActiveRunFile = (request: { readonly stateFolder: string; readonly ac
   writeFileSync(path.join(runFolder, "active-run.json"), request.activeRunJson);
 };
 
-const writeValidActiveRun = (scenario: Scenario, stateFolder: string): string => {
+const writeValidActiveRun = (scenario: Scenario, storageFolder: string): string => {
   const specPath = path.join(scenario.root, "SPEC.md");
   const reportPath = path.join(scenario.root, "report.md");
   writeFileSync(specPath, "# Spec\n");
   writeActiveRunFile({
-    stateFolder,
+    stateFolder: storageFolder,
     activeRunJson: JSON.stringify({ title: ACTIVE_RUN_TITLE, specPath, reportPath }),
   });
 
@@ -71,13 +71,16 @@ const runHook = (request: {
   readonly stateHome: string | null;
 }) => {
   const environment: NodeJS.ProcessEnv = {
-    ...testEnvironment(),
+    ...readTestEnvironment(),
     HOME: request.scenario.homeFolder,
     // Git never climbs above the temp root, so a test folder is not inside this repository.
     GIT_CEILING_DIRECTORIES: request.scenario.root,
   };
   delete environment.XDG_STATE_HOME;
-  if (request.stateHome !== null) environment.XDG_STATE_HOME = request.stateHome;
+
+  const isHomeFolderSet = request.stateHome !== null;
+  if (isHomeFolderSet) environment.XDG_STATE_HOME = request.stateHome;
+
   return spawnSync(process.execPath, ["--import", tsxLoaderUrl, hookPath], {
     cwd: request.scenario.repositoryFolder,
     input: request.hookInput,
@@ -86,7 +89,7 @@ const runHook = (request: {
   });
 };
 
-const hookInputFor = (request: { readonly hookEventName: string; readonly cwd: string }): string =>
+const readHookDetails = (request: { readonly hookEventName: string; readonly cwd: string }): string =>
   JSON.stringify({ hook_event_name: request.hookEventName, cwd: request.cwd });
 
 afterEach(() => {
@@ -100,16 +103,18 @@ describe("activeRunReminder process boundary", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
     const specPath = writeValidActiveRun(scenario, scenario.stateFolder);
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookDetails = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookDetails, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
     expect(execution.stderr).toBe("");
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.hookEventName).toBe("SessionStart");
-    expect(output.hookSpecificOutput.additionalContext).toContain(`This repo has an active run: ${ACTIVE_RUN_TITLE}.`);
-    expect(output.hookSpecificOutput.additionalContext).toContain(
+    const printout = JSON.parse(execution.stdout);
+    expect(printout.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(printout.hookSpecificOutput.additionalContext).toContain(
+      `This repo has an active run: ${ACTIVE_RUN_TITLE}.`,
+    );
+    expect(printout.hookSpecificOutput.additionalContext).toContain(
       `If your task is part of this run, read ${specPath} in full before you continue.`,
     );
   });
@@ -118,14 +123,16 @@ describe("activeRunReminder process boundary", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
     writeValidActiveRun(scenario, scenario.stateFolder);
-    const hookInput = hookInputFor({ hookEventName: "SubagentStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SubagentStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.hookEventName).toBe("SubagentStart");
-    expect(output.hookSpecificOutput.additionalContext).toContain(`This repo has an active run: ${ACTIVE_RUN_TITLE}.`);
+    const hookReply = JSON.parse(execution.stdout);
+    expect(hookReply.hookSpecificOutput.hookEventName).toBe("SubagentStart");
+    expect(hookReply.hookSpecificOutput.additionalContext).toContain(
+      `This repo has an active run: ${ACTIVE_RUN_TITLE}.`,
+    );
   });
 
   it("says the spec is missing when the active run points to a file that does not exist", () => {
@@ -140,13 +147,13 @@ describe("activeRunReminder process boundary", () => {
         reportPath: path.join(scenario.root, "report.md"),
       }),
     });
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toBe(
+    const hookReply = JSON.parse(execution.stdout);
+    expect(hookReply.hookSpecificOutput.additionalContext).toBe(
       `This repo's active-run.json points to a missing spec (${missingSpecPath}). Tell the user before you continue.`,
     );
   });
@@ -155,9 +162,9 @@ describe("activeRunReminder process boundary", () => {
     const scenario = createScenario();
     mkdirSync(scenario.repositoryFolder, { recursive: true });
     writeValidActiveRun(scenario, scenario.stateFolder);
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
     expect(execution.stdout).toBe("");
@@ -166,9 +173,9 @@ describe("activeRunReminder process boundary", () => {
   it("stays silent when the repository has no active-run.json", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
     expect(execution.stdout).toBe("");
@@ -194,46 +201,50 @@ describe("activeRunReminder process boundary", () => {
     const worktreeFolder = path.join(scenario.root, "a-worktree-folder");
     runGit({ folder: scenario.repositoryFolder, args: ["worktree", "add", "--quiet", "--detach", worktreeFolder] });
     writeValidActiveRun(scenario, scenario.stateFolder);
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: worktreeFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: worktreeFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toContain(`This repo has an active run: ${ACTIVE_RUN_TITLE}.`);
+    const hookReply = JSON.parse(execution.stdout);
+    expect(hookReply.hookSpecificOutput.additionalContext).toContain(
+      `This repo has an active run: ${ACTIVE_RUN_TITLE}.`,
+    );
   });
 
   it("reads the runs folder under XDG_STATE_HOME and ignores the default folder under HOME", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
     writeValidActiveRun(scenario, scenario.stateFolder);
-    const decoyHomeStateFolder = path.join(scenario.homeFolder, ".local", "state");
+    const decoyHomeStorageFolder = path.join(scenario.homeFolder, ".local", "state");
     writeActiveRunFile({
-      stateFolder: decoyHomeStateFolder,
+      stateFolder: decoyHomeStorageFolder,
       activeRunJson: JSON.stringify({ title: "Decoy run", specPath: "/missing", reportPath: "/missing" }),
     });
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toContain(ACTIVE_RUN_TITLE);
-    expect(output.hookSpecificOutput.additionalContext).not.toContain("Decoy run");
+    const hookReply = JSON.parse(execution.stdout);
+    expect(hookReply.hookSpecificOutput.additionalContext).toContain(ACTIVE_RUN_TITLE);
+    expect(hookReply.hookSpecificOutput.additionalContext).not.toContain("Decoy run");
   });
 
   it("reads the runs folder under HOME/.local/state when XDG_STATE_HOME is unset", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
-    const defaultStateFolder = path.join(scenario.homeFolder, ".local", "state");
-    writeValidActiveRun(scenario, defaultStateFolder);
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const defaultStorageFolder = path.join(scenario.homeFolder, ".local", "state");
+    writeValidActiveRun(scenario, defaultStorageFolder);
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: null });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: null });
 
     expect(execution.status).toBe(0);
-    const output = JSON.parse(execution.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toContain(`This repo has an active run: ${ACTIVE_RUN_TITLE}.`);
+    const hookReply = JSON.parse(execution.stdout);
+    expect(hookReply.hookSpecificOutput.additionalContext).toContain(
+      `This repo has an active run: ${ACTIVE_RUN_TITLE}.`,
+    );
   });
 
   it("fails open with clean stdout when hook input is malformed", () => {
@@ -250,9 +261,9 @@ describe("activeRunReminder process boundary", () => {
     const scenario = createScenario();
     createRepository(scenario.repositoryFolder);
     writeActiveRunFile({ stateFolder: scenario.stateFolder, activeRunJson: "{" });
-    const hookInput = hookInputFor({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
+    const hookEvent = readHookDetails({ hookEventName: "SessionStart", cwd: scenario.repositoryFolder });
 
-    const execution = runHook({ scenario, hookInput, stateHome: scenario.stateFolder });
+    const execution = runHook({ scenario, hookInput: hookEvent, stateHome: scenario.stateFolder });
 
     expect(execution.status).toBe(0);
     expect(execution.stdout).toBe("");

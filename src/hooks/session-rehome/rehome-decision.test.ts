@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { decideRehome, deletedReposDominate, scoreSession } from "./rehome-decision.js";
+import { decideRehome, isDeletedReposDominate, scoreSession } from "./rehome-decision.js";
 
-const evidenceWith = (request: {
+const readEvidenceWith = (request: {
   readonly paths?: Record<string, number>;
   readonly prompts?: Record<string, number>;
 }) => ({
@@ -14,8 +14,8 @@ const evidenceWith = (request: {
 describe("rehome decision", () => {
   it("moves a session started in a generic folder when one repo owns most of its work", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ paths: { vybekiit: 80, replybase: 10 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ paths: { vybekiit: 80, replybase: 10 } }),
+      folderRepoName: null,
     });
 
     expect(decideRehome({ scores, homeRepoName: undefined })).toEqual({
@@ -27,57 +27,63 @@ describe("rehome decision", () => {
 
   it("keeps a cross-repo session uncertain instead of guessing", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ paths: { "agent-setup": 50, replybase: 30, vybekiit: 20 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ paths: { "agent-setup": 50, replybase: 30, vybekiit: 20 } }),
+      folderRepoName: null,
     });
 
     expect(decideRehome({ scores, homeRepoName: undefined })._tag).toBe("uncertain");
   });
 
   it("treats a session with too few signals as uncertain even when one repo has all of them", () => {
-    const scores = scoreSession({ evidence: evidenceWith({ prompts: { vybekiit: 1 } }), folderRepoName: undefined });
+    const scores = scoreSession({
+      evidence: readEvidenceWith({ prompts: { vybekiit: 1 } }),
+      folderRepoName: null,
+    });
 
     expect(decideRehome({ scores, homeRepoName: undefined })._tag).toBe("uncertain");
   });
 
   it("moves a short session from a generic folder once a prompt and a file both name one repo", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ prompts: { vybekiit: 1 }, paths: { vybekiit: 2 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ prompts: { vybekiit: 1 }, paths: { vybekiit: 2 } }),
+      folderRepoName: null,
     });
 
     expect(decideRehome({ scores, homeRepoName: undefined })).toMatchObject({ _tag: "move", repoName: "vybekiit" });
   });
 
   it("does not move a short session that only names a repo in prompts and never touches it", () => {
-    const scores = scoreSession({ evidence: evidenceWith({ prompts: { extensions: 2 } }), folderRepoName: undefined });
+    const scores = scoreSession({
+      evidence: readEvidenceWith({ prompts: { extensions: 2 } }),
+      folderRepoName: null,
+    });
 
     expect(decideRehome({ scores, homeRepoName: undefined })._tag).toBe("uncertain");
   });
 
   it("keeps the same short session in the repo it started in", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ prompts: { vybekiit: 1 }, paths: { vybekiit: 2 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ prompts: { vybekiit: 1 }, paths: { vybekiit: 2 } }),
+      folderRepoName: null,
     });
 
     expect(decideRehome({ scores, homeRepoName: "replybase" })).toEqual({ _tag: "stay", repoName: "replybase" });
   });
 
   it("reports no signal when nothing in the session names a repo", () => {
-    const scores = scoreSession({ evidence: evidenceWith({}), folderRepoName: undefined });
+    const scores = scoreSession({ evidence: readEvidenceWith({}), folderRepoName: null });
 
     expect(decideRehome({ scores, homeRepoName: undefined })).toEqual({ _tag: "noSignal" });
   });
 
   it("keeps a session in its own repo unless another repo clearly dominates", () => {
     const mostlyElsewhere = scoreSession({
-      evidence: evidenceWith({ paths: { replybase: 70, vybekiit: 30 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ paths: { replybase: 70, vybekiit: 30 } }),
+      folderRepoName: null,
     });
     const almostAllElsewhere = scoreSession({
-      evidence: evidenceWith({ paths: { replybase: 95, vybekiit: 5 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ paths: { replybase: 95, vybekiit: 5 } }),
+      folderRepoName: null,
     });
 
     expect(decideRehome({ scores: mostlyElsewhere, homeRepoName: "vybekiit" })).toEqual({
@@ -89,7 +95,7 @@ describe("rehome decision", () => {
 
   it("weighs prompts above single paths and a repo-named launch folder above both", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ paths: { replybase: 12 }, prompts: { vybekiit: 1 } }),
+      evidence: readEvidenceWith({ paths: { replybase: 12 }, prompts: { vybekiit: 1 } }),
       folderRepoName: "vybekiit",
     });
 
@@ -98,11 +104,11 @@ describe("rehome decision", () => {
 
   it("counts repos named for deletion together", () => {
     const scores = scoreSession({
-      evidence: evidenceWith({ paths: { aria: 40, "extension-installer": 35, "agent-setup": 25 } }),
-      folderRepoName: undefined,
+      evidence: readEvidenceWith({ paths: { aria: 40, "extension-installer": 35, "agent-setup": 25 } }),
+      folderRepoName: null,
     });
 
-    expect(deletedReposDominate({ scores, deletedRepoNames: new Set(["aria", "extension-installer"]) })).toBe(true);
-    expect(deletedReposDominate({ scores, deletedRepoNames: new Set(["aria"]) })).toBe(false);
+    expect(isDeletedReposDominate({ scores, deletedRepoNames: new Set(["aria", "extension-installer"]) })).toBe(true);
+    expect(isDeletedReposDominate({ scores, deletedRepoNames: new Set(["aria"]) })).toBe(false);
   });
 });

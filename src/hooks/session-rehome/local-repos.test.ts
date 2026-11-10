@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createKeywordMatcher, discoverRepos, repoContaining, repoNamedByFolder } from "./local-repos.js";
+import { createKeywordMatcher, discoverRepos, readRepoContaining, readRepoNamedByFolder } from "./local-repos.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const workspaces: Array<string> = [];
@@ -17,10 +17,14 @@ const createCodeFolder = (): string => {
 
 const createRepo = (request: { readonly folder: string; readonly packageName?: string; readonly origin?: string }) => {
   mkdirSync(path.join(request.folder, ".git"), { recursive: true });
-  if (request.packageName) {
+
+  const hasPackageName = request.packageName != null;
+  if (hasPackageName) {
     writeFileSync(path.join(request.folder, "package.json"), JSON.stringify({ name: request.packageName }));
   }
-  if (request.origin) {
+
+  const hasOrigin = request.origin != null;
+  if (hasOrigin) {
     writeFileSync(path.join(request.folder, ".git", "config"), `[remote "origin"]\n\turl = ${request.origin}\n`);
   }
 };
@@ -67,20 +71,20 @@ describe("local repos", () => {
   });
 
   it("matches prompt keywords as whole words only", () => {
-    const matchKeywords = createKeywordMatcher([
+    const hitKeywords = createKeywordMatcher([
       { name: "vybekiit", root: "/code/vybekiit", keywords: ["vybekiit"], checkedOut: true },
     ]);
 
-    expect([...matchKeywords("fix the VybeKiit checkout")]).toEqual(["vybekiit"]);
-    expect([...matchKeywords("the vybekiit-ui package")]).toEqual([]);
+    expect([...hitKeywords("fix the VybeKiit checkout")]).toEqual(["vybekiit"]);
+    expect([...hitKeywords("the vybekiit-ui package")]).toEqual([]);
   });
 
   it("finds the repo that contains a folder, or the repo a folder outside every repo is named after", () => {
     const repos = [{ name: "vybekiit", root: "/code/vybekiit", keywords: [], checkedOut: true }];
 
-    expect(repoContaining({ repos, folder: "/code/vybekiit/.worktrees/web" })?.name).toBe("vybekiit");
-    expect(repoContaining({ repos, folder: "/code" })).toBeUndefined();
-    expect(repoNamedByFolder({ repos, folder: "/private/tmp/vybekiit-buyer-eval-3" })?.name).toBe("vybekiit");
-    expect(repoNamedByFolder({ repos, folder: "/private/tmp/other" })).toBeUndefined();
+    expect(readRepoContaining({ repos, folder: "/code/vybekiit/.worktrees/web" })?.name).toBe("vybekiit");
+    expect(readRepoContaining({ repos, folder: "/code" })).toBeNull();
+    expect(readRepoNamedByFolder({ repos, folder: "/private/tmp/vybekiit-buyer-eval-3" })?.name).toBe("vybekiit");
+    expect(readRepoNamedByFolder({ repos, folder: "/private/tmp/other" })).toBeNull();
   });
 });
