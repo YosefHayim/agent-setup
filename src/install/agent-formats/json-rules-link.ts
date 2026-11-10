@@ -221,6 +221,7 @@ export const addJsonRule = (link: JsonRulesLink): { bytes: Uint8Array; ownership
   }
 
   const isRulesMissing = previousRules == null;
+
   const isInstructionListed = !isRulesMissing && previousRules.includes(link.instructionPath);
   if (isInstructionListed) {
     return {

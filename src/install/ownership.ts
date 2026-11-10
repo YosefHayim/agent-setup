@@ -425,12 +425,14 @@ const jsonValuesEqual = (left: unknown, right: unknown): boolean => JSON.stringi
 
 const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
   const previous = ownedValue.previous;
+
   const isPreviousMissing = previous._tag === "missing";
   if (isPreviousMissing) {
     return false;
   }
 
   const lexical = previous.lexical;
+
   const isLexicalAbsent = lexical == null;
   if (isLexicalAbsent) {
     return false;

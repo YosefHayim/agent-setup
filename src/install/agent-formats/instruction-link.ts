@@ -64,6 +64,7 @@ interface PreviousFileRule {
 
 const findBrokenPreviousFileRules = (request: InstructionLinkRequestFields): Array<PreviousFileRule> => {
   const previousFile = request.previousFile;
+
   const isPreviousFileMissing = previousFile._tag === "missing";
 
   if (isPreviousFileMissing) {
@@ -201,6 +202,7 @@ const planReferenceChange = (request: InstructionLinkRequest): InstructionLinkPl
   }
 
   const previousFile = request.previousFile;
+
   const isPreviousFileMissing = previousFile._tag === "missing";
 
   if (isPreviousFileMissing) {

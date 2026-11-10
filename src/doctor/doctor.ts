@@ -115,6 +115,7 @@ const preparedRuntimeStatus = async (
   packageRoot: string,
 ): Promise<PreparedRuntimeStatus> => {
   const runtime = feature.runtime;
+
   const isRuntimeNotRequired = runtime._tag === "none";
 
   if (isRuntimeNotRequired) {
