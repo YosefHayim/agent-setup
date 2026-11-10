@@ -103,7 +103,7 @@ const automaticConfigSelection = (input: {
   if (input.request.destination._tag === "project") {
     return {
       _tag: "firstProjectInstall",
-      globalConfig: input.global === undefined ? { _tag: "missing" } : input.global,
+      globalConfig: input.global == null ? { _tag: "missing" } : input.global,
     };
   }
 
