@@ -37,8 +37,8 @@ describe("hook config resolution", () => {
       writeFileSync(installedSettings, `${JSON.stringify({ debugLogs: true, sessionRehomeRoots: ["Work"] })}\n`);
 
       const printSettings = [
-        `const { installRoot, readConfig } = await import(${JSON.stringify(pathToFileURL(installedModule).href)});`,
-        "process.stdout.write(JSON.stringify({ installRoot, config: readConfig() }));",
+        `const { installRoot, readSettings } = await import(${JSON.stringify(pathToFileURL(installedModule).href)});`,
+        "process.stdout.write(JSON.stringify({ installRoot, config: readSettings() }));",
       ].join("\n");
       const execution = spawnSync(
         process.execPath,

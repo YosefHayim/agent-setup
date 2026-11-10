@@ -65,7 +65,7 @@ const managedBlockOwnership = {
 
 const createOwnedField = (pointer: string, previous: object = missingPrevious) => ({
   pointer,
-  installed: { _tag: "field", hash: installedFieldHash },
+  installed: { _tag: "value", hash: installedFieldHash },
   previous,
 });
 
@@ -78,15 +78,15 @@ const createDocumentFields = (fields: ReadonlyArray<object>, createdContainers: 
 
 const documentFieldsOwnership = createDocumentFields([
   createOwnedField("/hooks/PreToolUse"),
-  { pointer: "/enabled", installed: { _tag: "field", hash: installedHash }, previous: { _tag: "field", field: false } },
+  { pointer: "/enabled", installed: { _tag: "value", hash: installedHash }, previous: { _tag: "value", value: false } },
 ]);
 
 const settingsDocumentFieldsOwnership = createDocumentFields([
   createOwnedField("/hooks/PreToolUse"),
   {
     pointer: "/enabled",
-    installed: { _tag: "field", hash: installedHash },
-    previous: { _tag: "field", field: false, lexical: { _tag: "field", source: "false" } },
+    installed: { _tag: "value", hash: installedHash },
+    previous: { _tag: "value", value: false, lexical: { _tag: "value", source: "false" } },
   },
 ]);
 
@@ -291,7 +291,7 @@ describe("receiptSchema", () => {
       {
         _tag: "jsonValues",
         filePreviouslyPresent: false,
-        values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "field", field: false } }],
+        values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "value", value: false } }],
       },
       { _tag: "yamlSequenceValue", filePreviouslyPresent: false, previouslyPresent: true },
     ]);
@@ -309,7 +309,7 @@ describe("receiptSchema", () => {
     { name: "owner", decode: () => decodeOwner({ _tag: "application", extra: true }) },
     { name: "kind", decode: () => decodeKind({ _tag: "runtime", extra: true }) },
     { name: "previous file", decode: () => decodePreviousFile({ _tag: "missing", extra: true }) },
-    { name: "previous JSON field", decode: () => decodePreviousDocument({ _tag: "field", field: null, extra: true }) },
+    { name: "previous JSON field", decode: () => decodePreviousDocument({ _tag: "value", value: null, extra: true }) },
     { name: "owned file", decode: () => decodeOwnedFile({ ...completeReceiptFields.ownedFiles[0], extra: true }) },
     {
       name: "owned JSON field",
@@ -363,7 +363,7 @@ describe("receiptSchema", () => {
   it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 1n, new Date("2026-01-01T00:00:00.000Z")])(
     "rejects a non-JSON previous field",
     (field) => {
-      expect(() => decodePreviousDocument({ _tag: "field", field })).toThrow();
+      expect(() => decodePreviousDocument({ _tag: "value", value: field })).toThrow();
     },
   );
 
@@ -380,7 +380,7 @@ describe("receiptSchema", () => {
     const ownership = decodeDocumentFields(createDocumentFields([createOwnedField("/hooks/PreToolUse")], ["/hooks"]));
 
     expect(ownership.createdContainers).toEqual(["/hooks"]);
-    expect(ownership.values.map((field) => field.installed)).toEqual([{ _tag: "field", hash: installedFieldHash }]);
+    expect(ownership.values.map((field) => field.installed)).toEqual([{ _tag: "value", hash: installedFieldHash }]);
   });
 
   it.each([
@@ -390,7 +390,7 @@ describe("receiptSchema", () => {
   ])("rejects $name created JSON containers", ({ createdContainers }) => {
     expect(() =>
       decodeDocumentFields(
-        createDocumentFields([createOwnedField("/hooks/Stop", { _tag: "field", field: [] })], createdContainers),
+        createDocumentFields([createOwnedField("/hooks/Stop", { _tag: "value", value: [] })], createdContainers),
       ),
     ).toThrow(/container|ancestor|unique/i);
   });

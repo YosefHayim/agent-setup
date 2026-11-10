@@ -10,7 +10,7 @@ describe("commandFactsIn", () => {
       {
         configKeys: ["core.hookspath"],
         repoFolders: ["../app"],
-        changedFolder: undefined,
+        changedFolder: null,
         subcommand: "push",
         args: ["origin", "--force"],
       },
