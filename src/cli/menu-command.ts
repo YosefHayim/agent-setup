@@ -4,7 +4,7 @@ import type { Command } from "commander";
 
 import { detectAgents } from "#src/catalog/agent-catalog.js";
 import { defaultFeatureIds, featureCatalog } from "#src/catalog/feature-catalog.js";
-import { destinationForScope, type HostScan, scanHost } from "#src/config/host-scan.js";
+import { type HostScan, readDestinationForScope, scanHost } from "#src/config/host-scan.js";
 import { install } from "#src/install/install.js";
 import { receiptPath } from "#src/install/install-paths.js";
 import { wrapAsInstallError } from "#src/install/install-request.js";
@@ -17,7 +17,7 @@ import { showFeatureList } from "./catalog-command.js";
 import { createCommand } from "./cli-options.js";
 import { checkBothScopes, showScopeHealth } from "./doctor-command.js";
 import { showInstallation } from "./install-command.js";
-import { applyIfApproved, pickScope, runConfig } from "./menu-settings.js";
+import { applyIfApproved, pickScope, runSettings } from "./menu-settings.js";
 import * as TerminalUI from "./terminal-ui.js";
 import { showUninstallation } from "./uninstall-command.js";
 import { showUpdate } from "./update-command.js";
@@ -31,7 +31,7 @@ type UpdateFeatures =
   | { readonly _tag: "preserve" }
   | { readonly _tag: "selected"; readonly ids: ReadonlyArray<string> };
 
-const agentSummary = (host: HostScan): string => {
+const readAgentSummary = (host: HostScan): string => {
   const detected = detectAgents(host.agentEvidence)
     .filter((agent) => agent.installed)
     .map((agent) => agent.displayName);
@@ -39,13 +39,13 @@ const agentSummary = (host: HostScan): string => {
   return isThereDetectedAgent ? detected.join(", ") : "none detected";
 };
 
-const featureList = (ids: ReadonlyArray<string>): string => {
+const readFeatureList = (ids: ReadonlyArray<string>): string => {
   const isThereFeature = ids.length > 0;
   return isThereFeature ? ids.join(", ") : "(none)";
 };
 
 const pickFeatures = (initial: ReadonlyArray<string>): Promise<string[]> =>
-  TerminalUI.multiSelect({
+  TerminalUI.listMultiSelect({
     message: "Select features (space toggles, enter confirms)",
     choices: featureCatalog.map((feature) => ({
       label: feature.title,
@@ -58,7 +58,7 @@ const pickFeatures = (initial: ReadonlyArray<string>): Promise<string[]> =>
 const pickDestination = async (verb: string) => {
   const scope = await pickScope(verb);
   const host = await scanHost();
-  const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
+  const destination = readDestinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
   return { scope, host, destination };
 };
 
@@ -92,8 +92,8 @@ const runInstallScreen = async (abortSignal: AbortSignal): Promise<void> => {
       { label: "Action", detail: "add features + hooks; installed features are kept" },
       { label: "Scope", detail: scope },
       { label: "Destination", detail: destination.root },
-      { label: "Features", detail: featureList(features) },
-      { label: "Agents", detail: `${agentSummary(host)} (auto-detected)` },
+      { label: "Features", detail: readFeatureList(features) },
+      { label: "Agents", detail: `${readAgentSummary(host)} (auto-detected)` },
       { label: "Config", detail: "automatic (reuse / inherit / defaults)" },
     ],
     confirmMessage: "Apply this install plan?",
@@ -125,10 +125,11 @@ const runUpdateScreen = async (abortSignal: AbortSignal): Promise<void> => {
     initial: "preserve",
   });
   const receiptSnapshot = await readReceiptSnapshot(destination.root);
-  const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : defaultFeatureIds;
+  const isReceiptPresent = receiptSnapshot._tag === "present";
+  const installedIds = isReceiptPresent ? receiptSnapshot.receipt.features : defaultFeatureIds;
   const features = await readUpdateFeatures({ mode, installedIds });
   const isPreserveFeatures = features._tag === "preserve";
-  const featureDetail = isPreserveFeatures ? "preserve receipt selection" : featureList(features.ids);
+  const featureDetail = isPreserveFeatures ? "preserve receipt selection" : readFeatureList(features.ids);
 
   await applyIfApproved({
     title: "Update plan",
@@ -137,7 +138,7 @@ const runUpdateScreen = async (abortSignal: AbortSignal): Promise<void> => {
       { label: "Scope", detail: scope },
       { label: "Destination", detail: destination.root },
       { label: "Features", detail: featureDetail },
-      { label: "Agents", detail: `${agentSummary(host)} (auto-detected)` },
+      { label: "Agents", detail: `${readAgentSummary(host)} (auto-detected)` },
       { label: "Config", detail: "automatic" },
     ],
     confirmMessage: "Apply this update plan?",
@@ -182,14 +183,17 @@ const runUninstallScreen = async (abortSignal: AbortSignal): Promise<void> => {
 };
 
 const runWorkflowScreen = async (): Promise<void> => {
-  const workspace = await TerminalUI.optionalText({
+  const workspace = await TerminalUI.readOptionalString({
     message: "Target workspace (repository root)",
     fallback: resolve(process.cwd()),
   });
   const targetRoot = resolve(workspace);
-  const overwrite = await TerminalUI.confirm({ message: "Overwrite existing workflow files?", initialValue: false });
+  const isOverwriteRequested = await TerminalUI.confirm({
+    message: "Overwrite existing workflow files?",
+    initialValue: false,
+  });
   const templateDirectory = await findWorkflowTemplateDirectory();
-  const overwriteDetail = overwrite ? "yes" : "no (skip existing)";
+  const overwriteDetail = isOverwriteRequested ? "yes" : "no (skip existing)";
 
   await applyIfApproved({
     title: "Workflow scaffold plan",
@@ -201,7 +205,7 @@ const runWorkflowScreen = async (): Promise<void> => {
     ],
     confirmMessage: "Apply this workflow scaffold plan?",
     apply: async () => {
-      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: overwrite });
+      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: isOverwriteRequested });
       await showCopiedWorkflows(copiedWorkflows);
     },
   });
@@ -215,7 +219,7 @@ const runDoctorScreen = async (): Promise<void> => {
 };
 
 const runCatalogScreen = async (): Promise<void> => {
-  await TerminalUI.intro("catalog");
+  await TerminalUI.runIntro("catalog");
   await showFeatureList();
 };
 
@@ -231,7 +235,7 @@ const runMenuScreen = async (screen: MenuScreen, abortSignal: AbortSignal): Prom
       await runUninstallScreen(abortSignal);
       return;
     case "config":
-      await runConfig(abortSignal);
+      await runSettings(abortSignal);
       return;
     case "doctor":
       await runDoctorScreen();
@@ -249,7 +253,7 @@ export const createMenuCommand = (abortSignal: AbortSignal): Command =>
   createCommand("menu")
     .description("Interactive TUI: same options as CLI args, ordered plan preview, approve before apply")
     .action(async () => {
-      await TerminalUI.intro("menu");
+      await TerminalUI.runIntro("menu");
       const action = await TerminalUI.selectOne<MenuScreen | "exit">({
         message: "What would you like to do?",
         choices: [
@@ -267,10 +271,10 @@ export const createMenuCommand = (abortSignal: AbortSignal): Command =>
 
       const isExit = action === "exit";
       if (isExit) {
-        await TerminalUI.outro("Closed.");
+        await TerminalUI.runOutro("Closed.");
         return;
       }
 
       await runMenuScreen(action, abortSignal);
-      await TerminalUI.outro("Done.");
+      await TerminalUI.runOutro("Done.");
     });

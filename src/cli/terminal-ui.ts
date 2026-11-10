@@ -1,7 +1,7 @@
 import type { Option } from "@clack/prompts";
 import * as ClackPrompts from "@clack/prompts";
 
-import type { OutputFormat } from "./cli-options.js";
+import type { PrintFormat } from "./cli-options.js";
 
 interface PlanStep {
   readonly label: string;
@@ -24,19 +24,19 @@ const writeLine = async (message: string): Promise<void> => {
 
 export const isInteractiveTerminal = (): boolean => Boolean(process.stdout.isTTY);
 
-export const intro = (title: string) => writeLine(`\n  agent-setup · ${title}\n`);
+export const runIntro = (title: string) => writeLine(`\n  agent-setup · ${title}\n`);
 
-export const outro = (message: string) => writeLine(`\n  ${message}\n`);
+export const runOutro = (message: string) => writeLine(`\n  ${message}\n`);
 
-export const step = (message: string) => writeLine(`  → ${message}`);
+export const runStep = (message: string) => writeLine(`  → ${message}`);
 
-export const success = (message: string) => writeLine(`  ✓ ${message}`);
+export const runSuccess = (message: string) => writeLine(`  ✓ ${message}`);
 
 export const warn = (message: string) => writeLine(`  ! ${message}`);
 
 export const fail = (message: string) => writeLine(`  ✗ ${message}`);
 
-export const detail = (message: string) => writeLine(`  · ${message}`);
+export const runDetail = (message: string) => writeLine(`  · ${message}`);
 
 export const showDocument = (printedDocument: unknown) => writeLine(JSON.stringify(printedDocument));
 
@@ -59,14 +59,14 @@ export const showError = async (error: unknown): Promise<void> => {
   await fail(message);
 };
 
-export const showCancelledOutro = () => outro("Cancelled — nothing was changed.");
+export const showCancelledOutro = () => runOutro("Cancelled — nothing was changed.");
 
 export const showCancelled = async (request: {
-  readonly format: OutputFormat;
+  readonly format: PrintFormat;
   readonly scope: string;
 }): Promise<void> => {
-  const isJsonFormat = request.format === "json";
-  if (isJsonFormat) {
+  const isDocumentFormat = request.format === "json";
+  if (isDocumentFormat) {
     await showDocument({ _tag: "cancelled", scope: request.scope });
     return;
   }
@@ -77,29 +77,29 @@ export const showCancelled = async (request: {
 // Every prompt answers with its fallback when there is no terminal, so non-TTY runs never block.
 export const confirm = async ({
   message,
-  initialValue,
+  initialValue: initialField,
 }: {
   message: string;
   initialValue: boolean;
 }): Promise<boolean> => {
   const isNonInteractive = !isInteractiveTerminal();
   if (isNonInteractive) {
-    return initialValue;
+    return initialField;
   }
 
-  const confirmAnswer = await ClackPrompts.confirm({ message, initialValue });
+  const confirmAnswer = await ClackPrompts.confirm({ message, initialValue: initialField });
   return readPromptAnswer(confirmAnswer);
 };
 
-export const selectOne = async <Value>({
+export const selectOne = async <Field>({
   message,
   choices,
   initial,
 }: {
   message: string;
-  choices: ReadonlyArray<Option<Value>>;
-  initial?: Value;
-}): Promise<Value> => {
+  choices: ReadonlyArray<Option<Field>>;
+  initial?: Field;
+}): Promise<Field> => {
   const isInteractive = isInteractiveTerminal();
   if (isInteractive) {
     const selectAnswer = await ClackPrompts.select({ message, options: [...choices], initialValue: initial });
@@ -108,6 +108,7 @@ export const selectOne = async <Value>({
 
   const hasInitial = initial != null;
   const fallback = hasInitial ? initial : choices.at(0)?.value;
+
   const isThereNoFallback = fallback === undefined;
   if (isThereNoFallback) {
     throw new Error("No choices available for non-interactive select.");
@@ -116,7 +117,7 @@ export const selectOne = async <Value>({
   return fallback;
 };
 
-export const multiSelect = async <Value>({
+export const listMultiSelect = async <Value>({
   message,
   choices,
   initial,
@@ -141,23 +142,29 @@ export const multiSelect = async <Value>({
   return isThereSelection ? selected : [...initial];
 };
 
-export const optionalText = async ({ message, fallback }: { message: string; fallback: string }): Promise<string> => {
+export const readOptionalString = async ({
+  message,
+  fallback,
+}: {
+  message: string;
+  fallback: string;
+}): Promise<string> => {
   const isNonInteractive = !isInteractiveTerminal();
   if (isNonInteractive) {
     return fallback;
   }
 
-  const textAnswer = await ClackPrompts.text({ message, initialValue: fallback });
-  const trimmedAnswer = readPromptAnswer(textAnswer).trim();
+  const stringAnswer = await ClackPrompts.text({ message, initialValue: fallback });
+  const trimmedAnswer = readPromptAnswer(stringAnswer).trim();
   const isThereNoAnswer = trimmedAnswer === "";
   return isThereNoAnswer ? fallback : trimmedAnswer;
 };
 
-export const formatPlan = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string> =>
+export const createPlanLines = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string> =>
   steps.map((planStep, index) => `${String(index + 1)}. ${planStep.label}: ${planStep.detail}`);
 
 const showPlan = async ({ title, steps }: { readonly title: string; readonly steps: ReadonlyArray<PlanStep> }) => {
-  const planLines = formatPlan(steps);
+  const planLines = createPlanLines(steps);
   await note(planLines.join("\n"), title);
 };
 
@@ -166,7 +173,7 @@ export const confirmPlan = async ({
   title,
   steps,
   confirmMessage,
-  initialValue,
+  initialValue: initialField,
 }: {
   readonly title: string;
   readonly steps: ReadonlyArray<PlanStep>;
@@ -174,6 +181,6 @@ export const confirmPlan = async ({
   readonly initialValue?: boolean;
 }): Promise<boolean> => {
   await showPlan({ title, steps });
-  const isInitialValueYes = initialValue === true;
-  return confirm({ message: confirmMessage, initialValue: isInitialValueYes });
+  const isInitialFieldYes = initialField === true;
+  return confirm({ message: confirmMessage, initialValue: isInitialFieldYes });
 };

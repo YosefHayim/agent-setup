@@ -7,7 +7,7 @@ const FEATURE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 // e.g. "SKILL.md", "watchers/cleanup-watcher.ts" — not "/abs/path" or "a/../b"
 const FEATURE_RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+$/;
 // e.g. "hooks/scratch-folder-guard.ts" — feature-relative hook entrypoint only
-const HOOK_SOURCE_ENTRYPOINT_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+\.ts$/;
+const HOOK_ORIGIN_ENTRYPOINT_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+\.ts$/;
 
 export const featureIdSchema = nonEmptyTrimmedTextSchema
   .regex(FEATURE_ID_PATTERN, "Feature IDs must use lowercase kebab-case.")
@@ -16,7 +16,7 @@ export const featureIdSchema = nonEmptyTrimmedTextSchema
 
 export type FeatureId = z.infer<typeof featureIdSchema>;
 
-const sourceDirectorySchema = nonEmptyTrimmedTextSchema.regex(
+const originDirectorySchema = nonEmptyTrimmedTextSchema.regex(
   FEATURE_ID_PATTERN,
   "Source directories must use kebab-case.",
 );
@@ -26,7 +26,7 @@ const shippedPathSchema = nonEmptyTrimmedTextSchema.regex(
   "Shipped paths must stay inside the authored skill directory.",
 );
 
-const shippedPathsSchema = (request: { readonly duplicateMessage: string; readonly description: string }) =>
+const readShippedPathsSchema = (request: { readonly duplicateMessage: string; readonly description: string }) =>
   z
     .array(shippedPathSchema)
     .refine((paths) => paths.length === new Set(paths).size, { message: request.duplicateMessage })
@@ -42,7 +42,7 @@ export const installedSkillSchema = z
     id: nonEmptyTrimmedTextSchema
       .regex(FEATURE_ID_PATTERN, "Installed skill IDs must use lowercase kebab-case.")
       .describe("Public directory name installed for this skill."),
-    shippedPaths: shippedPathsSchema({
+    shippedPaths: readShippedPathsSchema({
       duplicateMessage: "Shipped paths must be unique within one skill.",
       description: "Exact feature-relative allowlist copied into dist/skills.",
     }),
@@ -70,7 +70,7 @@ const registrationEntrypointSchema = z
     z.strictObject({
       _tag: z.literal("path"),
       value: nonEmptyTrimmedTextSchema
-        .regex(HOOK_SOURCE_ENTRYPOINT_PATTERN, "Registration entrypoints must end in .ts and stay feature-relative.")
+        .regex(HOOK_ORIGIN_ENTRYPOINT_PATTERN, "Registration entrypoints must end in .ts and stay feature-relative.")
         .describe("Feature-relative TypeScript entrypoint for this registration only."),
     }),
   ])
@@ -109,7 +109,7 @@ const featureRuntimeSchema = z.discriminatedUnion("_tag", [
   z.strictObject({
     _tag: z.literal("hook"),
     sourceEntrypoint: nonEmptyTrimmedTextSchema
-      .regex(HOOK_SOURCE_ENTRYPOINT_PATTERN, "Hook source entrypoints must end in .ts and stay feature-relative.")
+      .regex(HOOK_ORIGIN_ENTRYPOINT_PATTERN, "Hook source entrypoints must end in .ts and stay feature-relative.")
       .describe("Feature-relative TypeScript entrypoint compiled into dist/src/hooks."),
     registrations: z
       .array(hookRegistrationSchema)
@@ -117,9 +117,9 @@ const featureRuntimeSchema = z.discriminatedUnion("_tag", [
   }),
 ]);
 
-export const featureDefinitionSchema = z.strictObject({
+const featureDefinitionSchema = z.strictObject({
   id: featureIdSchema.describe("Stable public feature ID."),
-  sourceDirectory: sourceDirectorySchema.describe("Authored directory under src/skills."),
+  sourceDirectory: originDirectorySchema.describe("Authored directory under src/skills."),
   installedSkill: installedSkillDefinitionSchema.describe("Installed output, separate from feature identity."),
   title: nonEmptyTrimmedTextSchema.describe("Short human-readable CLI label."),
   summary: nonEmptyTrimmedTextSchema.describe("One-line user-facing feature description."),
@@ -138,87 +138,113 @@ interface CatalogIssue {
   readonly message: string;
 }
 
-const duplicateIssues = (request: {
-  readonly values: ReadonlyArray<string | undefined>;
+const listDuplicateIssues = (request: {
+  readonly values: ReadonlyArray<string | null>;
   readonly field: ReadonlyArray<string>;
   readonly message: string;
 }): ReadonlyArray<CatalogIssue> =>
-  request.values.flatMap((value, index) =>
-    value === undefined || request.values.indexOf(value) === index
-      ? []
-      : [{ path: [index, ...request.field], message: request.message }],
-  );
+  request.values.flatMap((member, index) => {
+    const isMissingMember = member == null;
+    const isFirstWithThisMember = request.values.indexOf(member) === index;
 
-const missingDependencyIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
+    const isSkippedMember = isMissingMember || isFirstWithThisMember;
+
+    if (isSkippedMember) {
+      return [];
+    }
+
+    return [{ path: [index, ...request.field], message: request.message }];
+  });
+
+const listMissingDependencyIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
   const featureIds = new Set(features.map((feature) => feature.id));
 
   return features.flatMap((feature, index) =>
-    feature.dependencies.flatMap((dependency, dependencyIndex) =>
-      featureIds.has(dependency)
-        ? []
-        : [
-            {
-              path: [index, "dependencies", dependencyIndex],
-              message: "Dependencies must reference catalog features.",
-            },
-          ],
-    ),
+    feature.dependencies.flatMap((dependency, dependencyIndex) => {
+      const isKnownDependency = featureIds.has(dependency);
+
+      if (isKnownDependency) {
+        return [];
+      }
+
+      return [
+        {
+          path: [index, "dependencies", dependencyIndex],
+          message: "Dependencies must reference catalog features.",
+        },
+      ];
+    }),
   );
 };
 
-const dependencyCycleIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
-  const createsCycle = (id: FeatureId, path: ReadonlyArray<FeatureId>): boolean => {
-    if (path.includes(id)) {
+const listDependencyCycleIssues = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => {
+  const isCreatingCycle = (id: FeatureId, path: ReadonlyArray<FeatureId>): boolean => {
+    const isIdOnPath = path.includes(id);
+
+    if (isIdOnPath) {
       return true;
     }
 
     const feature = features.find((candidate) => candidate.id === id);
-    if (feature === undefined) {
+
+    const isFeatureMissing = feature == null;
+    if (isFeatureMissing) {
       return false;
     }
 
-    return feature.dependencies.some((dependency) => createsCycle(dependency, [...path, id]));
+    return feature.dependencies.some((dependency) => isCreatingCycle(dependency, [...path, id]));
   };
 
-  return features.flatMap((feature, index) =>
-    createsCycle(feature.id, [])
-      ? [{ path: [index, "dependencies"], message: "Feature dependencies must be acyclic." }]
-      : [],
-  );
+  return features.flatMap((feature, index) => {
+    const isThereCycle = isCreatingCycle(feature.id, []);
+
+    if (isThereCycle) {
+      return [{ path: [index, "dependencies"], message: "Feature dependencies must be acyclic." }];
+    }
+
+    return [];
+  });
 };
 
 const validateFeatureCatalog = (features: ReadonlyArray<FeatureDefinition>): ReadonlyArray<CatalogIssue> => [
-  ...duplicateIssues({
+  ...listDuplicateIssues({
     values: features.map((feature) => feature.id),
     field: ["id"],
     message: "Feature IDs must be unique.",
   }),
-  ...duplicateIssues({
+  ...listDuplicateIssues({
     values: features.map((feature) => feature.sourceDirectory),
     field: ["sourceDirectory"],
     message: "Source directories must be unique.",
   }),
-  ...duplicateIssues({
-    values: features.map((feature) =>
-      feature.installedSkill._tag === "skill" ? feature.installedSkill.id : undefined,
-    ),
+  ...listDuplicateIssues({
+    values: features.map((feature) => {
+      const installedSkill = feature.installedSkill;
+      const isSkillInstalled = installedSkill._tag === "skill";
+
+      if (isSkillInstalled) {
+        return installedSkill.id;
+      }
+
+      return null;
+    }),
     field: ["installedSkill", "id"],
     message: "Installed skill IDs must be unique.",
   }),
-  ...missingDependencyIssues(features),
-  ...dependencyCycleIssues(features),
+  ...listMissingDependencyIssues(features),
+  ...listDependencyCycleIssues(features),
 ];
 
-export const featureCatalogSchema = z.array(featureDefinitionSchema).superRefine((features, context) => {
+export const featureCatalogSchema = z.array(featureDefinitionSchema).superRefine((features, refinement) => {
   for (const issue of validateFeatureCatalog(features)) {
-    context.addIssue({ code: "custom", message: issue.message, path: [...issue.path] });
+    refinement.addIssue({ code: "custom", message: issue.message, path: [...issue.path] });
   }
 });
 
 // A copied skill: installed under its feature ID, never preselected, and without hook code.
-const skillFeature = ({
+const readSkillFeature = ({
   shippedPaths,
-  dependencies = [],
+  dependencies: collaborators = [],
   platform = "any",
   ...skill
 }: {
@@ -233,7 +259,7 @@ const skillFeature = ({
   ...skill,
   installedSkill: { _tag: "skill", id: skill.id, shippedPaths },
   selectedByDefault: false,
-  dependencies,
+  dependencies: collaborators,
   platform,
   runtime: { _tag: "none" },
 });
@@ -432,7 +458,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       ],
     },
   },
-  skillFeature({
+  readSkillFeature({
     id: "image-to-code",
     sourceDirectory: "image-to-code",
     title: "Image to code",
@@ -450,14 +476,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "scripts/src",
     ],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "github-repo-about",
     sourceDirectory: "github-repo-about",
     title: "GitHub repo About",
     summary: 'Write the GitHub "About" box — a one-line description, a website link, and topics.',
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "write-blog-post",
     sourceDirectory: "write-blog-post",
     title: "Write blog post (voice + cover)",
@@ -465,7 +491,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Write a new portfolio blog post in the owner's voice, add it to the blog data file, and make a matching cover image in ChatGPT.",
     shippedPaths: ["SKILL.md", "agents"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "write-readme",
     sourceDirectory: "write-readme",
     title: "Write README",
@@ -473,7 +499,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Write or fix the README and other start-here docs. Reads the repo first, then asks you questions one by one.",
     shippedPaths: ["SKILL.md", "references"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "update-agent-docs",
     sourceDirectory: "update-agent-docs",
     title: "Update agent docs",
@@ -481,7 +507,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Create or update agent instruction files (AGENTS.md, CLAUDE.md, GEMINI.md, Cursor rules, and more) based on each agent's official docs.",
     shippedPaths: ["SKILL.md", "sources.json", "scripts"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "make-code-readable",
     sourceDirectory: "make-code-readable",
     title: "Make code readable",
@@ -489,14 +515,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Make code easier to read — clearer names, files, and functions. Reviews first and shows before and after.",
     shippedPaths: ["SKILL.md", "references"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "simplify-code",
     sourceDirectory: "simplify-code",
     title: "Simplify code",
     summary: "Remove extra code — wrappers, layers, folders, generic names, and scripts the job does not need.",
     shippedPaths: ["SKILL.md", "references"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "question-my-plan",
     sourceDirectory: "question-my-plan",
     title: "Question my plan",
@@ -505,7 +531,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md"],
     dependencies: ["code-style"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "ask-before-build",
     sourceDirectory: "ask-before-build",
     title: "Ask before build",
@@ -513,7 +539,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Ask every open question about a new task up front, cut it to an MVP, and backlog the rest, so scope does not arrive one message at a time.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "code-style",
     sourceDirectory: "code-style",
     title: "Code style",
@@ -521,7 +547,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Make a repo follow the personal rules in ~/.claude/rules/: set up Biome and Ruff, move the repo's own exceptions into AGENTS.md, line up folders, file names and root docs, and fix the code. Can also only review a repo.",
     shippedPaths: ["SKILL.md", "ADOPT.md", "NEW-PROJECT.md", "_shared"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "code-style-teach-me",
     sourceDirectory: "code-style-teach-me",
     title: "Code style — teach me",
@@ -529,7 +555,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "While you build, stop at each real choice, show two options, and explain the rule so you learn your own architecture.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "code-style-review",
     sourceDirectory: "code-style-review",
     title: "Code style review",
@@ -537,7 +563,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Check a big change (branch or PR) against the style rules and get a short report, so you do not need to read every file.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "explain-my-stack",
     sourceDirectory: "explain-my-stack",
     title: "Explain my stack",
@@ -545,7 +571,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Understand why the project uses each technology (language, framework, services), with honest trade-offs and a plain glossary, all in chat.",
     shippedPaths: ["SKILL.md", "TEACH-FORMAT.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "plan-page",
     sourceDirectory: "plan-page",
     title: "Plan page",
@@ -553,14 +579,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Show a plan, approval step, or report as an interactive HTML page (open-source planpage package) where you can approve or change choices.",
     shippedPaths: ["SKILL.md", "COMPONENTS.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "website-speed-ci",
     sourceDirectory: "website-speed-ci",
     title: "Website speed CI",
     summary: "Add website speed checks (Lighthouse CI, Core Web Vitals, CrUX) to CI so a slow change fails the PR.",
     shippedPaths: ["SKILL.md", "README.md", "CONTEXT.md", "TECH-GLOSSARY.md", "reference", "scripts", "templates"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "chrome-store-seo",
     sourceDirectory: "chrome-store-seo",
     title: "Chrome Store SEO",
@@ -568,7 +594,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Improve your Chrome Web Store text (name, summary, description) and landing page so more people find the extension.",
     shippedPaths: ["SKILL.md", "REFERENCE.md", "scripts", "templates"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "make-promo-video",
     sourceDirectory: "make-promo-video",
     title: "Make promo video",
@@ -578,7 +604,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     dependencies: ["plan-page"],
     platform: "macos",
   }),
-  skillFeature({
+  readSkillFeature({
     id: "check-website-quality",
     sourceDirectory: "check-website-quality",
     title: "Check website quality",
@@ -586,14 +612,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Scan a website for HTML structure, accessibility, images, speed, security headers, SEO, and AI-readiness, then fix what is wrong.",
     shippedPaths: ["SKILL.md", "reference", "scripts", "templates"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "organize-commits",
     sourceDirectory: "organize-commits",
     title: "Organize commits",
     summary: "Split your changes into small, clear commits with good messages, and clean up history and branches.",
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "finish-and-push",
     sourceDirectory: "finish-and-push",
     title: "Finish and push",
@@ -601,14 +627,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md"],
     dependencies: ["organize-commits"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "run-local-and-check",
     sourceDirectory: "run-local-and-check",
     title: "Run local and check",
     summary: "Run the app on your computer and prove it works in a real browser or app. No deploy.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "run-ci-locally",
     sourceDirectory: "run-ci-locally",
     title: "Run CI locally",
@@ -616,7 +642,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Run the repo's GitHub Actions workflows in Docker with act when Actions cannot run, then remove everything the run made.",
     shippedPaths: ["SKILL.md", "scripts"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "reuse-before-build",
     sourceDirectory: "reuse-before-build",
     title: "Reuse before build",
@@ -624,21 +650,21 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Before building a feature, find code, packages, or platform features you already have that can do the job.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "find-repeated-prompts",
     sourceDirectory: "find-repeated-prompts",
     title: "Find repeated prompts",
     summary: "Read your past agent sessions and find prompts and work patterns you repeat, as ideas for new skills.",
     shippedPaths: ["SKILL.md", "scripts"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "install-skills",
     sourceDirectory: "install-skills",
     title: "Install skills",
     summary: "Install or update skills in all your coding agents and check that each agent can really find them.",
     shippedPaths: ["SKILL.md", "agents"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "fix-env-config",
     sourceDirectory: "fix-env-config",
     title: "Fix env config",
@@ -646,14 +672,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Put env variables and config in one place with types and checks, and find duplicates, silent defaults, and secrets leaking to the client.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "add-mcp-server",
     sourceDirectory: "add-mcp-server",
     title: "Add MCP server",
     summary: "Add an MCP server to your agents, log in with OAuth, and check that its tools really work.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "check-rtl-ui",
     sourceDirectory: "check-rtl-ui",
     title: "Check RTL UI",
@@ -661,21 +687,21 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Check and fix right-to-left screens (Hebrew, Arabic, Persian, Urdu) — layout, mixed-direction text, icons, forms, and accessibility.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "deploy-and-check",
     sourceDirectory: "deploy-and-check",
     title: "Deploy and check",
     summary: "Deploy to production and prove it is really live with checks against the real URL.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "fix-bug",
     sourceDirectory: "fix-bug",
     title: "Fix bug",
     summary: "Reproduce the bug first, find the real cause, fix it, and prove the fix works.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "run-tasks-in-parallel",
     sourceDirectory: "run-tasks-in-parallel",
     title: "Run tasks in parallel",
@@ -683,7 +709,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
     dependencies: ["organize-commits", "finish-and-push", "run-local-and-check", "active-run-reminder"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "ship-one-feature",
     sourceDirectory: "ship-one-feature",
     title: "Ship one feature",
@@ -691,7 +717,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
     dependencies: ["run-tasks-in-parallel", "finish-and-push", "organize-commits"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "find-missing-tests",
     sourceDirectory: "find-missing-tests",
     title: "Find missing tests",
@@ -699,7 +725,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "REFERENCE.md", "references"],
     dependencies: ["run-tasks-in-parallel", "organize-commits", "finish-and-push"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "ship-missing-tests",
     sourceDirectory: "ship-missing-tests",
     title: "Ship missing tests",
@@ -714,7 +740,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "ship-one-feature",
     ],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "simplify-repo-with-tests",
     sourceDirectory: "simplify-repo-with-tests",
     title: "Simplify repo with tests",
@@ -728,7 +754,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "find-missing-tests",
     ],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "restructure-repo",
     sourceDirectory: "restructure-repo",
     title: "Restructure repo",
@@ -737,7 +763,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "REFERENCE.md", "EXAMPLES.md"],
     dependencies: ["make-code-readable", "simplify-code"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "improve-ux",
     sourceDirectory: "improve-ux",
     title: "Improve UX",
@@ -746,7 +772,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
     dependencies: ["plan-page", "run-tasks-in-parallel", "finish-and-push", "organize-commits", "run-local-and-check"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "design-app-mockup",
     sourceDirectory: "design-app-mockup",
     title: "Design app mockup",
@@ -754,28 +780,28 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Turn an app idea into premium, Framer-level UI mockups: pick one of 3 real templates, get a hi-fi landing page inspired by it, or a close match in your own colors and content, then a UI library from that page, custom icons, real photos, and clickable app journeys.",
     shippedPaths: ["SKILL.md", "REFERENCE.md", "scripts"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "free-ports",
     sourceDirectory: "free-ports",
     title: "Free ports",
     summary: "Stop local servers that block ports (keeps Metro on 8081) so you can start dev again.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "clone-all-repos",
     sourceDirectory: "clone-all-repos",
     title: "Clone all repos",
     summary: "Clone or update all your GitHub repos into your Code folder and report what changed.",
     shippedPaths: ["SKILL.md", "agents"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "manage-cloudflare",
     sourceDirectory: "manage-cloudflare",
     title: "Manage Cloudflare",
     summary: "Set up and fix Cloudflare — wrangler config, D1, KV, R2, Workers and Pages projects, and secrets.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "clean-repo-by-feature",
     sourceDirectory: "clean-repo-by-feature",
     title: "Clean repo by feature",
@@ -784,7 +810,7 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
     shippedPaths: ["SKILL.md", "agents"],
     dependencies: ["run-tasks-in-parallel", "finish-and-push", "organize-commits"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "add-skill",
     sourceDirectory: "add-skill",
     title: "Add skill",
@@ -792,14 +818,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Describe a new skill and answer its questions; it shows the whole skill for approval, then adds, checks, and installs it.",
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "improve-skill",
     sourceDirectory: "improve-skill",
     title: "Improve skill",
     summary: "Change an existing skill based on feedback or on what went wrong in a real session.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "which-skill",
     sourceDirectory: "which-skill",
     title: "Which skill",
@@ -807,14 +833,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Not sure which skill to use? It turns your request into a short plan with the right skills and a ready prompt.",
     shippedPaths: ["SKILL.md", "REFERENCE.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "benchmark-agents",
     sourceDirectory: "benchmark-agents",
     title: "Benchmark agents",
     summary: "Run the same tasks with different agents, skills, or tools and compare tokens, time, cost, and success.",
     shippedPaths: ["SKILL.md", "REFERENCE.md", "agents", "scripts"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "release-mobile-app",
     sourceDirectory: "release-mobile-app",
     title: "Release mobile app",
@@ -822,14 +848,14 @@ export const featureCatalog: ReadonlyArray<FeatureDefinition> = featureCatalogSc
       "Build and upload the app to App Store, TestFlight, or Google Play, and prove which commit, version, and build was sent.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "save-as-skill",
     sourceDirectory: "save-as-skill",
     title: "Save as skill",
     summary: "Turn what we just did into something you can reuse — a skill, script, template, test, or runbook.",
     shippedPaths: ["SKILL.md"],
   }),
-  skillFeature({
+  readSkillFeature({
     id: "finish-old-sessions",
     sourceDirectory: "finish-old-sessions",
     title: "Finish old sessions",
@@ -854,14 +880,15 @@ export const defaultFeatureIds = featureCatalog
   .filter((feature) => feature.selectedByDefault)
   .map((feature) => feature.id);
 
-export type AddDependenciesResult =
+export type AddCollaboratorsReport =
   | { readonly status: "ready"; readonly featureIds: ReadonlyArray<FeatureId> }
   | { readonly status: "unknown"; readonly featureId: string };
 
 // Adds every dependency of the requested features. An unknown requested ID is a status, not a throw.
-export const addDependencies = (requestedIds: ReadonlyArray<string>): AddDependenciesResult => {
+export const addDependencies = (requestedIds: ReadonlyArray<string>): AddCollaboratorsReport => {
   const unknownId = requestedIds.find((id) => findFeature(id) === null);
-  const isThereUnknownId = unknownId !== undefined;
+
+  const isThereUnknownId = unknownId != null;
   if (isThereUnknownId) {
     return { status: "unknown", featureId: unknownId };
   }
@@ -869,7 +896,9 @@ export const addDependencies = (requestedIds: ReadonlyArray<string>): AddDepende
   const includedIds = new Set<string>();
   // The catalog schema already proves every dependency exists and the graph is acyclic.
   const visitFeature = (feature: FeatureDefinition): void => {
-    if (includedIds.has(feature.id)) {
+    const isAlreadyIncluded = includedIds.has(feature.id);
+
+    if (isAlreadyIncluded) {
       return;
     }
 
@@ -883,6 +912,16 @@ export const addDependencies = (requestedIds: ReadonlyArray<string>): AddDepende
 };
 
 export const skillsForFeatures = (featureIds: ReadonlyArray<FeatureId>) =>
-  featureCatalog.flatMap((feature) =>
-    featureIds.includes(feature.id) && feature.installedSkill._tag === "skill" ? [feature.installedSkill] : [],
-  );
+  featureCatalog.flatMap((feature) => {
+    const isFeatureRequested = featureIds.includes(feature.id);
+    const installedSkill = feature.installedSkill;
+    const isSkillInstalled = installedSkill._tag === "skill";
+
+    const isSkillRequested = isFeatureRequested && isSkillInstalled;
+
+    if (isSkillRequested) {
+      return [installedSkill];
+    }
+
+    return [];
+  });

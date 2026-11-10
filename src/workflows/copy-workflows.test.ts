@@ -9,7 +9,7 @@ import { copyWorkflows, fillPublishTemplate, planWorkflowFiles } from "./copy-wo
 
 const templateDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../templates/workflows");
 
-const inputs = { owner: "Acme", repo: "widget", packageName: "widget-cli" };
+const detailsList = { owner: "Acme", repo: "widget", packageName: "widget-cli" };
 
 const temporaryRoots: Array<string> = [];
 
@@ -29,7 +29,10 @@ const makeRepository = (): string => {
 
 describe("fillPublishTemplate", () => {
   it("substitutes every OWNER, REPO and PACKAGE placeholder", () => {
-    const filled = fillPublishTemplate({ template: "{{OWNER}}/{{REPO}} ships {{PACKAGE}} — {{OWNER}} again", inputs });
+    const filled = fillPublishTemplate({
+      template: "{{OWNER}}/{{REPO}} ships {{PACKAGE}} — {{OWNER}} again",
+      inputs: detailsList,
+    });
 
     expect(filled).toBe("Acme/widget ships widget-cli — Acme again");
   });
@@ -43,7 +46,7 @@ describe("planWorkflowFiles", () => {
         { name: "publish.yml", text: "{{OWNER}}/{{REPO}} ships {{PACKAGE}}" },
         { name: "README.md", text: "ignore me" },
       ],
-      inputs,
+      inputs: detailsList,
     });
 
     expect(planned).toEqual([

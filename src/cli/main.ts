@@ -9,7 +9,7 @@ import { type Command, CommanderError } from "commander";
 import { readPackageVersion } from "#src/install/package-root.js";
 import { createCatalogCommand } from "./catalog-command.js";
 import { createCommand, isCliUsageError } from "./cli-options.js";
-import { createConfigCommand } from "./config-command.js";
+import { createSettingsCommand } from "./config-command.js";
 import { createDoctorCommand, type HealthStatus } from "./doctor-command.js";
 import { createInstallCommand } from "./install-command.js";
 import { createMenuCommand } from "./menu-command.js";
@@ -38,7 +38,7 @@ const createAgentSetupCommand = (packageVersion: string, abortSignal: AbortSigna
     .addCommand(createUninstallCommand(abortSignal))
     .addCommand(createMenuCommand(abortSignal))
     .addCommand(createCatalogCommand())
-    .addCommand(createConfigCommand(abortSignal))
+    .addCommand(createSettingsCommand(abortSignal))
     .addCommand(createDoctorCommand(applyHealthStatusExitCode))
     .addCommand(createWorkflowCommand());
 
@@ -46,6 +46,7 @@ export const isBareArgv = (argv: ReadonlyArray<string>): boolean => argv.length 
 
 const reportFailure = async (request: { readonly error: unknown; readonly isInterrupted: boolean }): Promise<void> => {
   const { error, isInterrupted } = request;
+
   const isCommanderExit = error instanceof CommanderError;
   if (isCommanderExit) {
     // Help and version exit 0; a usage error from commander has already printed its message.
@@ -62,7 +63,7 @@ const reportFailure = async (request: { readonly error: unknown; readonly isInte
   process.exitCode = isCliUsageError(error) ? USAGE_EXIT_CODE : FAILED_EXIT_CODE;
 };
 
-const main = async (argv: ReadonlyArray<string>): Promise<void> => {
+const runMain = async (argv: ReadonlyArray<string>): Promise<void> => {
   const abortController = new AbortController();
   process.once("SIGINT", () => {
     process.exitCode = INTERRUPTED_EXIT_CODE;
@@ -81,10 +82,15 @@ const main = async (argv: ReadonlyArray<string>): Promise<void> => {
 };
 
 const thisFile = fileURLToPath(import.meta.url);
-const invoked = process.argv[1] === undefined ? undefined : resolve(process.argv[1]);
+const invokedPath = process.argv[1];
+const isInvokedPathMissing = invokedPath == null;
+const invoked = isInvokedPathMissing ? null : resolve(invokedPath);
+
 // tsx runs main.ts while the build runs main.js, so both spellings count as this file.
 let isDirectRun = invoked === thisFile || invoked === thisFile.replace(/\.ts$/, ".js");
-if (!isDirectRun && invoked !== undefined) {
+
+const isDirectRunPossible = !isDirectRun && invoked != null;
+if (isDirectRunPossible) {
   try {
     // The npm bin is a symlink into node_modules; realpath makes argv match import.meta.url.
     isDirectRun = realpathSync(invoked) === thisFile;
@@ -95,5 +101,5 @@ if (!isDirectRun && invoked !== undefined) {
 
 // Tests import this module for isBareArgv, so the CLI runs only when this file is the entry point.
 if (isDirectRun) {
-  await main(process.argv);
+  await runMain(process.argv);
 }

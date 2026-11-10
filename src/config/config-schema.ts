@@ -6,44 +6,44 @@ const CODE_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "re
 
 const rootFolderListSchema = z.array(nonEmptyTrimmedTextSchema).default(CODE_ROOT_FOLDERS);
 
-const configObjectSchema = z.strictObject({
+const settingsObjectSchema = z.strictObject({
   sessionRehomeRoots: rootFolderListSchema,
   diskCleanupRoots: rootFolderListSchema,
   debugLogs: z.boolean().default(false),
 });
 
-export type Config = z.infer<typeof configObjectSchema>;
+export type Config = z.infer<typeof settingsObjectSchema>;
 
-type ConfigKey = keyof Config;
+type SettingKey = keyof Config;
 
 // A key set to undefined is rejected here, before defaults fill it in; JSON files can never carry one.
-const rejectUndefinedProperties = (input: unknown, context: z.RefinementCtx) => {
-  const isNotPlainObject = typeof input !== "object" || input === null;
+const rejectUndefinedProperties = (details: unknown, refinement: z.RefinementCtx) => {
+  const isNotPlainObject = typeof details !== "object" || details === null;
   if (isNotPlainObject) {
     return;
   }
 
-  for (const [key, value] of Object.entries(input)) {
-    const isUndefinedValue = value === undefined;
-    if (isUndefinedValue) {
-      context.addIssue({ code: "custom", message: "Properties must not be undefined.", path: [key] });
+  for (const [key, field] of Object.entries(details)) {
+    const isUndefinedField = typeof field === "undefined";
+    if (isUndefinedField) {
+      refinement.addIssue({ code: "custom", message: "Properties must not be undefined.", path: [key] });
     }
   }
 };
 
-export const configSchema = z.unknown().superRefine(rejectUndefinedProperties).pipe(configObjectSchema);
+export const settingsSchema = z.unknown().superRefine(rejectUndefinedProperties).pipe(settingsObjectSchema);
 
 // Temporary bridge for the Effect schemas that still validate configs; removed with those schemas.
-export const isConfig = (input: unknown): input is Config => configSchema.safeParse(input).success;
+export const isConfig = (details: unknown): details is Config => settingsSchema.safeParse(details).success;
 
-export const encodeConfigJson = (config: Config): string => JSON.stringify(config);
+export const encodeSettingsDocument = (settings: Config): string => JSON.stringify(settings);
 
-export const defaultConfig: Config = configObjectSchema.parse({});
+export const defaultConfig: Config = settingsObjectSchema.parse({});
 
-export type SettingKind = "number" | "boolean" | "list" | "text";
+type SettingKind = "number" | "boolean" | "list" | "text";
 
-export interface ConfigSetting {
-  readonly key: ConfigKey;
+export interface Setting {
+  readonly key: SettingKey;
   readonly name: string;
   readonly label: string;
   readonly description: string;
@@ -52,15 +52,15 @@ export interface ConfigSetting {
   readonly optional: boolean;
 }
 
-interface ConfigSettingDefinition {
-  readonly key: ConfigKey;
+interface SettingDefinition {
+  readonly key: SettingKey;
   readonly label: string;
   readonly description: string;
   readonly kind: SettingKind;
 }
 
 // The CLI label and meaning of every setting; the CLI, the menu and the README settings table all read this one list.
-const configSettingDefinitions = [
+const settingDefinitions = [
   {
     key: "sessionRehomeRoots",
     label: "session rehome roots",
@@ -81,70 +81,79 @@ const configSettingDefinitions = [
     description: "Print agent-setup hook errors to stderr.",
     kind: "boolean",
   },
-] as const satisfies ReadonlyArray<ConfigSettingDefinition>;
+] as const satisfies ReadonlyArray<SettingDefinition>;
 
 // e.g. "debugLogs" → "debug-logs"
-const settingNameFor = (key: ConfigKey): string => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+const readSettingName = (key: SettingKey): string => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
-const choicesFor = (kind: SettingKind): ReadonlyArray<string> => (kind === "boolean" ? ["true", "false"] : []);
+const listKindChoices = (kind: SettingKind): ReadonlyArray<string> => {
+  const isBooleanKind = kind === "boolean";
 
-export const configSettings: ReadonlyArray<ConfigSetting> = configSettingDefinitions.map((definition) => ({
+  if (isBooleanKind) {
+    return ["true", "false"];
+  }
+
+  return [];
+};
+
+export const settingList: ReadonlyArray<Setting> = settingDefinitions.map((definition) => ({
   key: definition.key,
-  name: settingNameFor(definition.key),
+  name: readSettingName(definition.key),
   label: definition.label,
   description: definition.description,
   kind: definition.kind,
-  choices: choicesFor(definition.kind),
+  choices: listKindChoices(definition.kind),
   optional: false,
 }));
 
-const booleanTextSchema = z.enum(["true", "false"]).transform((text) => text === "true");
+const booleanStringSchema = z.enum(["true", "false"]).transform((string) => string === "true");
 
-const numberTextSchema = z
+const numberStringSchema = z
   .string()
-  .refine((text) => text !== "" && Number.isFinite(Number(text)), { message: "Expected a number." })
-  .transform((text) => Number(text));
+  .refine((string) => string !== "" && Number.isFinite(Number(string)), { message: "Expected a number." })
+  .transform((string) => Number(string));
 
-const listTextSchema = z
+const listStringSchema = z
   .string()
-  .transform((text) => text.split(",").map((entry) => entry.trim()))
-  .transform((entries) => entries.filter((entry) => entry !== ""));
+  .transform((string) => string.split(",").map((line) => line.trim()))
+  .transform((lines) => lines.filter((line) => line !== ""));
 
 // Turns CLI text into the value a setting stores; empty text clears an optional setting (null).
 // A text the setting cannot hold throws a ZodError.
-export const settingValueFromText = (request: { readonly setting: ConfigSetting; readonly text: string }): unknown => {
-  const trimmedText = request.text.trim();
-  const isClearingOptionalSetting = request.setting.optional && trimmedText === "";
+export const readSettingFieldFromString = (request: { readonly setting: Setting; readonly text: string }): unknown => {
+  const trimmedString = request.text.trim();
+
+  const isClearingOptionalSetting = request.setting.optional && trimmedString === "";
   if (isClearingOptionalSetting) {
     return null;
   }
 
   switch (request.setting.kind) {
     case "number":
-      return numberTextSchema.parse(trimmedText);
+      return numberStringSchema.parse(trimmedString);
     case "boolean":
-      return booleanTextSchema.parse(trimmedText);
+      return booleanStringSchema.parse(trimmedString);
     case "list":
-      return listTextSchema.parse(request.text);
+      return listStringSchema.parse(request.text);
     case "text":
       return request.text;
   }
 };
 
-export const defaultSettingValue = (key: ConfigKey): unknown => defaultConfig[key];
+export const readDefaultSettingField = (key: SettingKey): unknown => defaultConfig[key];
 
 // Returns a new complete config with one setting replaced; a null value removes an optional setting's key.
 // An invalid value throws a ZodError.
-export const withSettingValue = (request: {
+export const setSettingField = (request: {
   readonly config: Config;
-  readonly key: ConfigKey;
+  readonly key: SettingKey;
   readonly value: unknown;
 }) => {
   const isClearingSetting = request.value === null;
   if (isClearingSetting) {
-    const remainingEntries = Object.entries(request.config).filter(([name]) => name !== request.key);
-    return configSchema.parse(Object.fromEntries(remainingEntries));
+    const remainingLines = Object.entries(request.config).filter(([name]) => name !== request.key);
+    return settingsSchema.parse(Object.fromEntries(remainingLines));
   }
 
-  return configSchema.parse({ ...request.config, [request.key]: request.value });
+  return settingsSchema.parse({ ...request.config, [request.key]: request.value });
 };

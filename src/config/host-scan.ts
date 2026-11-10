@@ -1,7 +1,6 @@
-// Home and project roots, platform, and agent evidence, observed once per command and handed to capabilities.
-
 import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -12,7 +11,7 @@ import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 
-export const hostOperatingSystems = [
+const hostOperatingSystems = [
   "aix",
   "android",
   "darwin",
@@ -31,7 +30,7 @@ export const hostPlatformSchema = z.strictObject({
   operatingSystem: z.enum(hostOperatingSystems),
 });
 
-export type HostPlatform = z.infer<typeof hostPlatformSchema>;
+type HostPlatform = z.infer<typeof hostPlatformSchema>;
 
 export interface HostScan {
   readonly homeRoot: string;
@@ -40,16 +39,16 @@ export interface HostScan {
   readonly agentEvidence: AgentEvidence;
 }
 
-const uniqueSorted = (values: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(values)].sort();
+const listUniqueSorted = (fields: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(fields)].sort();
 
-const absoluteRoot = (value: string): string => path.resolve(value).replaceAll("\\", "/");
+const readAbsoluteRoot = (field: string): string => path.resolve(field).replaceAll("\\", "/");
 
 // cmux puts a wrapper for every agent it integrates with (grok, opencode, …) on each terminal's PATH whether or not
 // the agent is installed — its grok wrapper only prints "grok not found" — so a wrapper alone is not evidence.
 // e.g. "/Applications/cmux.app/Contents/Resources/bin/grok"
 const TERMINAL_WRAPPER_PATTERN = /\/cmux\.app\/Contents\/Resources\/bin\//u;
 
-const pathExists = async (filePath: string): Promise<boolean> => {
+const isPathExists = async (filePath: string): Promise<boolean> => {
   try {
     await access(filePath);
     return true;
@@ -60,7 +59,7 @@ const pathExists = async (filePath: string): Promise<boolean> => {
 };
 
 // `which` needs PATH to find anything, so the child gets this process's environment.
-const commandAvailable = async (commandName: string): Promise<boolean> => {
+const isCommandAvailable = async (commandName: string): Promise<boolean> => {
   try {
     const whichReply = await execFileAsync("which", ["-a", commandName], { env: process.env });
     const commandPaths = whichReply.stdout.split("\n");
@@ -71,48 +70,52 @@ const commandAvailable = async (commandName: string): Promise<boolean> => {
   }
 };
 
-const declaredEvidence = (select: (detection: AgentDefinition["detection"]) => ReadonlyArray<string>) =>
-  uniqueSorted(agentCatalog.flatMap((agent) => select(agent.detection)));
+const listDeclaredEvidence = (select: (detection: AgentDefinition["detection"]) => ReadonlyArray<string>) =>
+  listUniqueSorted(agentCatalog.flatMap((agent) => select(agent.detection)));
 
 // Checks one value at a time, in catalog order, and keeps the ones that are present.
-const keepPresentValues = async (
-  values: ReadonlyArray<string>,
-  isPresent: (value: string) => Promise<boolean>,
+const keepPresentFields = async (
+  fields: ReadonlyArray<string>,
+  isPresent: (field: string) => Promise<boolean>,
 ): Promise<Array<string>> => {
-  const presentValues: Array<string> = [];
-  for (const value of values) {
-    const isValuePresent = await isPresent(value);
-    if (isValuePresent) {
-      presentValues.push(value);
+  const presentFields: Array<string> = [];
+  for (const field of fields) {
+    const isFieldPresent = await isPresent(field);
+    if (isFieldPresent) {
+      presentFields.push(field);
     }
   }
 
-  return presentValues;
+  return presentFields;
 };
 
 // Checks every detection alternative the agent catalog declares, each exactly once.
 const captureAgentEvidence = async (homeRoot: string): Promise<AgentEvidence> => {
-  const declaredHomePaths = declaredEvidence((detection) => detection.homePaths);
-  const homePaths = await keepPresentValues(declaredHomePaths, (homePath) => pathExists(path.join(homeRoot, homePath)));
+  const declaredHomePaths = listDeclaredEvidence((detection) => detection.homePaths);
+  const homePaths = await keepPresentFields(declaredHomePaths, (homePath) =>
+    isPathExists(path.join(homeRoot, homePath)),
+  );
 
-  const declaredAbsolutePaths = declaredEvidence((detection) => detection.absolutePaths);
-  const absolutePaths = await keepPresentValues(declaredAbsolutePaths, pathExists);
+  const declaredAbsolutePaths = listDeclaredEvidence((detection) => detection.absolutePaths);
+  const absolutePaths = await keepPresentFields(declaredAbsolutePaths, isPathExists);
 
-  const declaredCommands = declaredEvidence((detection) => detection.commands);
-  const commands = await keepPresentValues(declaredCommands, commandAvailable);
+  const declaredCommands = listDeclaredEvidence((detection) => detection.commands);
+  const commands = await keepPresentFields(declaredCommands, isCommandAvailable);
 
   return { homePaths, absolutePaths, commands };
 };
 
 export const scanHost = async (): Promise<HostScan> => {
-  const homeRoot = absoluteRoot(process.env.HOME || process.env.USERPROFILE || "");
+  const homeRoot = readAbsoluteRoot(homedir());
+
   const isHomeRootUnusable = homeRoot === "/" || homeRoot === "";
   if (isHomeRootUnusable) {
     throw new Error("Cannot scan host: HOME (or USERPROFILE) must resolve to an absolute home directory.");
   }
 
-  const projectRoot = absoluteRoot(process.cwd());
+  const projectRoot = readAbsoluteRoot(process.cwd());
   const platformCheck = hostPlatformSchema.safeParse({ operatingSystem: process.platform });
+
   const isPlatformInvalid = !platformCheck.success;
   if (isPlatformInvalid) {
     throw new Error(
@@ -128,7 +131,7 @@ export const scanHost = async (): Promise<HostScan> => {
   return { homeRoot, projectRoot, platform: platformCheck.data, agentEvidence };
 };
 
-export const destinationForScope = (request: {
+export const readDestinationForScope = (request: {
   scope: "global" | "project";
   homeRoot: string;
   projectRoot: string;

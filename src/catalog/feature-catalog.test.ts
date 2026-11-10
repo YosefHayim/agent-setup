@@ -68,7 +68,7 @@ const expectedFeatureIds = [
   "finish-old-sessions",
 ];
 
-const expectedSourceDirectories = [
+const expectedOriginDirectories = [
   "active-run-reminder",
   "scratch-folder-guard",
   "process-kill-guard",
@@ -171,7 +171,7 @@ const validFixture = [
   },
 ];
 
-const decodeFixture = (input: unknown) => featureCatalogSchema.safeParse(input);
+const decodeFixture = (details: unknown) => featureCatalogSchema.safeParse(details);
 
 describe("featureCatalog", () => {
   it("decodes all approved features in display order", () => {
@@ -179,7 +179,7 @@ describe("featureCatalog", () => {
   });
 
   it("keeps public IDs, authored directories, and installed IDs distinct", () => {
-    expect(featureCatalog.map((feature) => feature.sourceDirectory)).toEqual(expectedSourceDirectories);
+    expect(featureCatalog.map((feature) => feature.sourceDirectory)).toEqual(expectedOriginDirectories);
   });
 
   it("derives defaults, installed skills, and exact shipped allowlists", () => {
@@ -257,18 +257,21 @@ describe("featureCatalog", () => {
   });
 
   it("stores authored TypeScript hook entrypoints and no generated JavaScript paths", () => {
-    const runtimeFeatures = featureCatalog.flatMap((feature) =>
-      feature.runtime._tag === "hook"
-        ? [
-            {
-              id: feature.id,
-              platform: feature.platform,
-              sourceEntrypoint: feature.runtime.sourceEntrypoint,
-              registrations: feature.runtime.registrations,
-            },
-          ]
-        : [],
-    );
+    const runtimeFeatures = featureCatalog.flatMap((feature) => {
+      const runtime = feature.runtime;
+      const isNotHookRuntime = runtime._tag !== "hook";
+
+      if (isNotHookRuntime) return [];
+
+      return [
+        {
+          id: feature.id,
+          platform: feature.platform,
+          sourceEntrypoint: runtime.sourceEntrypoint,
+          registrations: runtime.registrations,
+        },
+      ];
+    });
 
     expect(runtimeFeatures).toEqual([
       {
@@ -507,8 +510,8 @@ describe("featureCatalogSchema", () => {
       ],
       message: "must end in .ts",
     },
-  ])("rejects $name", ({ input, message }) => {
-    const featureCatalogCheck = decodeFixture(input);
+  ])("rejects $name", ({ input: details, message }) => {
+    const featureCatalogCheck = decodeFixture(details);
 
     expect(featureCatalogCheck.success).toBe(false);
     expect(String(featureCatalogCheck.error)).toContain(message);

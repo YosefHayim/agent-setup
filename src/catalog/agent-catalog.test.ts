@@ -129,9 +129,9 @@ const validAgentFixture = {
   nativeHooks: { _tag: "unsupported" },
 };
 
-const decodeDefinition = (input: unknown) => agentDefinitionSchema.safeParse(input);
+const decodeDefinition = (details: unknown) => agentDefinitionSchema.safeParse(details);
 
-const decodeTarget = (input: unknown) => agentTargetSchema.safeParse(input);
+const decodeTarget = (details: unknown) => agentTargetSchema.safeParse(details);
 
 describe("agentCatalog", () => {
   it("decodes the exact approved agents in stable display order", () => {
@@ -194,8 +194,8 @@ describe("agentCatalogSchema", () => {
       },
       decode: decodeTarget,
     },
-  ])("rejects excess properties in $name", ({ input, decode }) => {
-    const agentCatalogCheck = decode(input);
+  ])("rejects excess properties in $name", ({ input: details, decode }) => {
+    const agentCatalogCheck = decode(details);
 
     expect(agentCatalogCheck.success).toBe(false);
     expect(String(agentCatalogCheck.error)).toContain("Unrecognized key");

@@ -12,25 +12,28 @@ import { isBareArgv } from "./main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const packageVersion = String(JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version);
-const CLI_ENTRY = path.join(REPO_ROOT, "src/cli/main.ts");
+const CLI_LINE = path.join(REPO_ROOT, "src/cli/main.ts");
 const CLI_TEST_TIMEOUT = 75_000;
 
 // Async on purpose: a synchronous spawn blocks the vitest worker long enough for its RPC calls to time out.
-const runCli = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = {}) =>
-  new Promise<{ readonly stdout: string; readonly exitCode: number }>((resolve) => {
-    const child = spawn(process.execPath, ["--import", "tsx", CLI_ENTRY, ...args], {
+const runCli = (argumentList: ReadonlyArray<string>, environment: NodeJS.ProcessEnv = {}) =>
+  new Promise<{ readonly stdout: string; readonly exitCode: number }>((fulfill) => {
+    const child = spawn(process.execPath, ["--import", "tsx", CLI_LINE, ...argumentList], {
       cwd: REPO_ROOT,
       timeout: 60_000,
       stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, FORCE_COLOR: "0", ...env },
+      env: { ...process.env, FORCE_COLOR: "0", ...environment },
     });
     const chunks: Array<string> = [];
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => chunks.push(chunk));
-    child.on("close", (code) => resolve({ stdout: chunks.join(""), exitCode: code === null ? 1 : code }));
+    child.on("close", (code) => {
+      const isExitedBySignal = code === null;
+      fulfill({ stdout: chunks.join(""), exitCode: isExitedBySignal ? 1 : code });
+    });
   });
 
 // A throwaway directory, used as HOME so the global scope never touches the machine's real install.
-const withFreshDirectory = async (run: (directory: string) => Promise<void>) => {
+const createFreshDirectory = async (run: (directory: string) => Promise<void>) => {
   const directory = mkdtempSync(path.join(tmpdir(), "agent-setup-cli-"));
   try {
     await run(directory);
@@ -62,12 +65,12 @@ describe("CLI help", () => {
     },
   ])(
     "documents `$args`",
-    async ({ args, shows, hides }) => {
-      const execution = await runCli(args);
+    async ({ args: argumentList, shows, hides }) => {
+      const execution = await runCli(argumentList);
 
       expect(execution.exitCode).toBe(0);
-      for (const text of shows) expect(execution.stdout).toContain(text);
-      for (const text of hides) expect(execution.stdout).not.toContain(text);
+      for (const shownPhrase of shows) expect(execution.stdout).toContain(shownPhrase);
+      for (const hiddenPhrase of hides) expect(execution.stdout).not.toContain(hiddenPhrase);
     },
     CLI_TEST_TIMEOUT,
   );
@@ -110,7 +113,7 @@ describe("CLI exit codes", () => {
   it(
     "uses exit 2 for an invalid managed setting value",
     () =>
-      withFreshDirectory(async (homeRoot) => {
+      createFreshDirectory(async (homeRoot) => {
         expect((await runCli(["config", "set", "debug-logs", "sometimes"], { HOME: homeRoot })).exitCode).toBe(2);
       }),
     CLI_TEST_TIMEOUT,
@@ -121,16 +124,16 @@ describe("config reset", () => {
   it(
     "replaces a config.json that no longer decodes without reading it first",
     () =>
-      withFreshDirectory(async (homeRoot) => {
-        const configPath = path.join(homeRoot, ".claude/agent-setup/config.json");
-        mkdirSync(path.dirname(configPath), { recursive: true });
-        writeFileSync(configPath, '{ "unknownSetting": true,\n');
+      createFreshDirectory(async (homeRoot) => {
+        const settingsPath = path.join(homeRoot, ".claude/agent-setup/config.json");
+        mkdirSync(path.dirname(settingsPath), { recursive: true });
+        writeFileSync(settingsPath, '{ "unknownSetting": true,\n');
         const refusedSet = await runCli(["config", "set", "debug-logs", "true"], { HOME: homeRoot });
         const execution = await runCli(["config", "reset", "--yes", "--format", "json"], { HOME: homeRoot });
 
         expect(refusedSet.exitCode).not.toBe(0);
         expect(execution.exitCode).toBe(0);
-        expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(defaultConfig);
+        expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(defaultConfig);
       }),
     CLI_TEST_TIMEOUT,
   );

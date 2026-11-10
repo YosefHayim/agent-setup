@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { featureCatalog } from "#src/catalog/feature-catalog.js";
-import { createCommand, type FormatOptions, formatOption } from "./cli-options.js";
+import { createCommand, type FormatSettings, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
 const featureIdColumnWidth = 24;
@@ -10,10 +10,12 @@ const summaryIndentWidth = 26;
 export const showFeatureList = (): Promise<void> =>
   TerminalUI.note(
     featureCatalog
-      .map(
-        (feature) =>
-          `${feature.id.padEnd(featureIdColumnWidth)} ${feature.title}${feature.selectedByDefault ? " · default" : ""}\n${"".padEnd(summaryIndentWidth)}${feature.summary}`,
-      )
+      .map((feature) => {
+        const isDefaultFeature = feature.selectedByDefault;
+        const defaultMark = isDefaultFeature ? " · default" : "";
+
+        return `${feature.id.padEnd(featureIdColumnWidth)} ${feature.title}${defaultMark}\n${"".padEnd(summaryIndentWidth)}${feature.summary}`;
+      })
       .join("\n"),
     "Features",
   );
@@ -22,21 +24,21 @@ export const createCatalogCommand = (): Command =>
   createCommand("catalog")
     .description("List installable feature IDs and catalog defaults")
     .addOption(formatOption)
-    .action(async (options: FormatOptions) => {
-      const isJsonFormat = options.format === "json";
-      if (isJsonFormat) {
-        const featureRows = featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
+    .action(async (settings: FormatSettings) => {
+      const isDocumentFormat = settings.format === "json";
+      if (isDocumentFormat) {
+        const storedFeatureList = featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
           id,
           title,
           summary,
           selectedByDefault,
           platform,
         }));
-        await TerminalUI.showDocument({ features: featureRows });
+        await TerminalUI.showDocument({ features: storedFeatureList });
         return;
       }
 
-      await TerminalUI.intro("catalog");
+      await TerminalUI.runIntro("catalog");
       await showFeatureList();
-      await TerminalUI.outro("Install with `agent-setup install <feature-id>...`.");
+      await TerminalUI.runOutro("Install with `agent-setup install <feature-id>...`.");
     });

@@ -44,23 +44,26 @@ const makeTemporaryRoot = (prefix: string): string => {
 const makeWorkspace = async (files: { readonly config?: boolean; readonly receipt?: string | object }) => {
   const root = makeTemporaryRoot("agent-setup-doctor-root-");
   const preparedRoot = makeTemporaryRoot("agent-setup-doctor-prepared-");
-  const configPath = path.join(root, ".claude/agent-setup/config.json");
+  const settingsPath = path.join(root, ".claude/agent-setup/config.json");
   const receiptPath = path.join(root, ".claude/agent-setup/receipt.json");
-  const isConfigRequested = files.config === true;
-  const isReceiptRequested = files.receipt !== undefined;
+  const isSettingsRequested = files.config === true;
 
-  if (isConfigRequested || isReceiptRequested) {
-    await mkdir(path.dirname(configPath), { recursive: true });
+  const isReceiptRequested = files.receipt != null;
+
+  const isSettingsFolderNeeded = isSettingsRequested || isReceiptRequested;
+
+  if (isSettingsFolderNeeded) {
+    await mkdir(path.dirname(settingsPath), { recursive: true });
   }
 
-  if (isConfigRequested) {
-    await writeFile(configPath, `${JSON.stringify(defaultConfig)}\n`);
+  if (isSettingsRequested) {
+    await writeFile(settingsPath, `${JSON.stringify(defaultConfig)}\n`);
   }
 
   if (isReceiptRequested) {
-    const isReceiptText = typeof files.receipt === "string";
-    const receiptText = isReceiptText ? files.receipt : `${JSON.stringify(files.receipt)}\n`;
-    await writeFile(receiptPath, receiptText);
+    const isReceiptString = typeof files.receipt === "string";
+    const receiptString = isReceiptString ? files.receipt : `${JSON.stringify(files.receipt)}\n`;
+    await writeFile(receiptPath, receiptString);
   }
 
   const requestFor = (overrides: object = {}) => ({
@@ -70,7 +73,7 @@ const makeWorkspace = async (files: { readonly config?: boolean; readonly receip
     ...overrides,
   });
 
-  return { root, preparedRoot, configPath, receiptPath, requestFor };
+  return { root, preparedRoot, configPath: settingsPath, receiptPath, requestFor };
 };
 
 describe("checkHealth", () => {
@@ -113,7 +116,7 @@ describe("checkHealth", () => {
     );
     await mkdir(path.dirname(preparedScratchGuardPath), { recursive: true });
     await writeFile(preparedScratchGuardPath, "export {};\n");
-    const configBefore = await readFile(workspace.configPath);
+    const settingsBefore = await readFile(workspace.configPath);
     const receiptBefore = await readFile(workspace.receiptPath);
 
     const report = await checkHealth(
@@ -168,7 +171,7 @@ describe("checkHealth", () => {
       { _tag: "detectedAgentNotManaged", agentId: "cursor" },
       { _tag: "managedAgentNotDetected", agentId: "codex" },
     ]);
-    expect(await readFile(workspace.configPath)).toEqual(configBefore);
+    expect(await readFile(workspace.configPath)).toEqual(settingsBefore);
     expect(await readFile(workspace.receiptPath)).toEqual(receiptBefore);
     expect(existsSync(path.join(workspace.root, ".claude/agent-setup/recovery.json"))).toBe(false);
   });

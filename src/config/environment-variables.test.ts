@@ -12,7 +12,7 @@ const LIST_FILES = new Set(["src/config/environment-variables.ts", "src/config/e
 // e.g. "AGENT_SETUP_REHOME_STATE_DIR" inside TypeScript, Python, shell, or their docs
 const ENVIRONMENT_VARIABLE_NAME = /AGENT_SETUP_[A-Z_]+/g;
 
-const namesBySourceFile = (): ReadonlyMap<string, ReadonlySet<string>> =>
+const listVariableNamesByOriginFile = (): ReadonlyMap<string, ReadonlySet<string>> =>
   new Map(
     globSync("src/**/*.{ts,tsx,js,mjs,py,sh,md}", {
       cwd: packageRoot,
@@ -29,7 +29,7 @@ const namesBySourceFile = (): ReadonlyMap<string, ReadonlySet<string>> =>
 describe("environmentVariables", () => {
   it("lists every AGENT_SETUP_* name that code or docs under src/ use", () => {
     const listed = new Set(environmentVariables.map((variable) => variable.name));
-    const unlisted = [...namesBySourceFile()].flatMap(([file, names]) =>
+    const unlisted = [...listVariableNamesByOriginFile()].flatMap(([file, names]) =>
       [...names].filter((name) => !listed.has(name)).map((name) => `${file}: ${name}`),
     );
 
@@ -37,7 +37,7 @@ describe("environmentVariables", () => {
   });
 
   it("lists only names that some file under src/ still uses", () => {
-    const used = new Set([...namesBySourceFile().values()].flatMap((names) => [...names]));
+    const used = new Set([...listVariableNamesByOriginFile().values()].flatMap((names) => [...names]));
 
     expect(environmentVariables.map((variable) => variable.name).filter((name) => !used.has(name))).toEqual([]);
   });
