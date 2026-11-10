@@ -2,8 +2,10 @@
 
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import type { z } from "zod";
 
 import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { decodeStrictText, hashBytes } from "./file-bytes.js";
 import {
   applicationOwner,
@@ -31,7 +33,7 @@ const isUnderShippedPath = (filePath: string, shippedPath: string): boolean =>
   filePath === shippedPath || filePath.startsWith(`${shippedPath}/`);
 
 const preparedSkillPathIssues = (preparedSkill: {
-  installedSkill: Schema.Schema.Type<typeof installedSkillSchema>;
+  installedSkill: z.infer<typeof installedSkillSchema>;
   sourceFiles: ReadonlyArray<PreparedFile>;
 }) => [
   ...preparedSkill.sourceFiles.flatMap((sourceFile, index) =>
@@ -57,7 +59,7 @@ const preparedSkillPathIssues = (preparedSkill: {
 ];
 
 const preparedSkillSchema = Schema.Struct({
-  installedSkill: installedSkillSchema.annotations({
+  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
     description: "Catalog skill identity paired with its verified prepared files.",
   }),
   sourceFiles: Schema.Array(preparedFileSchema).annotations({

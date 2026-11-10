@@ -2,7 +2,8 @@
 
 import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
-import { agentDefinitionSchema } from "../../catalog/agent-catalog.js";
+import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
+import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import {
   fileKindSchema,
   fileOwnerSchema,
@@ -57,10 +58,7 @@ const instructionLinkWriteSchema = Schema.TaggedStruct("write", {
 type InstructionLinkWrite = Schema.Schema.Type<typeof instructionLinkWriteSchema>;
 
 const instructionLinkRequestFieldsSchema = Schema.Struct({
-  agent: Schema.Struct({
-    ...agentDefinitionSchema.fields,
-    target: agentDefinitionSchema.fields.target.members[3],
-  }).annotations({
+  agent: zodAsEffectSchema(agentDefinitionSchema.extend({ target: agentTargetSchema.options[3] })).annotations({
     description: "Exact catalog agent whose target defines the native config path, reference, and format.",
   }),
   desired: Schema.Union(Schema.TaggedStruct("present", {}), Schema.TaggedStruct("absent", {})).annotations({

@@ -5,12 +5,13 @@ import { Schema } from "effect";
 import { agentEvidenceSchema, agentIdSchema } from "../catalog/agent-catalog.js";
 import { featureIdSchema, featurePlatformSchema } from "../catalog/feature-catalog.js";
 import { type Config, isConfig } from "../config/config-schema.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { installationLocationSchema } from "./install-paths.js";
 import { absoluteRootSchema } from "./plan.js";
 import { versionSchema } from "./receipt.js";
 
 export const selectedFeatureChoiceSchema = Schema.TaggedStruct("selected", {
-  ids: Schema.Array(featureIdSchema).annotations({
+  ids: Schema.Array(zodAsEffectSchema(featureIdSchema)).annotations({
     description: "Explicit public feature IDs expanded through catalog dependencies.",
   }),
 });
@@ -25,7 +26,7 @@ const featureChoiceSchema = Schema.Union(
 });
 
 const selectedAgentChoiceSchema = Schema.TaggedStruct("selected", {
-  ids: Schema.Array(agentIdSchema).annotations({
+  ids: Schema.Array(zodAsEffectSchema(agentIdSchema)).annotations({
     description: "Explicit public agent IDs receiving native files.",
   }),
 });
@@ -33,7 +34,7 @@ const selectedAgentChoiceSchema = Schema.TaggedStruct("selected", {
 export const agentChoiceSchema = Schema.Union(
   selectedAgentChoiceSchema,
   Schema.TaggedStruct("detected", {
-    evidence: agentEvidenceSchema.annotations({
+    evidence: zodAsEffectSchema(agentEvidenceSchema).annotations({
       description: "Observed evidence the decoded agent catalog uses to detect installed agents.",
     }),
   }),
@@ -91,10 +92,10 @@ export const installRequestSchema = Schema.extend(
 export type InstallRequest = Schema.Schema.Type<typeof installRequestSchema>;
 
 export const platformRequirementSchema = Schema.Struct({
-  featureId: featureIdSchema.annotations({
+  featureId: zodAsEffectSchema(featureIdSchema).annotations({
     description: "Selected feature that declared this host requirement.",
   }),
-  platform: featurePlatformSchema,
+  platform: zodAsEffectSchema(featurePlatformSchema),
 }).annotations({
   description: "Catalog-correlated host requirement surfaced without hidden environment probing.",
 });
@@ -103,10 +104,10 @@ const installSummaryFieldsSchema = {
   scope: Schema.Literal("global", "project").annotations({
     description: "Scope synced by this capability call.",
   }),
-  features: Schema.Array(featureIdSchema).annotations({
+  features: Schema.Array(zodAsEffectSchema(featureIdSchema)).annotations({
     description: "Dependency-resolved features in catalog order.",
   }),
-  agents: Schema.Array(agentIdSchema).annotations({
+  agents: Schema.Array(zodAsEffectSchema(agentIdSchema)).annotations({
     description: "Selected agents in catalog order.",
   }),
   platformRequirements: Schema.Array(platformRequirementSchema).annotations({

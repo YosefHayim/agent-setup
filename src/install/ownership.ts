@@ -3,6 +3,7 @@
 import { Either, Encoding, Predicate, Schema } from "effect";
 
 import { agentCatalog, agentIdSchema } from "../catalog/agent-catalog.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 
 // e.g. "skills/make-code-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
 const RELATIVE_PATH_PATTERN = /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/;
@@ -102,7 +103,7 @@ const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>) => {
   return [];
 };
 
-const agentIdsSchema = Schema.NonEmptyArray(agentIdSchema).pipe(
+const agentIdsSchema = Schema.NonEmptyArray(zodAsEffectSchema(agentIdSchema)).pipe(
   Schema.filter(uniqueValues, {
     message: () => "Agent ownership IDs must be unique.",
   }),

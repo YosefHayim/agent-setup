@@ -1,6 +1,7 @@
 import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
-import { agentDefinitionSchema } from "../../catalog/agent-catalog.js";
+import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
 import { installedSkillSchema } from "../../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import { hashBytes } from "../file-bytes.js";
 import {
   fileKindSchema,
@@ -49,7 +50,7 @@ const matchesShippedPath = (path: string, shippedPath: string): boolean =>
   path === shippedPath || (!isShippedFilePath(shippedPath) && path.startsWith(`${shippedPath}/`));
 
 const preparedSkillFieldsSchema = Schema.Struct({
-  installedSkill: installedSkillSchema.annotations({
+  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
     description: "Catalog-owned installed skill and its exact shipped-path allowlist.",
   }),
   sourceFiles: Schema.Array(
@@ -105,10 +106,7 @@ const preparedSkillSchema = preparedSkillFieldsSchema.pipe(
 );
 
 const skillDirectoryRequestFieldsSchema = Schema.Struct({
-  agent: Schema.Struct({
-    ...agentDefinitionSchema.fields,
-    target: agentDefinitionSchema.fields.target.members[0],
-  }).annotations({
+  agent: zodAsEffectSchema(agentDefinitionSchema.extend({ target: agentTargetSchema.options[0] })).annotations({
     description: "Catalog agent whose skill-directory target receives the desired files.",
   }),
   skills: Schema.Array(preparedSkillSchema).annotations({
