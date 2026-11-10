@@ -1,15 +1,52 @@
 import { createHash } from "node:crypto";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
-import { FileSystem, Path } from "@effect/platform";
-import { type PlatformError, SystemError } from "@effect/platform/Error";
-import { NodeContext, NodeFileSystem, NodePath } from "@effect/platform-node";
-import { describe, expect, it, layer } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyPlan } from "./apply-plan.js";
 import { checkPlan, type ExpectedCurrent, type Plan } from "./plan.js";
 import { decodeReceiptJson } from "./receipt.js";
 import { decodeRecoveryRecordJson } from "./recovery.js";
+
+// Every fs/promises call the transaction makes goes through aroundCall, so a test can fail or hold one call.
+const injected = vi.hoisted(() => {
+  const passThroughCall = (_method: string, _args: ReadonlyArray<unknown>, run: () => Promise<unknown>) => run();
+
+  return { passThroughCall, aroundCall: passThroughCall };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+
+  return {
+    ...actual,
+    copyFile: (...args: Parameters<typeof actual.copyFile>) =>
+      injected.aroundCall("copyFile", args, () => actual.copyFile(...args)),
+    link: (...args: Parameters<typeof actual.link>) => injected.aroundCall("link", args, () => actual.link(...args)),
+    readFile: (...args: Parameters<typeof actual.readFile>) =>
+      injected.aroundCall("readFile", args, () => actual.readFile(...args)),
+    rename: (...args: Parameters<typeof actual.rename>) =>
+      injected.aroundCall("rename", args, () => actual.rename(...args)),
+    rm: (...args: Parameters<typeof actual.rm>) => injected.aroundCall("rm", args, () => actual.rm(...args)),
+    writeFile: (...args: Parameters<typeof actual.writeFile>) =>
+      injected.aroundCall("writeFile", args, () => actual.writeFile(...args)),
+  };
+});
 
 const installedHash = "1".repeat(64);
 const installedBytes = new TextEncoder().encode("installed");
@@ -24,35 +61,48 @@ const receiptFile = ".agent-setup/receipt.json";
 const recoveryFile = ".agent-setup/recovery.json";
 const receiptTarget = { path: receiptFile, kind: { _tag: "receipt" }, owner: applicationOwner };
 
-const portablePath = (filePath: string): string => filePath.replaceAll("\\", "/");
+const withForwardSlashes = (filePath: string): string => filePath.replaceAll("\\", "/");
 
-const expectedFile = (bytes: Uint8Array): ExpectedCurrent => ({
+const neverAbortedSignal = new AbortController().signal;
+
+// Runs a plan that nobody aborts. The interrupt test passes its own controller instead.
+const applyPlanUninterrupted = (plan: Plan): Promise<void> => applyPlan(plan, neverAbortedSignal);
+
+const readFileName = (value: unknown): string => basename(String(value));
+
+// Transaction files live at <root>/.agent-setup-transaction-<id>/<prepared|snapshots>/<name>.
+const findRootOfTransactionFile = (filePath: string): string => dirname(dirname(dirname(filePath)));
+
+const createExpectedFile = (bytes: Uint8Array): ExpectedCurrent => ({
   _tag: "file",
   sha256: createHash("sha256").update(bytes).digest("hex"),
 });
 
-const configFile = (path: string, previous: object = { _tag: "missing" }) => ({
+const createConfigFile = (path: string, previous: object = { _tag: "missing" }) => ({
   path,
   kind: { _tag: "managedConfig" },
   owner: applicationOwner,
   ownership: { _tag: "wholeFile", installedHash, previous },
 });
 
-const receiptOf = (ownedFiles: ReadonlyArray<object>) => ({
+const createReceipt = (ownedFiles: ReadonlyArray<object>) => ({
   version: "0.12.0",
   scope: "project",
   features: [],
   ownedFiles,
 });
 
-type WritePlanRequest = {
+interface WritePlanRequest {
   // Every path is written with installedBytes; the value is the state planning observed there.
   readonly files: Readonly<Record<string, ExpectedCurrent>>;
   readonly receipt?: ExpectedCurrent;
-};
+}
 
-const writePlan = (root: string, { files, receipt = expectedMissing }: WritePlanRequest): Plan => {
-  const planned = Object.entries(files).map(([path, expectedCurrent]) => ({ file: configFile(path), expectedCurrent }));
+const createWritePlan = (root: string, { files, receipt = expectedMissing }: WritePlanRequest): Plan => {
+  const planned = Object.entries(files).map(([path, expectedCurrent]) => ({
+    file: createConfigFile(path),
+    expectedCurrent,
+  }));
 
   return checkPlan({
     scope: "project",
@@ -67,15 +117,16 @@ const writePlan = (root: string, { files, receipt = expectedMissing }: WritePlan
     receipt: {
       _tag: "receiptPublish",
       target: receiptTarget,
-      receipt: receiptOf(planned.map(({ file }) => file)),
+      receipt: createReceipt(planned.map(({ file }) => file)),
       expectedCurrent: receipt,
     },
   });
 };
 
-const missingFiles = (paths: ReadonlyArray<string>) => Object.fromEntries(paths.map((path) => [path, expectedMissing]));
+const createMissingFiles = (paths: ReadonlyArray<string>) =>
+  Object.fromEntries(paths.map((path) => [path, expectedMissing]));
 
-const receiptRemovalPlan = (root: string, expectedCurrent: ExpectedCurrent): Plan =>
+const createReceiptRemovalPlan = (root: string, expectedCurrent: ExpectedCurrent): Plan =>
   checkPlan({
     scope: "project",
     root,
@@ -84,130 +135,190 @@ const receiptRemovalPlan = (root: string, expectedCurrent: ExpectedCurrent): Pla
     receipt: { _tag: "remove", target: receiptTarget, expectedCurrent },
   });
 
-// A temporary installation root, with shorthands for seeding it and checking what a transaction left behind.
-const makeWorkspace = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-apply-" });
-  const at = (relative: string) => path.join(root, relative);
+const temporaryDirectories: Array<string> = [];
 
-  return {
-    fileSystem,
-    path,
-    root,
-    at,
-    seed: (files: Readonly<Record<string, Uint8Array>>) =>
-      Effect.forEach(
-        Object.entries(files),
-        ([relative, bytes]) =>
-          Effect.zipRight(
-            fileSystem.makeDirectory(path.dirname(at(relative)), { recursive: true }),
-            fileSystem.writeFile(at(relative), bytes),
-          ),
-        { discard: true },
-      ),
-    expectBytes: (relative: string, bytes: Uint8Array) =>
-      Effect.map(fileSystem.readFile(at(relative)), (actual) => expect([...actual], relative).toEqual([...bytes])),
-    expectAbsent: (relatives: ReadonlyArray<string>) =>
-      Effect.forEach(
-        relatives,
-        (relative) => Effect.map(fileSystem.exists(at(relative)), (exists) => expect(exists, relative).toBe(false)),
-        { discard: true },
-      ),
-    transactionDirectories: Effect.map(fileSystem.readDirectory(root), (entries) =>
-      entries.filter((entry) => entry.startsWith(".agent-setup-transaction-")),
-    ),
-    publishedReceipt: Effect.flatMap(fileSystem.readFileString(at(receiptFile)), (receiptJson) =>
-      Effect.try(() => decodeReceiptJson(receiptJson)),
-    ),
-    recoveryRecord: Effect.flatMap(fileSystem.readFileString(at(recoveryFile)), (recoveryJson) =>
-      Effect.try(() => decodeRecoveryRecordJson(recoveryJson)),
-    ),
-  };
-});
+const createTemporaryDirectory = (prefix: string): string => {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
 
-const expectFailure = <Value, Failure, Requirements>(effect: Effect.Effect<Value, Failure, Requirements>) =>
-  Effect.map(Effect.exit(effect), (exit) => {
-    expect(Exit.isFailure(exit)).toBe(true);
-    return exit;
+  return directory;
+};
+
+const seedFiles = (root: string, files: Readonly<Record<string, Uint8Array>>): void => {
+  for (const [relative, bytes] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, relative)), { recursive: true });
+    writeFileSync(join(root, relative), bytes);
+  }
+};
+
+const expectFileBytes = (root: string, relative: string, bytes: Uint8Array): void => {
+  expect([...readFileSync(join(root, relative))], relative).toEqual([...bytes]);
+};
+
+const expectMissingPaths = (root: string, relatives: ReadonlyArray<string>): void => {
+  for (const relative of relatives) {
+    expect(existsSync(join(root, relative)), relative).toBe(false);
+  }
+};
+
+const listTransactionDirectories = (root: string): Array<string> =>
+  readdirSync(root).filter((entry) => entry.startsWith(".agent-setup-transaction-"));
+
+const readPublishedReceipt = (root: string) => decodeReceiptJson(readFileSync(join(root, receiptFile), "utf8"));
+
+const readRecoveryRecord = (root: string) => decodeRecoveryRecordJson(readFileSync(join(root, recoveryFile), "utf8"));
+
+// Collects the message of a failure and of every failure it groups, so a test can find any one of them.
+const describeFailure = (failure: unknown): string => {
+  const ownMessage = failure instanceof Error ? failure.message : String(failure);
+  const groupedMessages = failure instanceof AggregateError ? failure.errors.map(describeFailure) : [];
+
+  return [ownMessage, ...groupedMessages].join("\n");
+};
+
+const catchFailure = async (operation: Promise<unknown>): Promise<unknown> => {
+  try {
+    await operation;
+  } catch (failure) {
+    return failure;
+  }
+
+  throw new Error("Expected the operation to fail.");
+};
+
+type Settlement = { readonly _tag: "fulfilled" } | { readonly _tag: "rejected"; readonly failure: unknown };
+
+const settleOperation = async (operation: Promise<unknown>): Promise<Settlement> => {
+  try {
+    await operation;
+    return { _tag: "fulfilled" };
+  } catch (failure) {
+    return { _tag: "rejected", failure };
+  }
+};
+
+interface Gate {
+  readonly wait: Promise<void>;
+  readonly open: () => void;
+}
+
+// A gate the test opens by hand, so a transaction can be held at one exact call.
+const createGate = (): Gate => {
+  const opener: { open: () => void } = { open: () => undefined };
+  const wait = new Promise<void>((markOpen) => {
+    opener.open = () => markOpen();
   });
 
-type FileSystemPatch = (fileSystem: FileSystem.FileSystem, path: Path.Path) => Partial<FileSystem.FileSystem>;
+  return { wait, open: () => opener.open() };
+};
 
-// The Node platform with some FileSystem methods replaced, to inject faults and races into a transaction.
-const patchedPlatform = (patch: FileSystemPatch) =>
-  Layer.merge(
-    Layer.effect(
-      FileSystem.FileSystem,
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        return FileSystem.make({ ...fileSystem, ...patch(fileSystem, yield* Path.Path) });
-      }),
-    ).pipe(Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))),
-    NodePath.layer,
-  );
+const createInjectedFailure = (method: string): Error => new Error(`Injected ${method} failure.`);
 
-const failWith = (method: string, pathOrDescriptor: string) =>
-  Effect.fail(
-    new SystemError({
-      reason: "PermissionDenied",
-      module: "FileSystem",
-      method,
-      pathOrDescriptor,
-      description: `Injected ${method} failure.`,
-    }),
-  );
+// Makes every call the predicate picks fail with an injected error; other calls run normally.
+const failCallsWhen = (isFailingCall: (method: string, args: ReadonlyArray<unknown>) => boolean): void => {
+  injected.aroundCall = async (method, args, run) => {
+    if (isFailingCall(method, args)) {
+      throw createInjectedFailure(method);
+    }
 
-const named = (filePath: string, name: string) => portablePath(filePath).endsWith(`/${name}`);
-
-// Transaction files live at <root>/.agent-setup-transaction-<id>/<prepared|snapshots>/<name>.
-const rootOfTransactionFile = (path: Path.Path, filePath: string) => path.dirname(path.dirname(path.dirname(filePath)));
-
-type Race = (context: {
-  root: string;
-  fileSystem: FileSystem.FileSystem;
-  path: Path.Path;
-}) => Effect.Effect<void, PlatformError>;
+    return run();
+  };
+};
 
 // Runs the race against the installation root right after the receipt is prepared, before any commit.
-const afterReceiptPrepared = (race: Race) =>
-  patchedPlatform((fileSystem, path) => ({
-    writeFile: (filePath, bytes) =>
-      fileSystem
-        .writeFile(filePath, bytes)
-        .pipe(
-          Effect.zipRight(
-            portablePath(filePath).endsWith("/prepared/receipt")
-              ? race({ root: rootOfTransactionFile(path, filePath), fileSystem, path })
-              : Effect.void,
-          ),
-        ),
-  }));
+const raceAfterReceiptPrepared = (race: (root: string) => void): void => {
+  injected.aroundCall = async (method, args, run) => {
+    const callReply = await run();
+    const preparedReceiptPath = withForwardSlashes(String(args[0]));
+    const isPreparedReceiptWrite = method === "writeFile" && preparedReceiptPath.endsWith("/prepared/receipt");
+    if (isPreparedReceiptWrite) {
+      race(findRootOfTransactionFile(String(args[0])));
+    }
+
+    return callReply;
+  };
+};
 
 // Fails the commit rename of fail.txt, optionally after changing the workspace first.
-const failingCommit = (before?: Race) =>
-  patchedPlatform((fileSystem, path) => ({
-    rename: (from, to) => {
-      if (!named(to, "fail.txt")) {
-        return fileSystem.rename(from, to);
-      }
+const failCommitOfFailFile = (beforeFailure?: (root: string) => void): void => {
+  injected.aroundCall = async (method, args, run) => {
+    const isFailingCommit = method === "rename" && readFileName(args[1]) === "fail.txt";
+    if (isFailingCommit) {
+      beforeFailure?.(dirname(String(args[1])));
+      throw createInjectedFailure("rename");
+    }
 
-      const change = before === undefined ? Effect.void : before({ root: path.dirname(to), fileSystem, path });
-      return Effect.zipRight(change, failWith("rename", to));
-    },
-  }));
+    return run();
+  };
+};
 
-layer(NodeContext.layer)("applyPlan", (it) => {
-  it.effect("rejects a cross-platform root that is not fully qualified on this host", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const foreignRoot = path.isAbsolute("C:/workspace") ? "/workspace" : "C:/workspace";
+// Logs each commit and each restore in order, and fails the commit of fail.txt.
+const recordTransactionOrder = (): void => {
+  const appendOrder = (filePath: string, event: string) =>
+    appendFileSync(join(findRootOfTransactionFile(filePath), ".transaction-order.log"), `${event}\n`);
 
-      yield* expectFailure(applyPlan(writePlan(foreignRoot, { files: missingFiles(["settings.json"]) })));
-    }),
+  const recordCommit = async (args: ReadonlyArray<unknown>, run: () => Promise<unknown>): Promise<unknown> => {
+    const isFailingCommit = readFileName(args[1]) === "fail.txt";
+    if (isFailingCommit) {
+      throw createInjectedFailure("rename");
+    }
+
+    const commitReply = await run();
+    appendOrder(String(args[0]), `commit:${readFileName(args[1])}`);
+
+    return commitReply;
+  };
+
+  injected.aroundCall = async (method, args, run) => {
+    const isRestore = method === "copyFile" && withForwardSlashes(String(args[0])).includes("/snapshots/");
+    if (isRestore) {
+      const restoreReply = await run();
+      appendOrder(String(args[0]), `restore:${readFileName(args[1])}`);
+
+      return restoreReply;
+    }
+
+    const isCommit = method === "rename";
+    if (isCommit) {
+      return recordCommit(args, run);
+    }
+
+    return run();
+  };
+};
+
+const readTransactionOrder = (root: string): Array<string> =>
+  readFileSync(join(root, ".transaction-order.log"), "utf8").trim().split("\n");
+
+const failedRollbackPlan = (root: string): Plan =>
+  createWritePlan(root, { files: { "existing.txt": createExpectedFile(originalBytes), "fail.txt": expectedMissing } });
+
+const failRollbackOfExistingFile = (): void => {
+  failCallsWhen(
+    (method, args) =>
+      (method === "copyFile" && readFileName(args[1]) === "existing.txt") ||
+      (method === "rename" && readFileName(args[1]) === "fail.txt"),
   );
+};
 
-  it.scoped.each([
+afterEach(() => {
+  injected.aroundCall = injected.passThroughCall;
+  for (const directory of temporaryDirectories) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  temporaryDirectories.length = 0;
+});
+
+describe("applyPlan", () => {
+  it("rejects a cross-platform root that is not fully qualified on this host", async () => {
+    const foreignRoot = isAbsolute("C:/workspace") ? "/workspace" : "C:/workspace";
+
+    await catchFailure(
+      applyPlanUninterrupted(createWritePlan(foreignRoot, { files: createMissingFiles(["settings.json"]) })),
+    );
+  });
+
+  it.each([
     {
       name: "file bytes into a new parent directory",
       seeded: {},
@@ -224,39 +335,38 @@ layer(NodeContext.layer)("applyPlan", (it) => {
       name: "beside a present receipt that still matches planning",
       seeded: { [receiptFile]: inspectedReceiptBytes },
       target: "settings.json",
-      receipt: expectedFile(inspectedReceiptBytes),
+      receipt: createExpectedFile(inspectedReceiptBytes),
     },
-  ])("commits $name and publishes the receipt", ({ seeded, target, receipt }) =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const seededBytes: Readonly<Record<string, Uint8Array>> = seeded;
-      const current = seededBytes[target];
-      yield* workspace.seed(seeded);
-      const plan = writePlan(workspace.root, {
-        files: { [target]: current === undefined ? expectedMissing : expectedFile(current) },
-        receipt,
-      });
+  ])("commits $name and publishes the receipt", async ({ seeded, target, receipt }) => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const seededBytes: Readonly<Record<string, Uint8Array>> = seeded;
+    const currentBytes: Uint8Array | undefined = seededBytes[target];
+    const isTargetPresent = currentBytes !== undefined;
+    seedFiles(root, seededBytes);
+    const plan = createWritePlan(root, {
+      files: { [target]: isTargetPresent ? createExpectedFile(currentBytes) : expectedMissing },
+      receipt,
+    });
 
-      yield* applyPlan(plan);
+    await applyPlanUninterrupted(plan);
 
-      yield* workspace.expectBytes(target, installedBytes);
-      expect(yield* workspace.publishedReceipt).toEqual(plan.receipt.receipt);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }),
-  );
+    expectFileBytes(root, target, installedBytes);
+    expect(readPublishedReceipt(root)).toEqual(plan.receipt.receipt);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
 
-  it.scoped.each([
+  it.each([
     {
       name: "a receipt that appeared after planning",
       seeded: { [receiptFile]: changedReceiptBytes },
-      files: missingFiles(["settings.json"]),
+      files: createMissingFiles(["settings.json"]),
       receipt: expectedMissing,
     },
     {
       name: "receipt bytes changed after planning",
       seeded: { [receiptFile]: changedReceiptBytes },
-      files: missingFiles(["settings.json"]),
-      receipt: expectedFile(inspectedReceiptBytes),
+      files: createMissingFiles(["settings.json"]),
+      receipt: createExpectedFile(inspectedReceiptBytes),
     },
     {
       name: "a target that appeared after planning",
@@ -265,644 +375,553 @@ layer(NodeContext.layer)("applyPlan", (it) => {
         "settings.json": new TextEncoder().encode("appeared after planning"),
         [receiptFile]: inspectedReceiptBytes,
       },
-      files: { "stable.txt": expectedFile(originalBytes), "settings.json": expectedMissing },
-      receipt: expectedFile(inspectedReceiptBytes),
+      files: { "stable.txt": createExpectedFile(originalBytes), "settings.json": expectedMissing },
+      receipt: createExpectedFile(inspectedReceiptBytes),
     },
     {
       name: "target bytes changed after planning",
       seeded: { "settings.json": externallyChangedBytes, [receiptFile]: inspectedReceiptBytes },
-      files: { "settings.json": expectedFile(originalBytes) },
-      receipt: expectedFile(inspectedReceiptBytes),
+      files: { "settings.json": createExpectedFile(originalBytes) },
+      receipt: createExpectedFile(inspectedReceiptBytes),
     },
-  ])("rejects $name without mutating any target", ({ seeded, files, receipt }) =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.seed(seeded);
+  ])("rejects $name without mutating any target", async ({ seeded, files, receipt }) => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const seededBytes: Readonly<Record<string, Uint8Array>> = seeded;
+    seedFiles(root, seededBytes);
 
-      const applyExit = yield* expectFailure(applyPlan(writePlan(workspace.root, { files, receipt })));
+    const failure = await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files, receipt })));
 
-      expect(Exit.isFailure(applyExit) && Cause.pretty(applyExit.cause)).toContain(
-        "no longer matches the state inspected during planning",
-      );
-      const seededBytes: Readonly<Record<string, Uint8Array>> = seeded;
-      yield* Effect.forEach(Object.entries(seededBytes), ([relative, bytes]) => workspace.expectBytes(relative, bytes));
-      yield* workspace.expectAbsent(Object.keys(files).filter((relative) => !(relative in seededBytes)));
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }),
-  );
+    expect(describeFailure(failure)).toContain("no longer matches the state inspected during planning");
+    for (const [relative, bytes] of Object.entries(seededBytes)) {
+      expectFileBytes(root, relative, bytes);
+    }
+    expectMissingPaths(
+      root,
+      Object.keys(files).filter((relative) => !(relative in seededBytes)),
+    );
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
 
-  it.scoped("rejects a changed receipt from a serialized removal plan", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const plan = receiptRemovalPlan(workspace.root, expectedFile(inspectedReceiptBytes));
-      yield* workspace.seed({ [receiptFile]: changedReceiptBytes });
+  it("rejects a changed receipt from a serialized removal plan", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const plan = createReceiptRemovalPlan(root, createExpectedFile(inspectedReceiptBytes));
+    seedFiles(root, { [receiptFile]: changedReceiptBytes });
 
-      yield* expectFailure(applyPlan(checkPlan(JSON.parse(JSON.stringify(plan)))));
+    await catchFailure(applyPlanUninterrupted(checkPlan(JSON.parse(JSON.stringify(plan)))));
 
-      yield* workspace.expectBytes(receiptFile, changedReceiptBytes);
-    }),
-  );
+    expectFileBytes(root, receiptFile, changedReceiptBytes);
+  });
 
-  it.scoped("guards unchanged owned targets before committing another file", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const stableFile = configFile("stable.txt");
-      const changedFile = configFile("changed.txt");
-      const plan = checkPlan({
-        scope: "project",
-        root: workspace.root,
-        operations: [{ _tag: "write", file: changedFile, bytes: installedBytes, expectedCurrent: expectedMissing }],
-        preconditions: [{ path: stableFile.path, expectedCurrent: expectedFile(originalBytes) }],
-        receipt: {
-          _tag: "receiptPublish",
-          target: receiptTarget,
-          receipt: receiptOf([stableFile, changedFile]),
-          expectedCurrent: expectedMissing,
+  it("guards unchanged owned targets before committing another file", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const stableFile = createConfigFile("stable.txt");
+    const changedFile = createConfigFile("changed.txt");
+    const plan = checkPlan({
+      scope: "project",
+      root,
+      operations: [{ _tag: "write", file: changedFile, bytes: installedBytes, expectedCurrent: expectedMissing }],
+      preconditions: [{ path: stableFile.path, expectedCurrent: createExpectedFile(originalBytes) }],
+      receipt: {
+        _tag: "receiptPublish",
+        target: receiptTarget,
+        receipt: createReceipt([stableFile, changedFile]),
+        expectedCurrent: expectedMissing,
+      },
+    });
+    seedFiles(root, { "stable.txt": externallyChangedBytes });
+
+    await catchFailure(applyPlanUninterrupted(plan));
+
+    expectFileBytes(root, "stable.txt", externallyChangedBytes);
+    expectMissingPaths(root, ["changed.txt", receiptFile]);
+  });
+
+  it("refuses to start while durable recovery evidence is pending", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const pendingRecovery = new TextEncoder().encode("pending recovery");
+    seedFiles(root, { [recoveryFile]: pendingRecovery });
+
+    await catchFailure(
+      applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["config/settings.json"]) })),
+    );
+
+    expectMissingPaths(root, ["config/settings.json"]);
+    expectFileBytes(root, recoveryFile, pendingRecovery);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it("rejects a symlinked parent before creating transaction state", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const outside = createTemporaryDirectory("agent-setup-apply-outside-");
+    symlinkSync(outside, join(root, "link"));
+
+    await catchFailure(
+      applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["link/escaped.json"]) })),
+    );
+
+    expect(existsSync(join(outside, "escaped.json"))).toBe(false);
+    expectMissingPaths(root, [receiptFile]);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it("applies write, restore, and remove operations before publishing ownership", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const writtenFile = createConfigFile("write.txt");
+    const plan = checkPlan({
+      scope: "project",
+      root,
+      operations: [
+        { _tag: "write", file: writtenFile, bytes: installedBytes, expectedCurrent: expectedMissing },
+        {
+          _tag: "restore",
+          file: createConfigFile("restore.txt", { _tag: "priorFile", bytes: originalBytes }),
+          bytes: originalBytes,
+          expectedCurrent: createExpectedFile(installedBytes),
         },
-      });
-      yield* workspace.seed({ "stable.txt": externallyChangedBytes });
-
-      yield* expectFailure(applyPlan(plan));
-
-      yield* workspace.expectBytes("stable.txt", externallyChangedBytes);
-      yield* workspace.expectAbsent(["changed.txt", receiptFile]);
-    }),
-  );
-
-  it.scoped("refuses to start while durable recovery evidence is pending", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const pendingRecovery = new TextEncoder().encode("pending recovery");
-      yield* workspace.seed({ [recoveryFile]: pendingRecovery });
-
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["config/settings.json"]) })));
-
-      yield* workspace.expectAbsent(["config/settings.json"]);
-      yield* workspace.expectBytes(recoveryFile, pendingRecovery);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }),
-  );
-
-  it.scoped("rejects a symlinked parent before creating transaction state", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const outside = yield* workspace.fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-apply-outside-" });
-      yield* workspace.fileSystem.symlink(outside, workspace.at("link"));
-
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["link/escaped.json"]) })));
-
-      expect(yield* workspace.fileSystem.exists(workspace.path.join(outside, "escaped.json"))).toBe(false);
-      yield* workspace.expectAbsent([receiptFile]);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }),
-  );
-
-  it.scoped("applies write, restore, and remove operations before publishing ownership", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const writtenFile = configFile("write.txt");
-      const plan = checkPlan({
-        scope: "project",
-        root: workspace.root,
-        operations: [
-          { _tag: "write", file: writtenFile, bytes: installedBytes, expectedCurrent: expectedMissing },
-          {
-            _tag: "restore",
-            file: configFile("restore.txt", { _tag: "priorFile", bytes: originalBytes }),
-            bytes: originalBytes,
-            expectedCurrent: expectedFile(installedBytes),
-          },
-          {
-            _tag: "remove",
-            file: configFile("remove.txt"),
-            unownedBytes: new Uint8Array(),
-            expectedCurrent: expectedFile(installedBytes),
-          },
-        ],
-        preconditions: [],
-        receipt: {
-          _tag: "receiptPublish",
-          target: receiptTarget,
-          receipt: receiptOf([writtenFile]),
-          expectedCurrent: expectedMissing,
+        {
+          _tag: "remove",
+          file: createConfigFile("remove.txt"),
+          unownedBytes: new Uint8Array(),
+          expectedCurrent: createExpectedFile(installedBytes),
         },
-      });
-      yield* workspace.seed({ "restore.txt": installedBytes, "remove.txt": installedBytes });
+      ],
+      preconditions: [],
+      receipt: {
+        _tag: "receiptPublish",
+        target: receiptTarget,
+        receipt: createReceipt([writtenFile]),
+        expectedCurrent: expectedMissing,
+      },
+    });
+    seedFiles(root, { "restore.txt": installedBytes, "remove.txt": installedBytes });
 
-      yield* applyPlan(plan);
+    await applyPlanUninterrupted(plan);
 
-      yield* workspace.expectBytes("write.txt", installedBytes);
-      yield* workspace.expectBytes("restore.txt", originalBytes);
-      yield* workspace.expectAbsent(["remove.txt"]);
-      expect((yield* workspace.publishedReceipt).ownedFiles.map((file) => file.path)).toEqual(["write.txt"]);
-    }),
-  );
+    expectFileBytes(root, "write.txt", installedBytes);
+    expectFileBytes(root, "restore.txt", originalBytes);
+    expectMissingPaths(root, ["remove.txt"]);
+    expect(readPublishedReceipt(root).ownedFiles.map((file) => file.path)).toEqual(["write.txt"]);
+  });
 
-  it.scoped("removes the ownership receipt for a completed uninstall plan", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const previousReceiptBytes = new TextEncoder().encode("previous receipt");
-      yield* workspace.seed({ [receiptFile]: previousReceiptBytes });
+  it("removes the ownership receipt for a completed uninstall plan", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const previousReceiptBytes = new TextEncoder().encode("previous receipt");
+    seedFiles(root, { [receiptFile]: previousReceiptBytes });
 
-      yield* applyPlan(receiptRemovalPlan(workspace.root, expectedFile(previousReceiptBytes)));
+    await applyPlanUninterrupted(createReceiptRemovalPlan(root, createExpectedFile(previousReceiptBytes)));
 
-      yield* workspace.expectAbsent([receiptFile]);
-    }),
-  );
+    expectMissingPaths(root, [receiptFile]);
+  });
 });
 
 describe("applyPlan under injected filesystem faults", () => {
-  const transactionOrderPlatform = patchedPlatform((fileSystem, path) => {
-    const log = (transactionFile: string, event: string) =>
-      fileSystem.writeFileString(
-        path.join(rootOfTransactionFile(path, transactionFile), ".transaction-order.log"),
-        `${event}\n`,
-        { flag: "a" },
-      );
-
-    return {
-      copyFile: (from, to) =>
-        fileSystem
-          .copyFile(from, to)
-          .pipe(
-            Effect.zipRight(
-              portablePath(from).includes("/snapshots/") ? log(from, `restore:${path.basename(to)}`) : Effect.void,
-            ),
-          ),
-      rename: (from, to) =>
-        path.basename(to) === "fail.txt"
-          ? failWith("rename", to)
-          : fileSystem.rename(from, to).pipe(Effect.zipRight(log(from, `commit:${path.basename(to)}`))),
-    };
-  });
-
-  it.scoped("commits the ownership receipt after every file", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-
-      yield* applyPlan(writePlan(workspace.root, { files: missingFiles(["first.txt", "second.txt"]) }));
-
-      const log = (yield* workspace.fileSystem.readFileString(workspace.at(".transaction-order.log")))
-        .trim()
-        .split("\n");
-      expect(log).toEqual(["commit:first.txt", "commit:second.txt", "commit:receipt.json"]);
-    }).pipe(Effect.provide(transactionOrderPlatform)),
-  );
-
-  it.scoped("restores captured targets in reverse mutation order", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const seeded = { "first.txt": originalBytes, "second.txt": secondOriginalBytes, "fail.txt": originalBytes };
-      yield* workspace.seed(seeded);
-      const files = Object.fromEntries(
-        Object.entries(seeded).map(([relative, bytes]) => [relative, expectedFile(bytes)]),
-      );
-
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files })));
-
-      const log = (yield* workspace.fileSystem.readFileString(workspace.at(".transaction-order.log")))
-        .trim()
-        .split("\n");
-      expect(log).toEqual([
-        "commit:first.txt",
-        "commit:second.txt",
-        "restore:fail.txt",
-        "restore:second.txt",
-        "restore:first.txt",
-      ]);
-    }).pipe(Effect.provide(transactionOrderPlatform)),
-  );
-
-  it.scoped.each([
+  it.each([
     { name: "between atomic file commits", pausedAt: "first.txt", targets: ["first.txt", "second.txt"] },
     { name: "inside the atomic receipt commit", pausedAt: "receipt.json", targets: ["settings.json"] },
-  ])("rolls back when interrupted $name", ({ pausedAt, targets }) =>
-    Effect.gen(function* () {
-      const committed = yield* Deferred.make<void>();
-      const release = yield* Deferred.make<void>();
-      const pausedPlatform = patchedPlatform((fileSystem) => ({
-        rename: (from, to) =>
-          named(to, pausedAt)
-            ? fileSystem.rename(from, to).pipe(
-                Effect.tap(() => Deferred.succeed(committed, undefined)),
-                Effect.zipRight(Deferred.await(release)),
-              )
-            : fileSystem.rename(from, to),
-      }));
+  ])("rolls back when interrupted $name", async ({ pausedAt, targets }) => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const pausedAfterRename = createGate();
+    const releasePausedRename = createGate();
+    injected.aroundCall = async (method, args, run) => {
+      const isPausedRename = method === "rename" && readFileName(args[1]) === pausedAt;
+      if (isPausedRename) {
+        const renameReply = await run();
+        pausedAfterRename.open();
+        await releasePausedRename.wait;
 
-      yield* Effect.gen(function* () {
-        const workspace = yield* makeWorkspace;
-        const applyFiber = yield* Effect.fork(applyPlan(writePlan(workspace.root, { files: missingFiles(targets) })));
+        return renameReply;
+      }
 
-        yield* Deferred.await(committed);
-        const interruption = yield* Effect.fork(Fiber.interrupt(applyFiber));
-        yield* Effect.yieldNow();
-        yield* Deferred.succeed(release, undefined);
-        const applyExit = yield* Fiber.join(interruption);
+      return run();
+    };
+    const interruption = new AbortController();
 
-        expect(Exit.isFailure(applyExit) && Cause.isInterruptedOnly(applyExit.cause)).toBe(true);
-        yield* workspace.expectAbsent([...targets, receiptFile, recoveryFile]);
-        expect(yield* workspace.transactionDirectories).toEqual([]);
-      }).pipe(Effect.provide(pausedPlatform));
-    }),
-  );
+    const failureAwaited = catchFailure(
+      applyPlan(createWritePlan(root, { files: createMissingFiles(targets) }), interruption.signal),
+    );
+    await pausedAfterRename.wait;
+    interruption.abort();
+    releasePausedRename.open();
+    const failure = await failureAwaited;
 
-  it.scoped("rejects a parent swapped to an outside symlink before commit", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const outside = `${workspace.root}-outside`;
-      yield* workspace.fileSystem.makeDirectory(workspace.at("safe"));
-      yield* workspace.fileSystem.makeDirectory(outside);
-      yield* Effect.addFinalizer(() => workspace.fileSystem.remove(outside, { recursive: true, force: true }));
+    expect(failure).toBe(interruption.signal.reason);
+    expectMissingPaths(root, [...targets, receiptFile, recoveryFile]);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
 
-      yield* expectFailure(
-        applyPlan(writePlan(workspace.root, { files: missingFiles(["first.txt", "safe/escaped.json"]) })),
-      );
+  it("commits the ownership receipt after every file", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    recordTransactionOrder();
 
-      yield* workspace.expectAbsent(["first.txt", receiptFile]);
-      expect(yield* workspace.fileSystem.exists(workspace.path.join(outside, "escaped.json"))).toBe(false);
-    }).pipe(
-      Effect.provide(
-        afterReceiptPrepared(({ root, fileSystem, path }) =>
-          Effect.zipRight(
-            fileSystem.rename(path.join(root, "safe"), path.join(root, "safe-before-swap")),
-            fileSystem.symlink(`${root}-outside`, path.join(root, "safe")),
-          ),
-        ),
-      ),
-    ),
-  );
+    await applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["first.txt", "second.txt"]) }));
 
-  it.scoped("never publishes the recovery marker through a swapped parent", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const outside = `${workspace.root}-recovery-outside`;
-      yield* workspace.fileSystem.makeDirectory(workspace.at(".agent-setup"));
-      yield* workspace.fileSystem.makeDirectory(outside);
-      yield* Effect.addFinalizer(() => workspace.fileSystem.remove(outside, { recursive: true, force: true }));
+    expect(readTransactionOrder(root)).toEqual(["commit:first.txt", "commit:second.txt", "commit:receipt.json"]);
+  });
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["settings.json"]) })));
+  it("restores captured targets in reverse mutation order", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const seeded = { "first.txt": originalBytes, "second.txt": secondOriginalBytes, "fail.txt": originalBytes };
+    seedFiles(root, seeded);
+    const files = Object.fromEntries(
+      Object.entries(seeded).map(([relative, bytes]) => [relative, createExpectedFile(bytes)]),
+    );
+    recordTransactionOrder();
 
-      yield* workspace.expectAbsent(["settings.json"]);
-      expect(yield* workspace.fileSystem.exists(workspace.path.join(outside, "recovery.json"))).toBe(false);
-      expect(yield* workspace.fileSystem.exists(workspace.path.join(outside, "receipt.json"))).toBe(false);
-    }).pipe(
-      Effect.provide(
-        afterReceiptPrepared(({ root, fileSystem, path }) =>
-          Effect.zipRight(
-            fileSystem.rename(path.join(root, ".agent-setup"), path.join(root, ".agent-setup-before-swap")),
-            fileSystem.symlink(`${root}-recovery-outside`, path.join(root, ".agent-setup")),
-          ),
-        ),
-      ),
-    ),
-  );
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files })));
 
-  it.scoped.each([
+    expect(readTransactionOrder(root)).toEqual([
+      "commit:first.txt",
+      "commit:second.txt",
+      "restore:fail.txt",
+      "restore:second.txt",
+      "restore:first.txt",
+    ]);
+  });
+
+  it("rejects a parent swapped to an outside symlink before commit", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const outside = `${root}-outside`;
+    mkdirSync(join(root, "safe"));
+    mkdirSync(outside);
+    temporaryDirectories.push(outside);
+    raceAfterReceiptPrepared((raceRoot) => {
+      renameSync(join(raceRoot, "safe"), join(raceRoot, "safe-before-swap"));
+      symlinkSync(`${raceRoot}-outside`, join(raceRoot, "safe"));
+    });
+
+    await catchFailure(
+      applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["first.txt", "safe/escaped.json"]) })),
+    );
+
+    expectMissingPaths(root, ["first.txt", receiptFile]);
+    expect(existsSync(join(outside, "escaped.json"))).toBe(false);
+  });
+
+  it("never publishes the recovery marker through a swapped parent", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const outside = `${root}-recovery-outside`;
+    mkdirSync(join(root, ".agent-setup"));
+    mkdirSync(outside);
+    temporaryDirectories.push(outside);
+    raceAfterReceiptPrepared((raceRoot) => {
+      renameSync(join(raceRoot, ".agent-setup"), join(raceRoot, ".agent-setup-before-swap"));
+      symlinkSync(`${raceRoot}-recovery-outside`, join(raceRoot, ".agent-setup"));
+    });
+
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
+
+    expectMissingPaths(root, ["settings.json"]);
+    expect(existsSync(join(outside, "recovery.json"))).toBe(false);
+    expect(existsSync(join(outside, "receipt.json"))).toBe(false);
+  });
+
+  it.each([
     {
       name: "fails",
-      markerLink: () => (_from: string, to: string) => failWith("link", to),
+      failsMarkerLink: false,
       cause: "Injected link failure",
     },
     {
-      name: "defects after linking",
-      markerLink: (fileSystem: FileSystem.FileSystem) => (from: string, to: string) =>
-        fileSystem.link(from, to).pipe(Effect.zipRight(Effect.dieMessage("Injected post-link defect."))),
+      name: "throws after linking",
+      failsMarkerLink: true,
       cause: "Injected post-link defect",
     },
-  ])("cleans up without mutating destinations when recovery marker publication $name", ({ markerLink, cause }) =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
+  ])(
+    "cleans up without mutating destinations when recovery marker publication $name",
+    async ({ failsMarkerLink, cause }) => {
+      const root = createTemporaryDirectory("agent-setup-apply-");
+      injected.aroundCall = async (method, args, run) => {
+        const isMarkerLink = method === "link" && readFileName(args[1]) === "recovery.json";
+        const isMarkerLinkThatThrowsAfterLinking = isMarkerLink && failsMarkerLink;
+        if (isMarkerLinkThatThrowsAfterLinking) {
+          await run();
+          throw new Error("Injected post-link defect.");
+        }
 
-      const applyExit = yield* expectFailure(
-        applyPlan(writePlan(workspace.root, { files: missingFiles(["settings.json"]) })),
-      );
+        if (isMarkerLink) {
+          throw createInjectedFailure("link");
+        }
 
-      expect(Exit.isFailure(applyExit) && Cause.pretty(applyExit.cause)).toContain(cause);
-      yield* workspace.expectAbsent(["settings.json", receiptFile, recoveryFile]);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }).pipe(
-      Effect.provide(
-        patchedPlatform((fileSystem) => ({
-          link: (from, to) =>
-            named(to, "recovery.json") ? markerLink(fileSystem)(from, to) : fileSystem.link(from, to),
-        })),
-      ),
-    ),
-  );
-
-  it.scoped("removes the losing transaction without touching the winning marker", () =>
-    Effect.gen(function* () {
-      const releaseWinner = yield* Deferred.make<void>();
-      const bothWritersReady = yield* Deferred.make<void>();
-      const linkArrivals = yield* Ref.make(0);
-      // Both writers reach the marker link together; the winner then holds the marker until released.
-      const competingPlatform = patchedPlatform((fileSystem) => ({
-        link: (from, to) =>
-          named(to, "recovery.json")
-            ? Effect.gen(function* () {
-                if ((yield* Ref.updateAndGet(linkArrivals, (count) => count + 1)) === 2) {
-                  yield* Deferred.succeed(bothWritersReady, undefined);
-                }
-                yield* Deferred.await(bothWritersReady);
-                yield* fileSystem.link(from, to);
-                yield* Deferred.await(releaseWinner);
-              })
-            : fileSystem.link(from, to),
-      }));
-
-      yield* Effect.gen(function* () {
-        const workspace = yield* makeWorkspace;
-        const plan = writePlan(workspace.root, { files: { "settings.json": expectedFile(originalBytes) } });
-        yield* workspace.fileSystem.makeDirectory(workspace.at(".agent-setup"));
-        yield* workspace.seed({ "settings.json": originalBytes });
-
-        const firstWriter = yield* Effect.fork(Effect.exit(applyPlan(plan)));
-        const secondWriter = yield* Effect.fork(Effect.exit(applyPlan(plan)));
-        const loserExit = yield* Effect.race(Fiber.join(firstWriter), Fiber.join(secondWriter));
-
-        yield* Effect.gen(function* () {
-          expect(Exit.isFailure(loserExit)).toBe(true);
-          expect(yield* workspace.fileSystem.exists(workspace.at(recoveryFile))).toBe(true);
-          expect(yield* workspace.transactionDirectories).toHaveLength(1);
-        }).pipe(Effect.ensuring(Deferred.succeed(releaseWinner, undefined)));
-
-        const writerExits = yield* Effect.all([Fiber.join(firstWriter), Fiber.join(secondWriter)]);
-
-        expect(writerExits.filter(Exit.isSuccess)).toHaveLength(1);
-        expect(writerExits.filter(Exit.isFailure)).toHaveLength(1);
-        yield* workspace.expectBytes("settings.json", installedBytes);
-        expect(yield* workspace.publishedReceipt).toEqual(plan.receipt.receipt);
-        yield* workspace.expectAbsent([recoveryFile]);
-        expect(yield* workspace.transactionDirectories).toEqual([]);
-      }).pipe(Effect.provide(competingPlatform));
-    }),
-  );
-
-  it.scoped("preserves bytes changed after capture instead of overwriting them", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.seed({ "changed.txt": originalBytes });
-
-      yield* expectFailure(
-        applyPlan(
-          writePlan(workspace.root, {
-            files: { "first.txt": expectedMissing, "changed.txt": expectedFile(originalBytes) },
-          }),
-        ),
-      );
-
-      yield* workspace.expectAbsent(["first.txt", receiptFile]);
-      yield* workspace.expectBytes("changed.txt", externallyChangedBytes);
-    }).pipe(
-      Effect.provide(
-        afterReceiptPrepared(({ root, fileSystem, path }) =>
-          fileSystem.writeFile(path.join(root, "changed.txt"), externallyChangedBytes),
-        ),
-      ),
-    ),
-  );
-
-  it.scoped("restores original bytes and removes created parents after a middle commit failure", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.seed({ "existing.txt": originalBytes });
-      const files = {
-        "existing.txt": expectedFile(originalBytes),
-        "created/nested/file.txt": expectedMissing,
-        "fail.txt": expectedMissing,
+        return run();
       };
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files })));
-
-      yield* workspace.expectBytes("existing.txt", originalBytes);
-      yield* workspace.expectAbsent(["created", "fail.txt", receiptFile]);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }).pipe(Effect.provide(failingCommit())),
-  );
-
-  it.scoped("removes snapshots while preserving external content in a created parent", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-
-      yield* expectFailure(
-        applyPlan(writePlan(workspace.root, { files: missingFiles(["created/nested/file.txt", "fail.txt"]) })),
+      const failure = await catchFailure(
+        applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })),
       );
 
-      yield* workspace.expectBytes("created/nested/external.txt", externallyChangedBytes);
-      yield* workspace.expectAbsent([receiptFile, recoveryFile]);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }).pipe(
-      Effect.provide(
-        failingCommit(({ root, fileSystem, path }) =>
-          fileSystem.writeFile(path.join(root, "created/nested/external.txt"), externallyChangedBytes),
-        ),
-      ),
-    ),
+      expect(describeFailure(failure)).toContain(cause);
+      expectMissingPaths(root, ["settings.json", receiptFile, recoveryFile]);
+      expect(listTransactionDirectories(root)).toEqual([]);
+    },
   );
 
-  it.scoped("retains recovery state instead of overwriting bytes changed after commit", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
+  it("removes the losing transaction without touching the winning marker", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const plan = createWritePlan(root, { files: { "settings.json": createExpectedFile(originalBytes) } });
+    mkdirSync(join(root, ".agent-setup"));
+    seedFiles(root, { "settings.json": originalBytes });
+    const bothWritersArrived = createGate();
+    const releaseWinner = createGate();
+    const markerLinkArrivals = { count: 0 };
+    // Both writers reach the marker link together; the winner then holds the marker until released.
+    const arriveAtMarkerLink = async (): Promise<void> => {
+      markerLinkArrivals.count += 1;
+      const isSecondArrival = markerLinkArrivals.count === 2;
+      if (isSecondArrival) {
+        bothWritersArrived.open();
+      }
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["first.txt", "fail.txt"]) })));
+      await bothWritersArrived.wait;
+    };
 
-      yield* workspace.expectBytes("first.txt", externallyChangedBytes);
-      yield* workspace.expectAbsent([receiptFile]);
-      expect(yield* workspace.fileSystem.exists((yield* workspace.recoveryRecord).transactionRoot)).toBe(true);
-    }).pipe(
-      Effect.provide(
-        failingCommit(({ root, fileSystem, path }) =>
-          fileSystem.writeFile(path.join(root, "first.txt"), externallyChangedBytes),
-        ),
+    injected.aroundCall = async (method, args, run) => {
+      const isMarkerLink = method === "link" && readFileName(args[1]) === "recovery.json";
+      if (isMarkerLink) {
+        await arriveAtMarkerLink();
+        const linkReply = await run();
+        await releaseWinner.wait;
+
+        return linkReply;
+      }
+
+      return run();
+    };
+
+    const firstWriter = settleOperation(applyPlanUninterrupted(plan));
+    const secondWriter = settleOperation(applyPlanUninterrupted(plan));
+    try {
+      const firstFinished = await Promise.race([firstWriter, secondWriter]);
+
+      expect(firstFinished._tag).toBe("rejected");
+      expect(existsSync(join(root, recoveryFile))).toBe(true);
+      expect(listTransactionDirectories(root)).toHaveLength(1);
+    } finally {
+      releaseWinner.open();
+    }
+
+    const writerOutcomes = await Promise.all([firstWriter, secondWriter]);
+
+    expect(writerOutcomes.filter((outcome) => outcome._tag === "fulfilled")).toHaveLength(1);
+    expect(writerOutcomes.filter((outcome) => outcome._tag === "rejected")).toHaveLength(1);
+    expectFileBytes(root, "settings.json", installedBytes);
+    expect(readPublishedReceipt(root)).toEqual(plan.receipt.receipt);
+    expectMissingPaths(root, [recoveryFile]);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it("preserves bytes changed after capture instead of overwriting them", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    seedFiles(root, { "changed.txt": originalBytes });
+    raceAfterReceiptPrepared((raceRoot) => {
+      writeFileSync(join(raceRoot, "changed.txt"), externallyChangedBytes);
+    });
+
+    await catchFailure(
+      applyPlanUninterrupted(
+        createWritePlan(root, {
+          files: { "first.txt": expectedMissing, "changed.txt": createExpectedFile(originalBytes) },
+        }),
       ),
-    ),
-  );
+    );
 
-  it.scoped("rolls files back and restores the prior receipt bytes after the receipt commit fails", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      const priorReceiptBytes = new Uint8Array([255, 0, 1, 128]);
-      yield* workspace.seed({ "existing.txt": originalBytes, [receiptFile]: priorReceiptBytes });
+    expectMissingPaths(root, ["first.txt", receiptFile]);
+    expectFileBytes(root, "changed.txt", externallyChangedBytes);
+  });
 
-      const applyExit = yield* expectFailure(
-        applyPlan(
-          writePlan(workspace.root, {
-            files: { "existing.txt": expectedFile(originalBytes) },
-            receipt: expectedFile(priorReceiptBytes),
-          }),
-        ),
-      );
+  it("restores original bytes and removes created parents after a middle commit failure", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    seedFiles(root, { "existing.txt": originalBytes });
+    const files = {
+      "existing.txt": createExpectedFile(originalBytes),
+      "created/nested/file.txt": expectedMissing,
+      "fail.txt": expectedMissing,
+    };
+    failCommitOfFailFile();
 
-      expect(Exit.isFailure(applyExit) && Cause.pretty(applyExit.cause)).toContain("Injected rename failure");
-      yield* workspace.expectBytes("existing.txt", originalBytes);
-      yield* workspace.expectBytes(receiptFile, priorReceiptBytes);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }).pipe(
-      Effect.provide(
-        patchedPlatform((fileSystem) => ({
-          rename: (from, to) => (named(to, "receipt.json") ? failWith("rename", to) : fileSystem.rename(from, to)),
-        })),
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files })));
+
+    expectFileBytes(root, "existing.txt", originalBytes);
+    expectMissingPaths(root, ["created", "fail.txt", receiptFile]);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it("removes snapshots while preserving external content in a created parent", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    failCommitOfFailFile((failureRoot) => {
+      writeFileSync(join(failureRoot, "created/nested/external.txt"), externallyChangedBytes);
+    });
+
+    await catchFailure(
+      applyPlanUninterrupted(
+        createWritePlan(root, { files: createMissingFiles(["created/nested/file.txt", "fail.txt"]) }),
       ),
-    ),
-  );
+    );
 
-  it.scoped.each([
+    expectFileBytes(root, "created/nested/external.txt", externallyChangedBytes);
+    expectMissingPaths(root, [receiptFile, recoveryFile]);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it("retains recovery state instead of overwriting bytes changed after commit", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    failCommitOfFailFile((failureRoot) => {
+      writeFileSync(join(failureRoot, "first.txt"), externallyChangedBytes);
+    });
+
+    await catchFailure(
+      applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["first.txt", "fail.txt"]) })),
+    );
+
+    expectFileBytes(root, "first.txt", externallyChangedBytes);
+    expectMissingPaths(root, [receiptFile]);
+    expect(existsSync(readRecoveryRecord(root).transactionRoot)).toBe(true);
+  });
+
+  it("rolls files back and restores the prior receipt bytes after the receipt commit fails", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    const priorReceiptBytes = new Uint8Array([255, 0, 1, 128]);
+    seedFiles(root, { "existing.txt": originalBytes, [receiptFile]: priorReceiptBytes });
+    failCallsWhen((method, args) => method === "rename" && readFileName(args[1]) === "receipt.json");
+
+    const failure = await catchFailure(
+      applyPlanUninterrupted(
+        createWritePlan(root, {
+          files: { "existing.txt": createExpectedFile(originalBytes) },
+          receipt: createExpectedFile(priorReceiptBytes),
+        }),
+      ),
+    );
+
+    expect(describeFailure(failure)).toContain("Injected rename failure");
+    expectFileBytes(root, "existing.txt", originalBytes);
+    expectFileBytes(root, receiptFile, priorReceiptBytes);
+    expect(listTransactionDirectories(root)).toEqual([]);
+  });
+
+  it.each([
     {
       name: "preparing",
       failed: "second.txt",
-      patch: ((fileSystem) => ({
-        writeFile: (filePath, bytes) =>
-          portablePath(filePath).includes("/prepared/1")
-            ? failWith("writeFile", filePath)
-            : fileSystem.writeFile(filePath, bytes),
-      })) satisfies FileSystemPatch,
+      isFailingCall: (method: string, args: ReadonlyArray<unknown>) =>
+        method === "writeFile" && withForwardSlashes(String(args[0])).includes("/prepared/1"),
     },
     {
       name: "capturing a snapshot",
       failed: "snapshot-fail.txt",
-      patch: ((fileSystem) => ({
-        readFile: (filePath) =>
-          named(filePath, "snapshot-fail.txt") ? failWith("readFile", filePath) : fileSystem.readFile(filePath),
-      })) satisfies FileSystemPatch,
+      isFailingCall: (method: string, args: ReadonlyArray<unknown>) =>
+        method === "readFile" && readFileName(args[0]) === "snapshot-fail.txt",
     },
-  ])("leaves every destination unchanged and removes transaction state when $name fails", ({ failed, patch }) =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.seed({ "first.txt": originalBytes, [failed]: secondOriginalBytes });
-      const files = { "first.txt": expectedFile(originalBytes), [failed]: expectedFile(secondOriginalBytes) };
+  ])(
+    "leaves every destination unchanged and removes transaction state when $name fails",
+    async ({ failed, isFailingCall }) => {
+      const root = createTemporaryDirectory("agent-setup-apply-");
+      seedFiles(root, { "first.txt": originalBytes, [failed]: secondOriginalBytes });
+      const files = {
+        "first.txt": createExpectedFile(originalBytes),
+        [failed]: createExpectedFile(secondOriginalBytes),
+      };
+      failCallsWhen(isFailingCall);
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files })));
+      await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files })));
 
-      yield* workspace.expectBytes("first.txt", originalBytes);
-      expect((yield* workspace.fileSystem.stat(workspace.at(failed))).type).toBe("File");
-      yield* workspace.expectAbsent([receiptFile]);
-      expect(yield* workspace.transactionDirectories).toEqual([]);
-    }).pipe(Effect.provide(patchedPlatform(patch))),
+      expectFileBytes(root, "first.txt", originalBytes);
+      expect(statSync(join(root, failed)).isFile()).toBe(true);
+      expectMissingPaths(root, [receiptFile]);
+      expect(listTransactionDirectories(root)).toEqual([]);
+    },
   );
 
-  it.scoped("surfaces cleanup failure without rolling back the committed receipt", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
+  it("surfaces cleanup failure without rolling back the committed receipt", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    failCallsWhen(
+      (method, args) => method === "rm" && withForwardSlashes(String(args[0])).includes("/.agent-setup-transaction-"),
+    );
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["settings.json"]) })));
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
 
-      yield* workspace.expectBytes("settings.json", installedBytes);
-      expect(yield* workspace.fileSystem.exists(workspace.at(receiptFile))).toBe(true);
-      yield* workspace.expectAbsent([recoveryFile]);
-      expect(yield* workspace.transactionDirectories).toHaveLength(1);
-    }).pipe(
-      Effect.provide(
-        patchedPlatform((fileSystem) => ({
-          remove: (filePath, options) =>
-            portablePath(filePath).includes("/.agent-setup-transaction-") && options?.recursive === true
-              ? failWith("remove", filePath)
-              : fileSystem.remove(filePath, options),
-        })),
-      ),
-    ),
-  );
+    expectFileBytes(root, "settings.json", installedBytes);
+    expect(existsSync(join(root, receiptFile))).toBe(true);
+    expectMissingPaths(root, [recoveryFile]);
+    expect(listTransactionDirectories(root)).toHaveLength(1);
+  });
 
-  it.scoped("retains the recovery marker and snapshots after committed cleanup fails", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
+  it("retains the recovery marker and snapshots after committed cleanup fails", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    failCallsWhen((method, args) => method === "rm" && readFileName(args[0]) === "recovery.json");
 
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["settings.json"]) })));
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
 
-      yield* workspace.expectBytes("settings.json", installedBytes);
-      expect(yield* workspace.fileSystem.exists(workspace.at(receiptFile))).toBe(true);
-      expect(yield* workspace.fileSystem.exists((yield* workspace.recoveryRecord).transactionRoot)).toBe(true);
-    }).pipe(
-      Effect.provide(
-        patchedPlatform((fileSystem) => ({
-          remove: (filePath, options) =>
-            portablePath(filePath).endsWith(`/${recoveryFile}`)
-              ? failWith("remove", filePath)
-              : fileSystem.remove(filePath, options),
-        })),
-      ),
-    ),
-  );
+    expectFileBytes(root, "settings.json", installedBytes);
+    expect(existsSync(join(root, receiptFile))).toBe(true);
+    expect(existsSync(readRecoveryRecord(root).transactionRoot)).toBe(true);
+  });
 
-  it.scoped("never unlinks a marker that changed before committed cleanup", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-
-      yield* expectFailure(applyPlan(writePlan(workspace.root, { files: missingFiles(["settings.json"]) })));
-
-      expect(yield* workspace.fileSystem.exists(workspace.at(receiptFile))).toBe(true);
-      expect(yield* workspace.fileSystem.readFileString(workspace.at(recoveryFile))).toBe("changed marker");
-      expect(yield* workspace.transactionDirectories).toHaveLength(1);
-    }).pipe(
-      Effect.provide(
-        patchedPlatform((fileSystem, path) => ({
-          rename: (from, to) =>
-            fileSystem
-              .rename(from, to)
-              .pipe(
-                Effect.zipRight(
-                  path.basename(to) === "receipt.json"
-                    ? fileSystem.writeFileString(path.join(path.dirname(to), "recovery.json"), "changed marker")
-                    : Effect.void,
-                ),
-              ),
-        })),
-      ),
-    ),
-  );
-
-  const rollbackFailurePlatform = patchedPlatform((fileSystem) => ({
-    copyFile: (from, to) => (named(to, "existing.txt") ? failWith("copyFile", to) : fileSystem.copyFile(from, to)),
-    rename: (from, to) => (named(to, "fail.txt") ? failWith("rename", to) : fileSystem.rename(from, to)),
-  }));
-
-  const failedRollbackPlan = (root: string) =>
-    writePlan(root, { files: { "existing.txt": expectedFile(originalBytes), "fail.txt": expectedMissing } });
-
-  it.scoped("retains snapshots and writes strict durable recovery evidence when rollback fails", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.seed({ "existing.txt": originalBytes });
-
-      const applyExit = yield* expectFailure(applyPlan(failedRollbackPlan(workspace.root)));
-
-      expect(Exit.isFailure(applyExit) && Cause.pretty(applyExit.cause)).toContain("Injected rename failure");
-      expect(Exit.isFailure(applyExit) && Cause.pretty(applyExit.cause)).toContain("Injected copyFile failure");
-      yield* workspace.expectAbsent(["existing.txt", receiptFile]);
-
-      const recovery = yield* workspace.recoveryRecord;
-      const canonicalRoot = yield* workspace.fileSystem.realPath(workspace.root);
-      const canonicalOriginalPath = workspace.path.join(canonicalRoot, "existing.txt");
-      expect(recovery._tag).toBe("pending");
-      expect(recovery.root).toBe(canonicalRoot);
-      expect(recovery.receiptPath).toBe(workspace.path.join(canonicalRoot, receiptFile));
-      expect(yield* workspace.fileSystem.exists(recovery.transactionRoot)).toBe(true);
-      expect(yield* workspace.fileSystem.exists(workspace.path.join(recovery.transactionRoot, "prepared"))).toBe(false);
-
-      const snapshot = recovery.snapshots.find((candidate) => candidate.targetPath === canonicalOriginalPath);
-      expect(snapshot?.original._tag).toBe("file");
-      if (snapshot?.original._tag === "file") {
-        expect([...(yield* workspace.fileSystem.readFile(snapshot.original.snapshotPath))]).toEqual([...originalBytes]);
+  it("never unlinks a marker that changed before committed cleanup", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    injected.aroundCall = async (method, args, run) => {
+      const callReply = await run();
+      const isReceiptCommit = method === "rename" && readFileName(args[1]) === "receipt.json";
+      if (isReceiptCommit) {
+        writeFileSync(join(dirname(String(args[1])), "recovery.json"), "changed marker");
       }
-    }).pipe(Effect.provide(rollbackFailurePlatform)),
-  );
 
-  it.scoped.skipIf(process.platform === "win32")("keeps retained recovery state private on POSIX hosts", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeWorkspace;
-      yield* workspace.fileSystem.writeFile(workspace.at("existing.txt"), originalBytes, { mode: 0o600 });
+      return callReply;
+    };
 
-      yield* Effect.exit(applyPlan(failedRollbackPlan(workspace.root)));
+    await catchFailure(applyPlanUninterrupted(createWritePlan(root, { files: createMissingFiles(["settings.json"]) })));
 
-      const recovery = yield* workspace.recoveryRecord;
-      const snapshot = recovery.snapshots.find((candidate) => candidate.targetPath.endsWith("/existing.txt"));
-      const modeOf = (filePath: string) => Effect.map(workspace.fileSystem.stat(filePath), (stat) => stat.mode & 0o777);
-      expect(yield* modeOf(recovery.transactionRoot)).toBe(0o700);
-      expect(yield* modeOf(workspace.path.join(recovery.transactionRoot, "pending.json"))).toBe(0o600);
-      expect(snapshot?.original._tag).toBe("file");
-      if (snapshot?.original._tag === "file") {
-        expect(yield* modeOf(snapshot.original.snapshotPath)).toBe(0o600);
-      }
-    }).pipe(Effect.provide(rollbackFailurePlatform)),
-  );
+    expect(existsSync(join(root, receiptFile))).toBe(true);
+    expect(readFileSync(join(root, recoveryFile), "utf8")).toBe("changed marker");
+    expect(listTransactionDirectories(root)).toHaveLength(1);
+  });
+
+  it("retains snapshots and writes strict durable recovery evidence when rollback fails", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    seedFiles(root, { "existing.txt": originalBytes });
+    failRollbackOfExistingFile();
+
+    const failure = await catchFailure(applyPlanUninterrupted(failedRollbackPlan(root)));
+
+    const failureText = describeFailure(failure);
+    expect(failureText).toContain("Injected rename failure");
+    expect(failureText).toContain("Injected copyFile failure");
+    expectMissingPaths(root, ["existing.txt", receiptFile]);
+
+    const recovery = readRecoveryRecord(root);
+    const canonicalRoot = realpathSync(root);
+    const canonicalOriginalPath = join(canonicalRoot, "existing.txt");
+    expect(recovery._tag).toBe("pending");
+    expect(recovery.root).toBe(canonicalRoot);
+    expect(recovery.receiptPath).toBe(join(canonicalRoot, receiptFile));
+    expect(existsSync(recovery.transactionRoot)).toBe(true);
+    expect(existsSync(join(recovery.transactionRoot, "prepared"))).toBe(false);
+
+    const snapshot = recovery.snapshots.find((candidate) => candidate.targetPath === canonicalOriginalPath);
+    const snapshotOriginal = snapshot?.original;
+    const isFileSnapshot = snapshotOriginal?._tag === "file";
+    expect(snapshotOriginal?._tag).toBe("file");
+    if (isFileSnapshot) {
+      expect([...readFileSync(snapshotOriginal.snapshotPath)]).toEqual([...originalBytes]);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("keeps retained recovery state private on POSIX hosts", async () => {
+    const root = createTemporaryDirectory("agent-setup-apply-");
+    writeFileSync(join(root, "existing.txt"), originalBytes, { mode: 0o600 });
+    failRollbackOfExistingFile();
+
+    await settleOperation(applyPlanUninterrupted(failedRollbackPlan(root)));
+
+    const recovery = readRecoveryRecord(root);
+    const snapshot = recovery.snapshots.find((candidate) => candidate.targetPath.endsWith("/existing.txt"));
+    const modeOf = (filePath: string): number => statSync(filePath).mode & 0o777;
+    expect(modeOf(recovery.transactionRoot)).toBe(0o700);
+    expect(modeOf(join(recovery.transactionRoot, "pending.json"))).toBe(0o600);
+    const snapshotOriginal = snapshot?.original;
+    const isFileSnapshot = snapshotOriginal?._tag === "file";
+    expect(snapshotOriginal?._tag).toBe("file");
+    if (isFileSnapshot) {
+      expect(modeOf(snapshotOriginal.snapshotPath)).toBe(0o600);
+    }
+  });
 });

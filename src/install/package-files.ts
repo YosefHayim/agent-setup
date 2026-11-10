@@ -1,11 +1,10 @@
-/** Files the prepared package ships: hook code and skill trees read from the prepared folder and planned as whole-file writes. */
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 
-import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, ParseResult, Schema } from "effect";
-import type { z } from "zod";
+import { z } from "zod";
 
 import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
 import { decodeStrictText, hashBytes } from "./file-bytes.js";
 import {
   applicationOwner,
@@ -15,19 +14,17 @@ import {
   readFileSnapshot,
 } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
-import { createInstallError, type InstallRequest, wrapAsInstallError } from "./install-request.js";
+import { createInstallError, type InstallRequest } from "./install-request.js";
+import type { FileChange } from "./plan.js";
 import type { Receipt } from "./receipt.js";
+import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
-const preparedFileSchema = Schema.Struct({
-  path: Schema.NonEmptyTrimmedString.annotations({
-    description: "Feature-runtime-relative prepared file path.",
-  }),
-  bytes: Schema.Uint8ArrayFromSelf.annotations({
-    description: "Exact prepared runtime bytes copied into the installation.",
-  }),
+const preparedFileSchema = z.object({
+  path: nonEmptyTrimmedTextSchema.describe("Feature-runtime-relative prepared file path."),
+  bytes: z.instanceof(Uint8Array).describe("Exact prepared runtime bytes copied into the installation."),
 });
 
-type PreparedFile = Schema.Schema.Type<typeof preparedFileSchema>;
+type PreparedFile = z.infer<typeof preparedFileSchema>;
 
 const isUnderShippedPath = (filePath: string, shippedPath: string): boolean =>
   filePath === shippedPath || filePath.startsWith(`${shippedPath}/`);
@@ -35,42 +32,51 @@ const isUnderShippedPath = (filePath: string, shippedPath: string): boolean =>
 const preparedSkillPathIssues = (preparedSkill: {
   installedSkill: z.infer<typeof installedSkillSchema>;
   sourceFiles: ReadonlyArray<PreparedFile>;
-}) => [
-  ...preparedSkill.sourceFiles.flatMap((sourceFile, index) =>
-    preparedSkill.installedSkill.shippedPaths.some((shippedPath) => isUnderShippedPath(sourceFile.path, shippedPath))
-      ? []
-      : [
-          {
-            path: ["sourceFiles", index, "path"],
-            message: `Prepared skill file ${sourceFile.path} is not catalog-shipped.`,
-          },
-        ],
-  ),
-  ...preparedSkill.installedSkill.shippedPaths.flatMap((shippedPath, index) =>
-    preparedSkill.sourceFiles.some((sourceFile) => isUnderShippedPath(sourceFile.path, shippedPath))
-      ? []
-      : [
-          {
-            path: ["installedSkill", "shippedPaths", index],
-            message: `Catalog-shipped path ${shippedPath} is missing from the prepared skill.`,
-          },
-        ],
-  ),
-];
+}): Array<ZodIssueDetail> => {
+  const sourceFileIssues = preparedSkill.sourceFiles.flatMap((sourceFile, index) => {
+    const isShippedFile = preparedSkill.installedSkill.shippedPaths.some((shippedPath) =>
+      isUnderShippedPath(sourceFile.path, shippedPath),
+    );
+    if (isShippedFile) {
+      return [];
+    }
 
-const preparedSkillSchema = Schema.Struct({
-  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
-    description: "Catalog skill identity paired with its verified prepared files.",
-  }),
-  sourceFiles: Schema.Array(preparedFileSchema).annotations({
-    description: "Complete verified prepared skill file tree.",
-  }),
-  markdown: Schema.NonEmptyString.annotations({
-    description: "Strict UTF-8 SKILL.md text used by native rule and instruction formats.",
-  }),
-}).pipe(Schema.filter(preparedSkillPathIssues));
+    return [
+      {
+        path: ["sourceFiles", index, "path"],
+        message: `Prepared skill file ${sourceFile.path} is not catalog-shipped.`,
+      },
+    ];
+  });
 
-export type PreparedSkill = Schema.Schema.Type<typeof preparedSkillSchema>;
+  const shippedPathIssues = preparedSkill.installedSkill.shippedPaths.flatMap((shippedPath, index) => {
+    const isShippedPathPrepared = preparedSkill.sourceFiles.some((sourceFile) =>
+      isUnderShippedPath(sourceFile.path, shippedPath),
+    );
+    if (isShippedPathPrepared) {
+      return [];
+    }
+
+    return [
+      {
+        path: ["installedSkill", "shippedPaths", index],
+        message: `Catalog-shipped path ${shippedPath} is missing from the prepared skill.`,
+      },
+    ];
+  });
+
+  return [...sourceFileIssues, ...shippedPathIssues];
+};
+
+const preparedSkillSchema = z
+  .object({
+    installedSkill: installedSkillSchema.describe("Catalog skill identity paired with its verified prepared files."),
+    sourceFiles: z.array(preparedFileSchema).describe("Complete verified prepared skill file tree."),
+    markdown: z.string().min(1).describe("Strict UTF-8 SKILL.md text used by native rule and instruction formats."),
+  })
+  .superRefine((preparedSkill, context) => addZodIssueDetails(context, preparedSkillPathIssues(preparedSkill)));
+
+export type PreparedSkill = z.infer<typeof preparedSkillSchema>;
 
 export const installedHookFile = (sourceDirectory: string, filePath: string): string =>
   `${hooksPath}/${sourceDirectory}/${filePath}`;
@@ -80,146 +86,153 @@ export const registrationEntrypoint = (
   runtime: { readonly sourceEntrypoint: string },
   registration: { readonly entrypoint: { _tag: "featureDefault" } | { _tag: "path"; value: string } },
 ): string => {
-  const sourceEntrypoint =
-    registration.entrypoint._tag === "path" ? registration.entrypoint.value : runtime.sourceEntrypoint;
+  const { entrypoint } = registration;
+  const isCustomEntrypoint = entrypoint._tag === "path";
+  const sourceEntrypoint = isCustomEntrypoint ? entrypoint.value : runtime.sourceEntrypoint;
 
   return `${sourceEntrypoint.slice(0, -3)}.js`;
 };
 
-const readPreparedFiles = (directory: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const entries = (yield* fileSystem.readDirectory(directory, { recursive: true })).sort();
-    const files = yield* Effect.forEach(entries, (entry) =>
-      Effect.gen(function* () {
-        const sourcePath = path.join(directory, entry);
-        const { type } = yield* fileSystem.stat(sourcePath);
-        if (type === "Directory") {
-          return [];
-        }
+const readPreparedFiles = async (directory: string): Promise<Array<PreparedFile>> => {
+  const relativePaths = (await readdir(directory, { recursive: true })).sort();
+  const files: Array<PreparedFile> = [];
+  for (const relativePath of relativePaths) {
+    const sourcePath = join(directory, relativePath);
+    const entryStats = await stat(sourcePath);
+    const isDirectory = entryStats.isDirectory();
+    if (isDirectory) {
+      continue;
+    }
 
-        if (type !== "File") {
-          return yield* Effect.fail(createInstallError(`Prepared path ${sourcePath} must be a regular file.`));
-        }
+    const isNotRegularFile = !entryStats.isFile();
+    if (isNotRegularFile) {
+      throw createInstallError(`Prepared path ${sourcePath} must be a regular file.`);
+    }
 
-        return [{ path: entry.replaceAll("\\", "/"), bytes: yield* fileSystem.readFile(sourcePath) }];
-      }),
-    );
+    const bytes = await readFile(sourcePath);
+    files.push({ path: relativePath.replaceAll("\\", "/"), bytes });
+  }
 
-    return files.flat();
+  return files;
+};
+
+interface HookFileWriteRequest {
+  readonly request: InstallRequest;
+  readonly previousReceipt: Receipt | undefined;
+  readonly filePath: string;
+  readonly bytes: Uint8Array;
+}
+
+const createHookFileWrite = async (fileWriteRequest: HookFileWriteRequest): Promise<FileChange> => {
+  const { request, previousReceipt, filePath, bytes } = fileWriteRequest;
+  const snapshot = await readFileSnapshot(join(request.destination.root, filePath));
+  const previous = previousWholeFile({
+    receipt: previousReceipt,
+    filePath,
+    snapshot,
+    desiredBytes: bytes,
   });
 
-const createHookFileWrite = (input: {
-  request: InstallRequest;
-  previousReceipt: Receipt | undefined;
-  filePath: string;
-  bytes: Uint8Array;
-}) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const snapshot = yield* Effect.tryPromise({
-      try: () => readFileSnapshot(path.join(input.request.destination.root, input.filePath)),
-      catch: (error) => error,
-    });
-    const previous = yield* Either.try({
-      try: () =>
-        previousWholeFile({
-          receipt: input.previousReceipt,
-          filePath: input.filePath,
-          snapshot,
-          desiredBytes: input.bytes,
-        }),
-      catch: wrapAsInstallError,
-    });
+  return checkFileChange({
+    _tag: "write",
+    file: {
+      owner: applicationOwner,
+      path: filePath,
+      kind: { _tag: "runtime" },
+      ownership: { _tag: "wholeFile", installedHash: hashBytes(bytes), previous },
+    },
+    bytes,
+    expectedCurrent: expectedCurrent(snapshot),
+  });
+};
 
-    return yield* Either.try({
-      try: () =>
-        checkFileChange({
-          _tag: "write",
-          file: {
-            owner: applicationOwner,
-            path: input.filePath,
-            kind: { _tag: "runtime" },
-            ownership: { _tag: "wholeFile", installedHash: hashBytes(input.bytes), previous },
-          },
-          bytes: input.bytes,
-          expectedCurrent: expectedCurrent(snapshot),
-        }),
-      catch: wrapAsInstallError,
-    });
+interface HookWritesRequest {
+  readonly request: InstallRequest;
+  readonly featureIds: ReadonlyArray<string>;
+  readonly previousReceipt: Receipt | undefined;
+}
+
+export const createHookWrites = async (hookWritesRequest: HookWritesRequest): Promise<Array<FileChange>> => {
+  const { request, featureIds, previousReceipt } = hookWritesRequest;
+  const hookFeatures = featureCatalog.flatMap((feature) => {
+    const isSelected = featureIds.includes(feature.id);
+    const { runtime } = feature;
+    const isHookRuntime = runtime._tag === "hook";
+    if (isSelected && isHookRuntime) {
+      return [{ sourceDirectory: feature.sourceDirectory, runtime }];
+    }
+
+    return [];
   });
 
-export const createHookWrites = (input: {
-  request: InstallRequest;
-  featureIds: ReadonlyArray<string>;
-  previousReceipt: Receipt | undefined;
-}) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const hookFeatures = featureCatalog.flatMap((feature) =>
-      input.featureIds.includes(feature.id) && feature.runtime._tag === "hook"
-        ? [{ sourceDirectory: feature.sourceDirectory, runtime: feature.runtime }]
-        : [],
-    );
-    const writes = yield* Effect.forEach(hookFeatures, ({ sourceDirectory, runtime }) =>
-      Effect.gen(function* () {
-        const files = yield* readPreparedFiles(path.join(input.request.preparedPackage.root, "hooks", sourceDirectory));
-        for (const registration of runtime.registrations) {
-          const entrypoint = registrationEntrypoint(runtime, registration);
-          if (!files.some((file) => file.path === entrypoint)) {
-            return yield* Effect.fail(
-              createInstallError(`Prepared runtime entrypoint is missing: ${sourceDirectory}/${entrypoint}`),
-            );
-          }
-        }
+  const writes: Array<FileChange> = [];
+  for (const { sourceDirectory, runtime } of hookFeatures) {
+    const files = await readPreparedFiles(join(request.preparedPackage.root, "hooks", sourceDirectory));
+    for (const registration of runtime.registrations) {
+      const entrypoint = registrationEntrypoint(runtime, registration);
+      const isEntrypointMissing = !files.some((file) => file.path === entrypoint);
+      if (isEntrypointMissing) {
+        throw createInstallError(`Prepared runtime entrypoint is missing: ${sourceDirectory}/${entrypoint}`);
+      }
+    }
 
-        return yield* Effect.forEach(files, (file) =>
-          createHookFileWrite({
-            request: input.request,
-            previousReceipt: input.previousReceipt,
-            filePath: installedHookFile(sourceDirectory, file.path),
-            bytes: file.bytes,
-          }),
-        );
-      }),
-    );
+    for (const file of files) {
+      const fileWrite = await createHookFileWrite({
+        request,
+        previousReceipt,
+        filePath: installedHookFile(sourceDirectory, file.path),
+        bytes: file.bytes,
+      });
+      writes.push(fileWrite);
+    }
+  }
 
-    return writes.flat();
+  return writes;
+};
+
+const readPreparedSkill = async (
+  preparedPackageRoot: string,
+  installedSkill: z.infer<typeof installedSkillSchema>,
+): Promise<PreparedSkill> => {
+  const directory = join(preparedPackageRoot, "skills", installedSkill.id);
+  const sourceFiles = await readPreparedFiles(directory);
+  const skillFile = sourceFiles.find((file) => file.path === "SKILL.md");
+  const isSkillFileMissing = skillFile === undefined;
+  if (isSkillFileMissing) {
+    throw createInstallError(`Prepared skill ${installedSkill.id} is missing SKILL.md.`);
+  }
+
+  const markdownReply = decodeStrictText(skillFile.bytes, join(directory, "SKILL.md"));
+  const isMarkdownInvalid = markdownReply._tag === "invalid";
+  if (isMarkdownInvalid) {
+    throw createInstallError(markdownReply.message);
+  }
+
+  const preparedSkillReply = preparedSkillSchema.safeParse({
+    installedSkill,
+    sourceFiles,
+    markdown: markdownReply.fileContents,
   });
+  const isPreparedSkillInvalid = !preparedSkillReply.success;
+  if (isPreparedSkillInvalid) {
+    const issueText = joinZodIssueMessages(preparedSkillReply.error);
+    throw createInstallError(`Prepared skill ${installedSkill.id} is invalid: ${issueText}`);
+  }
 
-export const readPreparedSkills = (input: { request: InstallRequest; featureIds: ReadonlyArray<FeatureId> }) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
+  return preparedSkillReply.data;
+};
 
-    return yield* Effect.forEach(skillsForFeatures(input.featureIds), (installedSkill) =>
-      Effect.gen(function* () {
-        const directory = path.join(input.request.preparedPackage.root, "skills", installedSkill.id);
-        const sourceFiles = yield* readPreparedFiles(directory);
-        const skillFile = sourceFiles.find((file) => file.path === "SKILL.md");
-        if (skillFile === undefined) {
-          return yield* Effect.fail(createInstallError(`Prepared skill ${installedSkill.id} is missing SKILL.md.`));
-        }
+interface PreparedSkillsRequest {
+  readonly request: InstallRequest;
+  readonly featureIds: ReadonlyArray<FeatureId>;
+}
 
-        const markdownReply = decodeStrictText(skillFile.bytes, path.join(directory, "SKILL.md"));
-        const isMarkdownInvalid = markdownReply._tag === "invalid";
-        if (isMarkdownInvalid) {
-          return yield* Effect.fail(createInstallError(markdownReply.message));
-        }
+export const readPreparedSkills = async (skillsRequest: PreparedSkillsRequest): Promise<Array<PreparedSkill>> => {
+  const preparedSkills: Array<PreparedSkill> = [];
+  for (const installedSkill of skillsForFeatures(skillsRequest.featureIds)) {
+    const preparedSkill = await readPreparedSkill(skillsRequest.request.preparedPackage.root, installedSkill);
+    preparedSkills.push(preparedSkill);
+  }
 
-        const markdown = markdownReply.fileContents;
-
-        return yield* Schema.validate(preparedSkillSchema, { onExcessProperty: "error" })({
-          installedSkill,
-          sourceFiles,
-          markdown,
-        }).pipe(
-          Effect.mapError((error) =>
-            createInstallError(
-              `Prepared skill ${installedSkill.id} is invalid: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
-            ),
-          ),
-        );
-      }),
-    );
-  });
+  return preparedSkills;
+};

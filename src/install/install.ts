@@ -290,8 +290,14 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
 
     const featureIds = yield* listFeaturesWithDependencies(request);
     const selectedAgents = yield* pickAgents(request);
-    const hookWrites = yield* createHookWrites({ request, featureIds, previousReceipt });
-    const preparedSkills = yield* readPreparedSkills({ request, featureIds });
+    const hookWrites = yield* Effect.tryPromise({
+      try: () => createHookWrites({ request, featureIds, previousReceipt }),
+      catch: (error) => error,
+    });
+    const preparedSkills = yield* Effect.tryPromise({
+      try: () => readPreparedSkills({ request, featureIds }),
+      catch: (error) => error,
+    });
     const agentWrites = yield* createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt });
     const managedConfigPlan = yield* createManagedConfigPlan({
       request,
@@ -356,7 +362,7 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       return installSummary({ tag: "unchanged", request, featureIds, selectedAgents });
     }
 
-    yield* applyPlan(plan);
+    yield* Effect.tryPromise({ try: (signal) => applyPlan(plan, signal), catch: (error) => error });
 
     return installSummary({ tag: "installed", request, featureIds, selectedAgents });
   }).pipe(Effect.mapError(wrapAsInstallError));
