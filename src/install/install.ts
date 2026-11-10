@@ -240,24 +240,32 @@ const planHookSettings = (input: {
               catch: (error) => error,
             });
 
-        return yield* planSettings({
-          filePath,
-          snapshot,
-          decoded: isClaudeSettings ? input.claudeSettings.decoded : yield* decodeSettings(snapshot),
-          previousFile: previousReceiptFile(input.previousReceipt, filePath),
-          desiredGroups: desiredHookGroups({
-            root: input.request.destination.root,
-            featureIds: input.featureIds,
-            selectedAgents: input.selectedAgents,
-            agent,
-            path,
-          }),
-          installedHooksFolder: path.join(input.request.destination.root, hooksPath),
+        const decoded = isClaudeSettings
+          ? input.claudeSettings.decoded
+          : yield* Effect.try({ try: () => decodeSettings(snapshot), catch: wrapAsInstallError });
+
+        return yield* Effect.try({
+          try: () =>
+            planSettings({
+              filePath,
+              snapshot,
+              decoded,
+              previousFile: previousReceiptFile(input.previousReceipt, filePath),
+              desiredGroups: desiredHookGroups({
+                root: input.request.destination.root,
+                featureIds: input.featureIds,
+                selectedAgents: input.selectedAgents,
+                agent,
+                path,
+              }),
+              installedHooksFolder: path.join(input.request.destination.root, hooksPath),
+            }),
+          catch: wrapAsInstallError,
         });
       }),
     );
 
-    return plans.filter((plan): plan is FileChange => plan !== undefined);
+    return plans.filter((plan): plan is FileChange => plan != null);
   });
 
 export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot }) =>
@@ -282,7 +290,7 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       try: () => readFileSnapshot(path.join(request.destination.root, settingsPath)),
       catch: (error) => error,
     });
-    const settings = yield* decodeSettings(settingsSnapshot);
+    const settings = yield* Effect.try({ try: () => decodeSettings(settingsSnapshot), catch: wrapAsInstallError });
     const previousReceipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     if (previousReceipt !== undefined && previousReceipt.scope !== request.destination._tag) {
       return yield* Effect.fail(createInstallError("Existing receipt scope does not match the requested destination."));
@@ -298,7 +306,10 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       try: () => readPreparedSkills({ request, featureIds }),
       catch: (error) => error,
     });
-    const agentWrites = yield* createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt });
+    const agentWrites = yield* Effect.tryPromise({
+      try: () => createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt }),
+      catch: (error) => error,
+    });
     const managedConfigPlan = yield* createManagedConfigPlan({
       request,
       inspection: configInspection,

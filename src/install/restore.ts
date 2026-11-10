@@ -147,7 +147,10 @@ export const planRestorations = (input: unknown) =>
           case "instructionLink":
             return yield* restoreInstructionLink(target);
           case "settings":
-            return yield* restoreSettings({ ...target, installedHooksFolder: path.join(request.root, hooksPath) });
+            return yield* Effect.try({
+              try: () => restoreSettings({ ...target, installedHooksFolder: path.join(request.root, hooksPath) }),
+              catch: wrapAsInstallError,
+            });
           default:
             return yield* restoreWholeFile(target);
         }
