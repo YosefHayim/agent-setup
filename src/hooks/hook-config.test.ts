@@ -11,7 +11,7 @@ import { defaultConfig } from "../config/config-schema.js";
 import { hooksPath } from "../install/install-paths.js";
 import { decodeHookConfig } from "./hook-config.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const configModuleSource = fileURLToPath(new URL("./hook-config.ts", import.meta.url));
 
 describe("hook config resolution", () => {

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { unfinishedClaudeJobStates } from "./claude-jobs.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workingSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const doneSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const workspaces: Array<string> = [];

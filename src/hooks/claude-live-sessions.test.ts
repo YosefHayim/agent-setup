@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { liveClaudeProcessIds, liveClaudeSessionIds } from "./claude-live-sessions.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const runningSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const exitedSessionId = "f7990b95-b427-4bfb-a8d6-cd6f5013ce14";
 const secondAccountSessionId = "0c2d6c1e-7f0a-4a55-9d0e-3a1b8f2c4d77";

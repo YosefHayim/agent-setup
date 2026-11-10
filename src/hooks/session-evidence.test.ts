@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createPathMatcher } from "./path-matcher.js";
 import { readClaudeEvidence, readCodexEvidence } from "./session-evidence.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const homeRoot = "/Users/me";
 const codeFolder = "/Users/me/Desktop/Code";
 const matchers = {

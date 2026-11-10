@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { hasRunningSubagents } from "./claude-subagents.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const workspaces: Array<string> = [];
 
