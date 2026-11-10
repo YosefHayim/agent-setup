@@ -52,20 +52,20 @@ const createWorkspace = async (): Promise<{ root: string; preparedRoot: string }
   return { root, preparedRoot };
 };
 
-const readFileContents = (root: string, relativePath: string): Promise<string> =>
+const readFileMessages = (root: string, relativePath: string): Promise<string> =>
   readFile(join(root, relativePath), "utf8");
 
-const installRequest = (input: { root: string; preparedRoot: string }) => ({
-  destination: { _tag: "project", root: input.root },
-  host: { homeRoot: input.root },
-  preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
+const installRequest = (roots: { root: string; preparedRoot: string }) => ({
+  destination: { _tag: "project", root: roots.root },
+  host: { homeRoot: roots.root },
+  preparedPackage: { root: roots.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["make-code-readable", "scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["vendor"] } },
 });
 
-const uninstallRequest = (root: string) => ({
+const createUninstallRequest = (root: string) => ({
   destination: { _tag: "project", root },
   host: { homeRoot: root },
   interaction: { _tag: "scripted" },
@@ -98,9 +98,9 @@ describe("uninstall", () => {
       expect(existsSync(join(root, created))).toBe(true);
     }
 
-    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
+    const uninstallation = await uninstall(createUninstallRequest(root), notAbortedSignal);
     for (const [relativePath, fileString] of Object.entries(originals)) {
-      expect(await readFileContents(root, relativePath)).toBe(fileString);
+      expect(await readFileMessages(root, relativePath)).toBe(fileString);
     }
     for (const created of installerCreatedFiles) {
       expect(existsSync(join(root, created))).toBe(false);
@@ -117,10 +117,10 @@ describe("uninstall", () => {
     await install(installRequest({ root, preparedRoot }), notAbortedSignal);
     await writeFiles(root, userFiles);
 
-    await uninstall(uninstallRequest(root), notAbortedSignal);
+    await uninstall(createUninstallRequest(root), notAbortedSignal);
 
     for (const [relativePath, fileString] of Object.entries(userFiles)) {
-      expect(await readFileContents(root, relativePath)).toBe(fileString);
+      expect(await readFileMessages(root, relativePath)).toBe(fileString);
     }
   });
 
@@ -129,7 +129,7 @@ describe("uninstall", () => {
     await install(installRequest({ root, preparedRoot }), notAbortedSignal);
     await writeFiles(root, { ".claude/skills/user/SKILL.md": "User-owned skill.\n" });
 
-    await uninstall(uninstallRequest(root), notAbortedSignal);
+    await uninstall(createUninstallRequest(root), notAbortedSignal);
 
     for (const emptied of [".claude/agent-setup", ".claude/skills/make-code-readable", ".agents", ".cursor"]) {
       expect(existsSync(join(root, emptied))).toBe(false);
@@ -141,10 +141,10 @@ describe("uninstall", () => {
     const root = await makeTemporaryDirectory("agent-setup-uninstall-root-");
     await writeFiles(root, { ".cursor/rules/user.mdc": "User-owned rule.\n" });
 
-    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
+    const uninstallation = await uninstall(createUninstallRequest(root), notAbortedSignal);
 
     expect(uninstallation).toEqual({ ...uninstalled, _tag: "absent" });
-    expect(await readFileContents(root, ".cursor/rules/user.mdc")).toBe("User-owned rule.\n");
+    expect(await readFileMessages(root, ".cursor/rules/user.mdc")).toBe("User-owned rule.\n");
   });
 
   // Runtime hooks were created from missing: uninstall force-removes them even if edited.
@@ -155,7 +155,7 @@ describe("uninstall", () => {
     await install(installRequest({ root, preparedRoot }), notAbortedSignal);
     await writeFiles(root, { [hookFile]: "user changed this\n" });
 
-    const uninstallation = await uninstall(uninstallRequest(root), notAbortedSignal);
+    const uninstallation = await uninstall(createUninstallRequest(root), notAbortedSignal);
 
     expect(uninstallation).toEqual(uninstalled);
     expect(existsSync(join(root, hookFile))).toBe(false);
@@ -181,14 +181,14 @@ describe("uninstall", () => {
     await writeFiles(root, { ".claude/settings.json": originalSettings });
     await install(installRequest({ root, preparedRoot }), notAbortedSignal);
 
-    await uninstall(uninstallRequest(root), notAbortedSignal);
+    await uninstall(createUninstallRequest(root), notAbortedSignal);
 
-    expect(await readFileContents(root, ".claude/settings.json")).toBe(originalSettings);
+    expect(await readFileMessages(root, ".claude/settings.json")).toBe(originalSettings);
   });
 
   it("strictly rejects agent detection and prepared-package inputs", () => {
     const decodedCheck = uninstallRequestSchema.safeParse({
-      ...uninstallRequest("/workspace"),
+      ...createUninstallRequest("/workspace"),
       agents: { _tag: "detected", evidence: { homePaths: [".cursor"], absolutePaths: [], commands: [] } },
       preparedPackage: { root: "/package/dist", version: "0.12.0" },
     });

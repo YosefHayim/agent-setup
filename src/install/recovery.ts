@@ -3,63 +3,68 @@ import { z } from "zod";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
-const portablePath = (filePath: string): string => filePath.replaceAll("\\", "/");
+const readPortablePath = (filePath: string): string => filePath.replaceAll("\\", "/");
 
-const normalizedRecoveryPath = (filePath: string): string => {
-  const normalized = portablePath(filePath);
+const readNormalizedRecoveryPath = (filePath: string): string => {
+  const normalized = readPortablePath(filePath);
 
-  return normalized.endsWith("/") && normalized !== "/" && !/^[A-Za-z]:\/$/.test(normalized)
-    ? normalized.slice(0, -1)
-    : normalized;
+  const hasTrailingSlashToTrim = normalized.endsWith("/") && normalized !== "/" && !/^[A-Za-z]:\/$/.test(normalized);
+  return hasTrailingSlashToTrim ? normalized.slice(0, -1) : normalized;
 };
 
-const childPathPrefix = (root: string): string => (root.endsWith("/") ? root : `${root}/`);
+const readChildPathPrefix = (root: string): string => {
+  const hasRootTrailingSlash = root.endsWith("/");
+  return hasRootTrailingSlash ? root : `${root}/`;
+};
 
 const transactionDirectoryNamePattern =
   /^\.agent-setup-transaction-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const isCanonicalAbsolutePath = (filePath: string): boolean => {
-  const driveQualified = /^[A-Za-z]:[\\/]/.test(filePath);
-  if (filePath.includes("\0") || (!driveQualified && (!filePath.startsWith("/") || filePath.includes("\\")))) {
+  const isDriveQualified = /^[A-Za-z]:[\\/]/.test(filePath);
+
+  const isUnsafeFilePath =
+    filePath.includes("\0") || (!isDriveQualified && (!filePath.startsWith("/") || filePath.includes("\\")));
+  if (isUnsafeFilePath) {
     return false;
   }
 
-  const remainder = driveQualified ? portablePath(filePath).slice(3) : filePath.slice(1);
+  const remainder = isDriveQualified ? readPortablePath(filePath).slice(3) : filePath.slice(1);
   return remainder === "" || remainder.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 };
 
 export const isInsideFolder = (root: string, candidate: string): boolean => {
-  const normalizedRoot = normalizedRecoveryPath(root);
-  const normalizedCandidate = normalizedRecoveryPath(candidate);
+  const normalizedRoot = readNormalizedRecoveryPath(root);
+  const normalizedCandidate = readNormalizedRecoveryPath(candidate);
 
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(childPathPrefix(normalizedRoot));
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(readChildPathPrefix(normalizedRoot));
 };
 
-const recoveryPathKey = (filePath: string): string => normalizedRecoveryPath(filePath).toLowerCase();
+const readRecoveryPathKey = (filePath: string): string => readNormalizedRecoveryPath(filePath).toLowerCase();
 
-const recoveryPathsConflict = (left: string, right: string): boolean => {
-  const leftKey = recoveryPathKey(left);
-  const rightKey = recoveryPathKey(right);
+const isRecoveryPathsConflict = (left: string, right: string): boolean => {
+  const leftKey = readRecoveryPathKey(left);
+  const rightKey = readRecoveryPathKey(right);
 
   return (
     leftKey === rightKey ||
-    leftKey.startsWith(childPathPrefix(rightKey)) ||
-    rightKey.startsWith(childPathPrefix(leftKey))
+    leftKey.startsWith(readChildPathPrefix(rightKey)) ||
+    rightKey.startsWith(readChildPathPrefix(leftKey))
   );
 };
 
-const recoveryMarkerPath = (receiptPath: string): string => {
-  const normalizedReceiptPath = normalizedRecoveryPath(receiptPath);
+const readRecoveryMarkerPath = (receiptPath: string): string => {
+  const normalizedReceiptPath = readNormalizedRecoveryPath(receiptPath);
 
   return `${normalizedReceiptPath.slice(0, normalizedReceiptPath.lastIndexOf("/"))}/recovery.json`;
 };
 
 const isDirectSnapshotPath = (transactionRoot: string, snapshotPath: string): boolean => {
-  const snapshotsPrefix = `${childPathPrefix(normalizedRecoveryPath(transactionRoot))}snapshots/`;
-  const normalizedSnapshotPath = normalizedRecoveryPath(snapshotPath);
-  const snapshotName = normalizedSnapshotPath.startsWith(snapshotsPrefix)
-    ? normalizedSnapshotPath.slice(snapshotsPrefix.length)
-    : "";
+  const snapshotsPrefix = `${readChildPathPrefix(readNormalizedRecoveryPath(transactionRoot))}snapshots/`;
+  const normalizedSnapshotPath = readNormalizedRecoveryPath(snapshotPath);
+
+  const isInsideSnapshots = normalizedSnapshotPath.startsWith(snapshotsPrefix);
+  const snapshotName = isInsideSnapshots ? normalizedSnapshotPath.slice(snapshotsPrefix.length) : "";
 
   return snapshotName !== "" && !snapshotName.includes("/");
 };
@@ -86,7 +91,7 @@ const targetSnapshotSchema = z.strictObject({
 
 export type TargetSnapshot = z.infer<typeof targetSnapshotSchema>;
 
-const recoveryRecordFieldsSchema = z.strictObject({
+const recoveryObjectFieldsSchema = z.strictObject({
   _tag: z.literal("pending"),
   version: z.literal(1).describe("Recovery record format version."),
   root: absolutePathSchema.describe("Absolute installation root of the failed transaction."),
@@ -98,11 +103,11 @@ const recoveryRecordFieldsSchema = z.strictObject({
     .describe("Original state of every target captured before the transaction lock was published."),
 });
 
-type RecoveryRecordFields = z.infer<typeof recoveryRecordFieldsSchema>;
+type RecoveryObjectFields = z.infer<typeof recoveryObjectFieldsSchema>;
 
-const checkReceiptPath = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+const checkReceiptPath = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
   const isReceiptPathValid =
-    isInsideFolder(record.root, record.receiptPath) && portablePath(record.receiptPath).endsWith("/receipt.json");
+    isInsideFolder(stored.root, stored.receiptPath) && readPortablePath(stored.receiptPath).endsWith("/receipt.json");
   if (isReceiptPathValid) {
     return null;
   }
@@ -113,12 +118,13 @@ const checkReceiptPath = (record: RecoveryRecordFields): ZodIssueDetail | null =
   };
 };
 
-const checkTransactionRoot = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const transactionName = normalizedRecoveryPath(record.transactionRoot).slice(
-    childPathPrefix(normalizedRecoveryPath(record.root)).length,
+const checkTransactionRoot = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const transactionName = readNormalizedRecoveryPath(stored.transactionRoot).slice(
+    readChildPathPrefix(readNormalizedRecoveryPath(stored.root)).length,
   );
+
   const isTransactionRootValid =
-    isInsideFolder(record.root, record.transactionRoot) && transactionDirectoryNamePattern.test(transactionName);
+    isInsideFolder(stored.root, stored.transactionRoot) && transactionDirectoryNamePattern.test(transactionName);
   if (isTransactionRootValid) {
     return null;
   }
@@ -129,14 +135,14 @@ const checkTransactionRoot = (record: RecoveryRecordFields): ZodIssueDetail | nu
   };
 };
 
-const checkTargetPaths = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const markerPath = recoveryMarkerPath(record.receiptPath);
-  const invalidIndex = record.snapshots.findIndex(
+const checkTargetPaths = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const markerPath = readRecoveryMarkerPath(stored.receiptPath);
+  const invalidIndex = stored.snapshots.findIndex(
     (snapshot) =>
-      !isInsideFolder(record.root, snapshot.targetPath) ||
-      normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.root) ||
-      recoveryPathsConflict(snapshot.targetPath, markerPath) ||
-      recoveryPathsConflict(record.transactionRoot, snapshot.targetPath),
+      !isInsideFolder(stored.root, snapshot.targetPath) ||
+      readNormalizedRecoveryPath(snapshot.targetPath) === readNormalizedRecoveryPath(stored.root) ||
+      isRecoveryPathsConflict(snapshot.targetPath, markerPath) ||
+      isRecoveryPathsConflict(stored.transactionRoot, snapshot.targetPath),
   );
 
   const isThereNoInvalidIndex = invalidIndex < 0;
@@ -150,11 +156,11 @@ const checkTargetPaths = (record: RecoveryRecordFields): ZodIssueDetail | null =
   };
 };
 
-const checkSnapshotPaths = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const invalidIndex = record.snapshots.findIndex(
+const checkSnapshotPaths = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const invalidIndex = stored.snapshots.findIndex(
     (snapshot) =>
       snapshot.original._tag === "file" &&
-      !isDirectSnapshotPath(record.transactionRoot, snapshot.original.snapshotPath),
+      !isDirectSnapshotPath(stored.transactionRoot, snapshot.original.snapshotPath),
   );
 
   const isThereNoInvalidIndex = invalidIndex < 0;
@@ -168,10 +174,10 @@ const checkSnapshotPaths = (record: RecoveryRecordFields): ZodIssueDetail | null
   };
 };
 
-const checkUniqueTargets = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const targetPaths = record.snapshots.map((snapshot) => snapshot.targetPath);
+const checkUniqueTargets = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const targetPaths = stored.snapshots.map((snapshot) => snapshot.targetPath);
   const conflictingIndex = targetPaths.findIndex((candidate, index) =>
-    targetPaths.slice(0, index).some((prior) => recoveryPathsConflict(prior, candidate)),
+    targetPaths.slice(0, index).some((prior) => isRecoveryPathsConflict(prior, candidate)),
   );
 
   const isThereNoConflictingIndex = conflictingIndex < 0;
@@ -185,21 +191,24 @@ const checkUniqueTargets = (record: RecoveryRecordFields): ZodIssueDetail | null
   };
 };
 
-const checkUniqueSnapshotSources = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const snapshotKeys = record.snapshots.flatMap((snapshot) =>
-    snapshot.original._tag === "file" ? [recoveryPathKey(snapshot.original.snapshotPath)] : [],
-  );
-  const isEverySourceUnique = new Set(snapshotKeys).size === snapshotKeys.length;
-  if (isEverySourceUnique) {
+const checkUniqueSnapshotOrigins = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const snapshotKeys = stored.snapshots.flatMap((snapshot) => {
+    const original = snapshot.original;
+    const hasOriginalFile = original._tag === "file";
+    return hasOriginalFile ? [readRecoveryPathKey(original.snapshotPath)] : [];
+  });
+
+  const isEveryOriginUnique = new Set(snapshotKeys).size === snapshotKeys.length;
+  if (isEveryOriginUnique) {
     return null;
   }
 
   return { path: ["snapshots"], message: "Recovery file snapshots must use unique source paths." };
 };
 
-const checkReceiptTargetCaptured = (record: RecoveryRecordFields): ZodIssueDetail | null => {
-  const isReceiptCaptured = record.snapshots.some(
-    (snapshot) => normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.receiptPath),
+const checkReceiptTargetCaptured = (stored: RecoveryObjectFields): ZodIssueDetail | null => {
+  const isReceiptCaptured = stored.snapshots.some(
+    (snapshot) => readNormalizedRecoveryPath(snapshot.targetPath) === readNormalizedRecoveryPath(stored.receiptPath),
   );
   if (isReceiptCaptured) {
     return null;
@@ -209,30 +218,31 @@ const checkReceiptTargetCaptured = (record: RecoveryRecordFields): ZodIssueDetai
 };
 
 // The first broken rule wins, in the order the checks are listed.
-const findRecoveryRecordIssue = (record: RecoveryRecordFields): ZodIssueDetail | null =>
-  checkReceiptPath(record) ??
-  checkTransactionRoot(record) ??
-  checkTargetPaths(record) ??
-  checkSnapshotPaths(record) ??
-  checkUniqueTargets(record) ??
-  checkUniqueSnapshotSources(record) ??
-  checkReceiptTargetCaptured(record);
+const findRecoveryIssue = (stored: RecoveryObjectFields): ZodIssueDetail | null =>
+  checkReceiptPath(stored) ??
+  checkTransactionRoot(stored) ??
+  checkTargetPaths(stored) ??
+  checkSnapshotPaths(stored) ??
+  checkUniqueTargets(stored) ??
+  checkUniqueSnapshotOrigins(stored) ??
+  checkReceiptTargetCaptured(stored);
 
-export const recoveryRecordSchema = recoveryRecordFieldsSchema.superRefine((record, context) => {
-  addZodIssueDetails(context, [findRecoveryRecordIssue(record)]);
+export const recoveryObjectSchema = recoveryObjectFieldsSchema.superRefine((stored, scope) => {
+  addZodIssueDetails(scope, [findRecoveryIssue(stored)]);
 });
 
-export type RecoveryRecord = z.infer<typeof recoveryRecordSchema>;
+export type StoredRecovery = z.infer<typeof recoveryObjectSchema>;
 
-export const encodeRecoveryRecordJson = (record: RecoveryRecord): string =>
-  JSON.stringify(recoveryRecordSchema.parse(record));
+export const encodeRecoveryDocument = (stored: StoredRecovery): string =>
+  JSON.stringify(recoveryObjectSchema.parse(stored));
 
-export const decodeRecoveryRecordJson = (json: string): RecoveryRecord => {
-  const recordCheck = recoveryRecordSchema.safeParse(JSON.parse(json));
-  const isRecordInvalid = !recordCheck.success;
-  if (isRecordInvalid) {
-    throw new Error(joinZodIssueMessages(recordCheck.error), { cause: recordCheck.error });
+export const decodeRecoveryDocument = (document: string): StoredRecovery => {
+  const objectCheck = recoveryObjectSchema.safeParse(JSON.parse(document));
+
+  const isObjectInvalid = !objectCheck.success;
+  if (isObjectInvalid) {
+    throw new Error(joinZodIssueMessages(objectCheck.error), { cause: objectCheck.error });
   }
 
-  return recordCheck.data;
+  return objectCheck.data;
 };

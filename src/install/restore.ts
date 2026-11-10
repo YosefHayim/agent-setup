@@ -1,5 +1,3 @@
-/** Plan the final unowned bytes of receipted files: what uninstall and update write back or remove. */
-
 import { join } from "node:path";
 
 import { z } from "zod";
@@ -9,7 +7,7 @@ import { planInstructionFile } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { hashBytes } from "./file-bytes.js";
 import { restoreSettings } from "./hook-settings.js";
-import { checkFileChange, expectedCurrent, type FileSnapshot, readFileSnapshot } from "./host-files.js";
+import { checkFileChange, type FileSnapshot, readExpectedCurrent, readFileSnapshot } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
 import { createInstallError, wrapAsInstallError } from "./install-request.js";
 import { type OwnedFile, ownedFileSchema } from "./ownership.js";
@@ -23,6 +21,7 @@ interface RestoreTarget {
 
 const restoreWholeFile = ({ file, snapshot }: RestoreTarget): FileChange => {
   const ownership = file.ownership;
+
   const isFormatSpecific = ownership._tag !== "wholeFile";
   if (isFormatSpecific) {
     throw createInstallError(`File ${file.path} requires a format-specific restoration.`);
@@ -31,13 +30,14 @@ const restoreWholeFile = ({ file, snapshot }: RestoreTarget): FileChange => {
   // We created this path from nothing, so uninstall must not stick on drift, upgrades, or prior deletion;
   // expectedCurrent still binds the transaction to the bytes observed at plan time.
   const previous = ownership.previous;
+
   const isNewFile = previous._tag === "missing";
   if (isNewFile) {
     return checkFileChange({
       _tag: "remove",
       file,
       unownedBytes: new Uint8Array(),
-      expectedCurrent: expectedCurrent(snapshot),
+      expectedCurrent: readExpectedCurrent(snapshot),
     });
   }
 
@@ -47,7 +47,7 @@ const restoreWholeFile = ({ file, snapshot }: RestoreTarget): FileChange => {
       _tag: "restore",
       file,
       bytes: previous.bytes,
-      expectedCurrent: expectedCurrent(snapshot),
+      expectedCurrent: readExpectedCurrent(snapshot),
     });
   }
 
@@ -63,7 +63,7 @@ const checkFormatRestoration = (
     throw createInstallError(`${format} restoration for ${file.path} returned no operation.`);
   }
 
-  return checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) });
+  return checkFileChange({ ...operation, expectedCurrent: readExpectedCurrent(snapshot) });
 };
 
 const restoreInstructionFile = (target: RestoreTarget): FileChange => {
@@ -80,6 +80,7 @@ const restoreInstructionFile = (target: RestoreTarget): FileChange => {
 const restoreInstructionLink = (target: RestoreTarget): FileChange => {
   const { file } = target;
   const owner = file.owner;
+
   const isNotSingleAgentOwner = owner._tag !== "agent" || owner.agentIds.length !== 1;
   if (isNotSingleAgentOwner) {
     throw createInstallError(`Native config restoration for ${file.path} requires one agent owner.`);
@@ -87,6 +88,7 @@ const restoreInstructionLink = (target: RestoreTarget): FileChange => {
 
   const agentId = owner.agentIds.at(0);
   const agent = agentCatalog.find((candidate) => candidate.id === agentId);
+
   const isCatalogAgentMissing = agent == null || agent.target._tag !== "instructionLink";
   if (isCatalogAgentMissing) {
     throw createInstallError(`Native config restoration for ${file.path} has no catalog agent.`);
@@ -130,9 +132,9 @@ const planFileRestoration = async ({ root, file }: { root: string; file: OwnedFi
 };
 
 // Computes each receipted file's final unowned bytes without touching the filesystem.
-export const planRestorations = async (input: unknown): Promise<FileChange[]> => {
+export const planRestorations = async (uncheckedRequest: unknown): Promise<FileChange[]> => {
   try {
-    const request = restoreRequestSchema.parse(input);
+    const request = restoreRequestSchema.parse(uncheckedRequest);
     const restorations: FileChange[] = [];
     for (const file of request.files) {
       restorations.push(await planFileRestoration({ root: request.root, file }));
@@ -144,25 +146,26 @@ export const planRestorations = async (input: unknown): Promise<FileChange[]> =>
   }
 };
 
-export const planStaleRestorations = async (input: {
+export const planStaleRestorations = async (staleRestoration: {
   root: string;
-  previousReceipt: Receipt | undefined;
+  previousReceipt: Receipt | null;
   desiredWrites: ReadonlyArray<FileChange>;
   settingsPlans: ReadonlyArray<FileChange>;
 }): Promise<FileChange[]> => {
-  const previousReceipt = input.previousReceipt;
+  const previousReceipt = staleRestoration.previousReceipt;
+
   const isThereNoPreviousReceipt = previousReceipt == null;
   if (isThereNoPreviousReceipt) {
     return [];
   }
 
-  const desiredPaths = new Set(input.desiredWrites.map((write) => write.file.path));
-  const settingsRestorations = input.settingsPlans.filter((operation) => operation._tag !== "write");
+  const desiredPaths = new Set(staleRestoration.desiredWrites.map((write) => write.file.path));
+  const settingsRestorations = staleRestoration.settingsPlans.filter((operation) => operation._tag !== "write");
   const settingsPaths = new Set(settingsRestorations.map((operation) => operation.file.path));
   const staleFiles = previousReceipt.ownedFiles.filter(
     (file) => !desiredPaths.has(file.path) && !settingsPaths.has(file.path),
   );
-  const staleFileRestorations = await planRestorations({ root: input.root, files: staleFiles });
+  const staleFileRestorations = await planRestorations({ root: staleRestoration.root, files: staleFiles });
 
   return [...settingsRestorations, ...staleFileRestorations];
 };

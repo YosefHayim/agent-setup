@@ -5,7 +5,7 @@ import { hashBytes } from "#src/install/file-bytes.js";
 import {
   agentOwnerSchema,
   fileKindSchema,
-  previousFileValueSchema,
+  previousFileFieldSchema,
   relativePathSchema,
   wholeFileOwnershipSchema,
 } from "#src/install/ownership.js";
@@ -13,7 +13,7 @@ import { writeOperationSchema } from "#src/install/plan.js";
 import { addZodIssueDetails, joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { markdownWithCompleteFrontmatterSchema, stripFrontmatter } from "./skill-text.js";
 
-const textEncoder = new TextEncoder();
+const stringEncoder = new TextEncoder();
 
 const createRulePlanError = (issue: string): Error => new Error(`Cannot plan rule files: ${issue}`);
 
@@ -30,7 +30,7 @@ const ruleFileSkillSchema = z.strictObject({
 
 const previousRuleFileSchema = z.strictObject({
   path: relativePathSchema.describe("Exact rule path whose original state is retained for restoration."),
-  previous: previousFileValueSchema.describe("Decoded original whole-file state retained across updates."),
+  previous: previousFileFieldSchema.describe("Decoded original whole-file state retained across updates."),
 });
 
 const ruleFileRequestFieldsSchema = z.strictObject({
@@ -51,20 +51,23 @@ const ruleFileRequestFieldsSchema = z.strictObject({
 
 type RuleFileRequestFields = z.infer<typeof ruleFileRequestFieldsSchema>;
 
-const rulePath = (request: RuleFileRequestFields, skillId: string): string =>
+const readRulePath = (request: RuleFileRequestFields, skillId: string): string =>
   `${request.agent.target.directory}/${skillId}${request.agent.target.extension}`;
 
-const exactPreviousFileIssues = (request: RuleFileRequestFields) => {
-  const expectedPaths = request.skills.map((skill) => rulePath(request, skill.installedSkill.id));
+const listExactPreviousFileIssues = (request: RuleFileRequestFields) => {
+  const expectedPaths = request.skills.map((skill) => readRulePath(request, skill.installedSkill.id));
   const previousPaths = request.previousFiles.map((file) => file.path);
   const mismatchIndex = expectedPaths.findIndex((path, index) => path !== previousPaths[index]);
+
   const isPathListExact = mismatchIndex < 0 && expectedPaths.length === previousPaths.length;
   if (isPathListExact) {
     return [];
   }
 
   const shorterLength = Math.min(expectedPaths.length, previousPaths.length);
-  const issueIndex = mismatchIndex < 0 ? shorterLength : mismatchIndex;
+
+  const isNoMismatchFound = mismatchIndex < 0;
+  const issueIndex = isNoMismatchFound ? shorterLength : mismatchIndex;
 
   return [
     {
@@ -74,8 +77,8 @@ const exactPreviousFileIssues = (request: RuleFileRequestFields) => {
   ];
 };
 
-export const ruleFileRequestSchema = ruleFileRequestFieldsSchema.superRefine((request, context) =>
-  addZodIssueDetails(context, exactPreviousFileIssues(request)),
+export const ruleFileRequestSchema = ruleFileRequestFieldsSchema.superRefine((request, scope) =>
+  addZodIssueDetails(scope, listExactPreviousFileIssues(request)),
 );
 
 type RuleFileRequest = z.infer<typeof ruleFileRequestSchema>;
@@ -97,13 +100,15 @@ type RuleFileWrite = z.infer<typeof ruleFileWriteSchema>;
 export type RuleFilePlan = { writes: RuleFileWrite[] };
 
 const createRuleWrite = (request: RuleFileRequest, skill: RuleFileRequest["skills"][number]): RuleFileWrite => {
-  const path = rulePath(request, skill.installedSkill.id);
+  const path = readRulePath(request, skill.installedSkill.id);
   const previousFile = request.previousFiles.find((file) => file.path === path);
-  if (previousFile == null) {
+
+  const isPreviousFileMissing = previousFile == null;
+  if (isPreviousFileMissing) {
     throw createRulePlanError(`Missing previous-file state for desired rule file ${path}.`);
   }
 
-  const bytes = textEncoder.encode(stripFrontmatter(skill.markdown));
+  const bytes = stringEncoder.encode(stripFrontmatter(skill.markdown));
 
   return {
     _tag: "write",
@@ -120,6 +125,7 @@ const createRuleWrite = (request: RuleFileRequest, skill: RuleFileRequest["skill
 // Plan native rule files without I/O: one whole-file write per skill.
 export const planRuleFiles = (candidateRequest: unknown): RuleFilePlan => {
   const requestCheck = ruleFileRequestSchema.safeParse(candidateRequest);
+
   const isRequestAccepted = requestCheck.success;
   if (isRequestAccepted) {
     const request = requestCheck.data;

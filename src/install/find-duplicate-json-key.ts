@@ -1,18 +1,19 @@
 import { visit } from "jsonc-parser";
 
-export const findDuplicateJsonKey = (json: string): string | undefined => {
+export const findDuplicateJsonKey = (document: string): string | undefined => {
   const objectProperties: Array<Set<string>> = [];
   let duplicate: string | undefined;
 
   visit(
-    json,
+    document,
     {
       onObjectBegin: () => {
         objectProperties.push(new Set());
       },
       onObjectProperty: (property) => {
         const properties = objectProperties.at(-1);
-        if (duplicate === undefined && properties?.has(property)) {
+        const isDuplicateKeyFound = duplicate == null && properties?.has(property);
+        if (isDuplicateKeyFound) {
           duplicate = property;
         }
 

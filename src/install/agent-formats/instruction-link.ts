@@ -4,22 +4,22 @@ import { agentDefinitionSchema, instructionLinkTargetSchema } from "#src/catalog
 import { readErrorMessage } from "#src/install/install-request.js";
 import {
   agentOwnerSchema,
+  type DocumentFieldsOwnership,
+  documentFieldsOwnershipSchema,
   instructionLinkKindSchema,
-  type JsonValuesOwnership,
-  jsonValuesOwnershipSchema,
   relativePathSchema,
-  type YamlSequenceValueOwnership,
-  yamlSequenceValueOwnershipSchema,
+  type YamlSequenceFieldOwnership,
+  yamlSequenceFieldOwnershipSchema,
 } from "#src/install/ownership.js";
 import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
-import { addJsonRule, jsonRulesOwnershipIsValid, removeJsonRule } from "./json-rules-link.js";
+import { addDocumentRule, isDocumentRulesOwnershipIsValid, removeDocumentRule } from "./json-rules-link.js";
 import { addYamlRead, removeYamlRead } from "./yaml-read-link.js";
 
 const createLinkPlanError = (issue: string, cause?: unknown): Error =>
   new Error(`Cannot plan native instruction link: ${issue}`, { cause });
 
 // Native config edits throw their own messages; this names the failure as an instruction-link plan error.
-const editNativeConfig = <NativeEdit>(editNative: () => NativeEdit): NativeEdit => {
+const editNativeSettings = <NativeEdit>(editNative: () => NativeEdit): NativeEdit => {
   try {
     return editNative();
   } catch (error) {
@@ -27,13 +27,13 @@ const editNativeConfig = <NativeEdit>(editNative: () => NativeEdit): NativeEdit 
   }
 };
 
-type LinkOwnership = JsonValuesOwnership | YamlSequenceValueOwnership;
+type LinkOwnership = DocumentFieldsOwnership | YamlSequenceFieldOwnership;
 
 const ownedInstructionLinkSchema = z.strictObject({
   owner: agentOwnerSchema,
   path: relativePathSchema,
   kind: instructionLinkKindSchema,
-  ownership: z.union([jsonValuesOwnershipSchema, yamlSequenceValueOwnershipSchema]),
+  ownership: z.union([documentFieldsOwnershipSchema, yamlSequenceFieldOwnershipSchema]),
 });
 
 type OwnedInstructionLink = z.infer<typeof ownedInstructionLinkSchema>;
@@ -104,7 +104,7 @@ const findBrokenPreviousFileRules = (request: InstructionLinkRequestFields): Arr
       message: "Prior YAML ownership must match the exact read reference.",
     },
     {
-      isValid: file.ownership._tag !== "jsonValues" || jsonRulesOwnershipIsValid(file.ownership),
+      isValid: file.ownership._tag !== "jsonValues" || isDocumentRulesOwnershipIsValid(file.ownership),
       path: ["previousFile", "file", "ownership"],
       message: "Prior JSON ownership must contain one /rules pointer with missing or string-array history.",
     },
@@ -113,9 +113,9 @@ const findBrokenPreviousFileRules = (request: InstructionLinkRequestFields): Arr
   return rules.filter((rule) => !rule.isValid);
 };
 
-const instructionLinkRequestSchema = instructionLinkRequestFieldsSchema.superRefine((request, context) => {
+const instructionLinkRequestSchema = instructionLinkRequestFieldsSchema.superRefine((request, scope) => {
   for (const brokenRule of findBrokenPreviousFileRules(request)) {
-    context.addIssue({ code: "custom", path: brokenRule.path, message: brokenRule.message });
+    scope.addIssue({ code: "custom", path: brokenRule.path, message: brokenRule.message });
   }
 });
 
@@ -127,8 +127,11 @@ export type InstructionLinkPlan =
   | { readonly _tag: "restore"; readonly file: OwnedInstructionLink; readonly bytes: Uint8Array }
   | { readonly _tag: "remove"; readonly file: OwnedInstructionLink; readonly unownedBytes: Uint8Array };
 
-const currentBytes = (request: InstructionLinkRequest): Uint8Array | undefined =>
-  request.currentFile._tag === "file" ? request.currentFile.bytes : undefined;
+const readCurrentBytes = (request: InstructionLinkRequest): Uint8Array | null => {
+  const currentFile = request.currentFile;
+  const isCurrentFileExisting = currentFile._tag === "file";
+  return isCurrentFileExisting ? currentFile.bytes : null;
+};
 
 const addReference = (request: InstructionLinkRequest): InstructionLinkPlan => {
   const target = request.agent.target;
@@ -136,7 +139,7 @@ const addReference = (request: InstructionLinkRequest): InstructionLinkPlan => {
   const isPreviousFileOwned = previousFile._tag === "owned";
   const ownership = isPreviousFileOwned ? previousFile.file.ownership : null;
   const link = {
-    currentBytes: currentBytes(request),
+    currentBytes: readCurrentBytes(request),
     configPath: target.configPath,
     instructionPath: target.instructionPath,
   };
@@ -155,41 +158,47 @@ const addReference = (request: InstructionLinkRequest): InstructionLinkPlan => {
     case "yamlReadArray": {
       const isYamlOwnershipReceipted = ownership?._tag === "yamlSequenceValue";
       const previousYamlOwnership = isYamlOwnershipReceipted ? ownership : null;
-      const yamlReadEdit = editNativeConfig(() => addYamlRead({ ...link, previousOwnership: previousYamlOwnership }));
+      const yamlReadEdit = editNativeSettings(() => addYamlRead({ ...link, previousOwnership: previousYamlOwnership }));
 
       return createWritePlan(yamlReadEdit);
     }
     case "jsonRulesArray": {
-      const isJsonOwnershipReceipted = ownership?._tag === "jsonValues";
-      const previousJsonOwnership = isJsonOwnershipReceipted ? ownership : null;
-      const jsonRulesEdit = editNativeConfig(() => addJsonRule({ ...link, previousOwnership: previousJsonOwnership }));
+      const isDocumentOwnershipReceipted = ownership?._tag === "jsonValues";
+      const previousDocumentOwnership = isDocumentOwnershipReceipted ? ownership : null;
+      const documentRulesEdit = editNativeSettings(() =>
+        addDocumentRule({ ...link, previousOwnership: previousDocumentOwnership }),
+      );
 
-      return createWritePlan(jsonRulesEdit);
+      return createWritePlan(documentRulesEdit);
     }
   }
 };
 
 // Empty unowned bytes mean the file held nothing but the reference, so it may be deleted.
-const unownedBytes = (request: InstructionLinkRequest, ownership: LinkOwnership): Uint8Array => {
+const readUnownedBytes = (request: InstructionLinkRequest, ownership: LinkOwnership): Uint8Array => {
   const target = request.agent.target;
-  const bytes = currentBytes(request);
+  const bytes = readCurrentBytes(request);
 
   switch (target.referenceFormat) {
     case "yamlReadArray": {
-      const isYamlReferenceUnusable = bytes === undefined || ownership._tag !== "yamlSequenceValue";
+      const isYamlReferenceUnusable = bytes == null || ownership._tag !== "yamlSequenceValue";
       if (isYamlReferenceUnusable) {
         throw createLinkPlanError("Receipted Aider configuration is missing or incompatible.");
       }
 
-      return editNativeConfig(() => removeYamlRead({ currentBytes: bytes, configPath: target.configPath, ownership }));
+      return editNativeSettings(() =>
+        removeYamlRead({ currentBytes: bytes, configPath: target.configPath, ownership }),
+      );
     }
     case "jsonRulesArray": {
-      const isJsonReferenceUnusable = bytes === undefined || ownership._tag !== "jsonValues";
-      if (isJsonReferenceUnusable) {
+      const isDocumentReferenceUnusable = bytes == null || ownership._tag !== "jsonValues";
+      if (isDocumentReferenceUnusable) {
         throw createLinkPlanError("Receipted Continue configuration is missing or incompatible.");
       }
 
-      return editNativeConfig(() => removeJsonRule({ currentBytes: bytes, configPath: target.configPath, ownership }));
+      return editNativeSettings(() =>
+        removeDocumentRule({ currentBytes: bytes, configPath: target.configPath, ownership }),
+      );
     }
   }
 };
@@ -210,7 +219,8 @@ const planReferenceChange = (request: InstructionLinkRequest): InstructionLinkPl
   }
 
   const file = previousFile.file;
-  const bytes = unownedBytes(request, file.ownership);
+  const bytes = readUnownedBytes(request, file.ownership);
+
   const isEmptyAndNew = bytes.byteLength === 0 && !file.ownership.filePreviouslyPresent;
 
   if (isEmptyAndNew) {
@@ -220,8 +230,9 @@ const planReferenceChange = (request: InstructionLinkRequest): InstructionLinkPl
   return { _tag: "restore", file, bytes };
 };
 
-export const planInstructionLink = (input: unknown): InstructionLinkPlan => {
-  const requestCheck = instructionLinkRequestSchema.safeParse(input);
+export const planInstructionLink = (uncheckedRequest: unknown): InstructionLinkPlan => {
+  const requestCheck = instructionLinkRequestSchema.safeParse(uncheckedRequest);
+
   const isRequestAccepted = requestCheck.success;
 
   if (isRequestAccepted) {

@@ -4,4 +4,4 @@ import { z } from "zod";
 export const nonEmptyTrimmedTextSchema = z
   .string()
   .min(1)
-  .refine((text) => text === text.trim(), { message: "Text must not start or end with spaces." });
+  .refine((string) => string === string.trim(), { message: "Text must not start or end with spaces." });

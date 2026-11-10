@@ -7,15 +7,15 @@ import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { type FileSnapshot, readFileSnapshot } from "./host-files.js";
 import { readErrorMessage } from "./install-request.js";
 import type { ExpectedCurrent, FileChange, Plan, Precondition, ReceiptOperation } from "./plan.js";
-import { encodeReceiptJson } from "./receipt.js";
+import { encodeReceiptDocument } from "./receipt.js";
 import {
   createUnfinishedChangeError,
-  decodeRecoveryRecordJson,
-  encodeRecoveryRecordJson,
-  type RecoveryRecord,
+  decodeRecoveryDocument,
+  encodeRecoveryDocument,
+  type StoredRecovery,
   type TargetSnapshot,
 } from "./recovery.js";
-import { parentDirectories, validatePlanRoot, validateTarget } from "./target-paths.js";
+import { listParentDirectories, validatePlanRoot, validateTarget } from "./target-paths.js";
 
 interface PreparedFile {
   readonly operation: FileChange;
@@ -39,7 +39,7 @@ interface PreparedReceipt {
 }
 
 interface PreparedPlan {
-  // The real path of the plan root, resolved once; every target must stay inside it.
+  // The real path of the plan root, fixed once; every target must stay inside it.
   readonly root: string;
   readonly transactionRoot: string;
   readonly preparedDirectory: string;
@@ -94,7 +94,7 @@ const isAlreadyExists = (error: unknown): boolean =>
   error instanceof Error && "code" in error && error.code === "EEXIST";
 
 // Returns null when nothing is at the path, so a missing file is not an error.
-const statIfPresent = async (filePath: string): Promise<Stats | null> => {
+const readStatIfPresent = async (filePath: string): Promise<Stats | null> => {
   try {
     return await stat(filePath);
   } catch (error) {
@@ -108,7 +108,7 @@ const statIfPresent = async (filePath: string): Promise<Stats | null> => {
 };
 
 const isPathPresent = async (filePath: string): Promise<boolean> => {
-  const fileStats = await statIfPresent(filePath);
+  const fileStats = await readStatIfPresent(filePath);
 
   return fileStats != null;
 };
@@ -116,6 +116,7 @@ const isPathPresent = async (filePath: string): Promise<boolean> => {
 // The first failure stays the visible message, so the user still sees the first problem.
 const combineFailures = (failures: ReadonlyArray<unknown>): unknown => {
   const [firstFailure] = failures;
+
   const isSingleFailure = failures.length === 1;
   if (isSingleFailure) {
     return firstFailure;
@@ -150,7 +151,7 @@ const createTargetSnapshot = (targetPath: string, original: TargetSnapshot["orig
   original,
 });
 
-const createPendingRecoveryRecord = (transaction: Transaction): RecoveryRecord => ({
+const createPendingRecovery = (transaction: Transaction): StoredRecovery => ({
   _tag: "pending",
   version: 1,
   root: transaction.preparedPlan.root,
@@ -192,7 +193,7 @@ const preparePlan = (plan: Plan, root: string): PreparedPlan => {
   };
 };
 
-const preflightTargets = async (preparedPlan: PreparedPlan): Promise<void> => {
+const runPreflightTargets = async (preparedPlan: PreparedPlan): Promise<void> => {
   const targetPaths = [
     ...preparedPlan.files.map((file) => file.targetPath),
     ...preparedPlan.preconditions.map((precondition) => precondition.targetPath),
@@ -217,6 +218,7 @@ const removeTransaction = (preparedPlan: PreparedPlan): Promise<void> =>
 const captureTarget = async (root: string, target: CaptureTarget): Promise<TargetSnapshot> => {
   await validateTarget(root, target.targetPath);
   const currentSnapshot = await readFileSnapshot(target.targetPath);
+
   const isMissing = currentSnapshot._tag === "missing";
   if (isMissing) {
     return createTargetSnapshot(target.targetPath, { _tag: "missing" });
@@ -249,6 +251,7 @@ const captureTargets = async (preparedPlan: PreparedPlan): Promise<Array<TargetS
 
 const findSnapshot = (transaction: Transaction, targetPath: string): TargetSnapshot => {
   const snapshot = transaction.snapshots.find((candidate) => candidate.targetPath === targetPath);
+
   const isSnapshotMissing = snapshot == null;
   if (isSnapshotMissing) {
     throw new Error(`Transaction snapshot missing for ${targetPath}`);
@@ -257,10 +260,11 @@ const findSnapshot = (transaction: Transaction, targetPath: string): TargetSnaps
   return snapshot;
 };
 
-const ensureMatchesPlannedState = async (transaction: Transaction, target: PlannedTarget): Promise<void> => {
+const ensureHitsPlannedStatus = async (transaction: Transaction, target: PlannedTarget): Promise<void> => {
   const snapshot = findSnapshot(transaction, target.targetPath);
   const { original } = snapshot;
   const { expected } = target;
+
   const isMissingAsPlanned = expected._tag === "missing" && original._tag === "missing";
   if (isMissingAsPlanned) {
     return;
@@ -269,6 +273,7 @@ const ensureMatchesPlannedState = async (transaction: Transaction, target: Plann
   const isFileAsPlanned = expected._tag === "file" && original._tag === "file";
   if (isFileAsPlanned) {
     const capturedBytes = await readFile(original.snapshotPath);
+
     const isSameHash = hashBytes(capturedBytes) === expected.sha256;
     if (isSameHash) {
       return;
@@ -291,12 +296,13 @@ const validatePlanPreconditions = async (transaction: Transaction): Promise<void
     { targetPath: receipt.targetPath, expected: receipt.operation.expectedCurrent },
   ];
   for (const plannedTarget of plannedTargets) {
-    await ensureMatchesPlannedState(transaction, plannedTarget);
+    await ensureHitsPlannedStatus(transaction, plannedTarget);
   }
 };
 
 const prepareFile = async (file: PreparedFile): Promise<void> => {
   const { operation, preparedPath } = file;
+
   const isRemoval = operation._tag === "remove";
   if (isRemoval) {
     return;
@@ -311,16 +317,18 @@ const prepareTargets = async (preparedPlan: PreparedPlan): Promise<void> => {
   }
 
   const { operation, preparedPath } = preparedPlan.receipt;
+
   const isReceiptPublish = operation._tag === "receiptPublish";
   if (isReceiptPublish) {
-    const encodedReceipt = encodeReceiptJson(operation.receipt);
+    const encodedReceipt = encodeReceiptDocument(operation.receipt);
     await writeFile(preparedPath, encodedReceipt);
   }
 };
 
 const ensureTargetParent = async (transaction: Transaction, targetPath: string): Promise<void> => {
-  for (const directory of parentDirectories(transaction.preparedPlan.root, targetPath)) {
-    const directoryStats = await statIfPresent(directory);
+  for (const directory of listParentDirectories(transaction.preparedPlan.root, targetPath)) {
+    const directoryStats = await readStatIfPresent(directory);
+
     const isDirectory = directoryStats?.isDirectory() === true;
     if (isDirectory) {
       continue;
@@ -334,14 +342,14 @@ const ensureTargetParent = async (transaction: Transaction, targetPath: string):
 // The marker is hard-linked into place so only one concurrent transaction can publish it.
 // Returns "alreadyHeld" when another transaction already holds it.
 const publishRecoveryMarker = async (transaction: Transaction): Promise<RecoveryMarkerPublication> => {
-  const { pendingRecordPath, receipt, root } = transaction.preparedPlan;
-  const encodedRecoveryRecord = encodeRecoveryRecordJson(createPendingRecoveryRecord(transaction));
+  const { pendingRecordPath: pendingObjectPath, receipt, root } = transaction.preparedPlan;
+  const storedEncodedRecovery = encodeRecoveryDocument(createPendingRecovery(transaction));
 
-  await writeFile(pendingRecordPath, encodedRecoveryRecord, { flag: "wx", mode: 0o600 });
+  await writeFile(pendingObjectPath, storedEncodedRecovery, { flag: "wx", mode: 0o600 });
   await ensureTargetParent(transaction, receipt.recoveryPath);
   await validateTarget(root, receipt.recoveryPath);
   try {
-    await link(pendingRecordPath, receipt.recoveryPath);
+    await link(pendingObjectPath, receipt.recoveryPath);
     return "published";
   } catch (linkFailure) {
     const isHeldByAnother = isAlreadyExists(linkFailure);
@@ -354,7 +362,7 @@ const publishRecoveryMarker = async (transaction: Transaction): Promise<Recovery
 };
 
 // Returns true when this transaction published the marker. A failed attempt cleans up by what is on disk.
-const claimRecoveryMarker = async (transaction: Transaction): Promise<boolean> => {
+const createRecoveryMarker = async (transaction: Transaction): Promise<boolean> => {
   try {
     const publication = await publishRecoveryMarker(transaction);
 
@@ -368,10 +376,11 @@ const claimRecoveryMarker = async (transaction: Transaction): Promise<boolean> =
 const verifyRecoveryMarker = async (transaction: Transaction): Promise<void> => {
   const { recoveryPath } = transaction.preparedPlan.receipt;
   const encodedMarker = await readFile(recoveryPath, "utf8");
-  const recordOnDisk = decodeRecoveryRecordJson(encodedMarker);
-  const isRecordChanged =
-    encodeRecoveryRecordJson(recordOnDisk) !== encodeRecoveryRecordJson(createPendingRecoveryRecord(transaction));
-  if (isRecordChanged) {
+  const objectOnDisk = decodeRecoveryDocument(encodedMarker);
+
+  const isObjectChanged =
+    encodeRecoveryDocument(objectOnDisk) !== encodeRecoveryDocument(createPendingRecovery(transaction));
+  if (isObjectChanged) {
     throw new Error(`FileSystem.readFile: Recovery marker ${recoveryPath} changed during the transaction.`);
   }
 };
@@ -401,6 +410,7 @@ const isHoldingKnownTarget = async (current: FileSnapshot, known: KnownTarget): 
 const ensureUnchanged = async (transaction: Transaction, check: UnchangedCheck): Promise<void> => {
   await validateTarget(transaction.preparedPlan.root, check.targetPath);
   const currentSnapshot = await readFileSnapshot(check.targetPath);
+
   const isStillKnown = await isHoldingKnownTarget(currentSnapshot, check.expected);
   if (isStillKnown) {
     return;
@@ -428,7 +438,7 @@ const findCheckedSnapshot = async (transaction: Transaction, targetPath: string)
 };
 
 // Records the captured original before the target is removed, so rollback can restore it.
-const recordAndRemove = async (transaction: Transaction, snapshot: TargetSnapshot): Promise<void> => {
+const saveAndRemove = async (transaction: Transaction, snapshot: TargetSnapshot): Promise<void> => {
   transaction.mutations = [...transaction.mutations, { snapshot, current: snapshot.original }];
   await rm(snapshot.targetPath, { force: true });
   setKnownTarget(transaction, snapshot.targetPath, { _tag: "missing" });
@@ -439,7 +449,7 @@ const replaceTarget = async (transaction: Transaction, targetPath: string, prepa
   await ensureTargetParent(transaction, targetPath);
   const snapshot = await findCheckedSnapshot(transaction, targetPath);
   const preparedBytes = await prepared.readBytes();
-  await recordAndRemove(transaction, snapshot);
+  await saveAndRemove(transaction, snapshot);
   await rename(prepared.path, targetPath);
   setKnownTarget(transaction, targetPath, { _tag: "bytes", bytes: preparedBytes });
   transaction.signal.throwIfAborted();
@@ -447,7 +457,7 @@ const replaceTarget = async (transaction: Transaction, targetPath: string, prepa
 
 const removeTarget = async (transaction: Transaction, targetPath: string): Promise<void> => {
   const snapshot = await findCheckedSnapshot(transaction, targetPath);
-  await recordAndRemove(transaction, snapshot);
+  await saveAndRemove(transaction, snapshot);
   transaction.signal.throwIfAborted();
 };
 
@@ -464,6 +474,7 @@ const commitFiles = async (transaction: Transaction): Promise<void> => {
 
 const commitReceipt = async (transaction: Transaction): Promise<void> => {
   const { operation, targetPath, preparedPath } = transaction.preparedPlan.receipt;
+
   const isReceiptPublish = operation._tag === "receiptPublish";
   if (isReceiptPublish) {
     await replaceTarget(transaction, targetPath, { path: preparedPath, readBytes: () => readFile(preparedPath) });
@@ -481,6 +492,7 @@ const restoreTarget = async (transaction: Transaction, mutation: Mutation): Prom
     since: "this transaction mutated it",
   });
   await rm(targetPath, { force: true });
+
   const isFileOriginal = original._tag === "file";
   if (isFileOriginal) {
     await copyFile(original.snapshotPath, targetPath);
@@ -516,7 +528,7 @@ const removeEmptiedDirectories = async (preparedPlan: PreparedPlan): Promise<voi
   const removedPaths = [...preparedPlan.files, preparedPlan.receipt]
     .filter((target) => target.operation._tag === "remove")
     .map((target) => target.targetPath);
-  const parentLists = removedPaths.map((targetPath) => parentDirectories(preparedPlan.root, targetPath));
+  const parentLists = removedPaths.map((targetPath) => listParentDirectories(preparedPlan.root, targetPath));
   const deepestFirst = [...new Set(parentLists.flat())].sort((left, right) => right.length - left.length);
 
   await collectFailures(deepestFirst.map((directory) => () => removeEmptyDirectory(directory)));
@@ -529,29 +541,30 @@ const releaseMarker = async (transaction: Transaction): Promise<void> => {
   await removeTransaction(transaction.preparedPlan);
 };
 
-const cleanupWithoutMarker = async (transaction: Transaction): Promise<void> => {
+const runCleanupWithoutMarker = async (transaction: Transaction): Promise<void> => {
   await removeTransaction(transaction.preparedPlan);
   await removeCreatedDirectories(transaction);
 };
 
-const cleanupWithMarker = async (transaction: Transaction): Promise<void> => {
+const runCleanupWithMarker = async (transaction: Transaction): Promise<void> => {
   await releaseMarker(transaction);
   await removeCreatedDirectories(transaction);
 };
 
 // A failed or defective link may still have published the marker, so clean up by what is on disk.
-const cleanupAfterMarkerAttempt = async (transaction: Transaction): Promise<void> => {
+const runCleanupAfterMarkerAttempt = async (transaction: Transaction): Promise<void> => {
   const isMarkerOnDisk = await isPathPresent(transaction.preparedPlan.receipt.recoveryPath);
   if (isMarkerOnDisk) {
-    await cleanupWithMarker(transaction);
+    await runCleanupWithMarker(transaction);
     return;
   }
 
-  await cleanupWithoutMarker(transaction);
+  await runCleanupWithoutMarker(transaction);
 };
 
 const createFailureAfterMarkerAttempt = async (transaction: Transaction, markerFailure: unknown): Promise<unknown> => {
-  const cleanupFailures = await collectFailures([() => cleanupAfterMarkerAttempt(transaction)]);
+  const cleanupFailures = await collectFailures([() => runCleanupAfterMarkerAttempt(transaction)]);
+
   const isCleanupClean = cleanupFailures.length === 0;
   if (isCleanupClean) {
     return markerFailure;
@@ -574,9 +587,10 @@ const keepRecoveryEvidence = async (transaction: Transaction): Promise<void> => 
 // snapshots stay on disk as recovery evidence and the pending recovery location is reported.
 const createFailureAfterCommit = async (transaction: Transaction, commitFailure: unknown): Promise<unknown> => {
   const rollbackFailures = await restoreTargets(transaction);
+
   const isRollbackClean = rollbackFailures.length === 0;
   if (isRollbackClean) {
-    const cleanupFailures = await collectFailures([() => cleanupWithMarker(transaction)]);
+    const cleanupFailures = await collectFailures([() => runCleanupWithMarker(transaction)]);
 
     return combineFailures([commitFailure, ...cleanupFailures]);
   }
@@ -596,7 +610,7 @@ const createFailureAfterCommit = async (transaction: Transaction, commitFailure:
 export const applyPlan = async (plan: Plan, signal: AbortSignal): Promise<void> => {
   const root = await validatePlanRoot(plan.root);
   const preparedPlan = preparePlan(plan, root);
-  await preflightTargets(preparedPlan);
+  await runPreflightTargets(preparedPlan);
   await ensureRecoveryAbsent(preparedPlan.receipt.recoveryPath);
   const snapshots = await captureTargets(preparedPlan);
   const transaction: Transaction = { preparedPlan, snapshots, mutations: [], createdDirectories: [], signal };
@@ -612,12 +626,13 @@ export const applyPlan = async (plan: Plan, signal: AbortSignal): Promise<void> 
     throw failureAfterCleanUp;
   }
 
-  const isMarkerPublished = await claimRecoveryMarker(transaction);
+  const isMarkerPublished = await createRecoveryMarker(transaction);
+
   const isMarkerHeldByAnother = !isMarkerPublished;
   if (isMarkerHeldByAnother) {
     const unfinishedChangeError = createUnfinishedChangeError(preparedPlan.receipt.recoveryPath);
     const failureAfterCleanUp = await createFailureAfterCleanUp(unfinishedChangeError, () =>
-      cleanupWithoutMarker(transaction),
+      runCleanupWithoutMarker(transaction),
     );
     throw failureAfterCleanUp;
   }

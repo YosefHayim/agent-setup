@@ -3,10 +3,10 @@ import { z } from "zod";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { bytesEqual } from "./file-bytes.js";
 import {
+  isOwnedFilesEqual,
+  isPathsConflict,
   type Ownership,
   ownedFileSchema,
-  ownedFilesEqual,
-  pathsConflict,
   relativePathSchema,
   sha256Schema,
 } from "./ownership.js";
@@ -38,11 +38,11 @@ export const receiptTargetSchema = z.strictObject({
 
 export type ReceiptTarget = z.infer<typeof receiptTargetSchema>;
 
-const plannedFileSchema = ownedFileSchema.superRefine((file, context) => {
-  const isReceiptEntry = file.kind._tag === "receipt";
+const plannedFileSchema = ownedFileSchema.superRefine((file, scope) => {
+  const isReceiptLine = file.kind._tag === "receipt";
 
-  if (isReceiptEntry) {
-    context.addIssue({
+  if (isReceiptLine) {
+    scope.addIssue({
       code: "custom",
       path: ["kind"],
       message: "Receipt entries belong only in the separate receipt operation.",
@@ -88,12 +88,14 @@ type RestoreFields = z.infer<typeof restoreFieldsSchema>;
 
 const restoreBytesIssues = (operation: RestoreFields): ReadonlyArray<ZodIssueDetail> => {
   const { ownership } = operation.file;
+
   const isOwnedInParts = ownership._tag !== "wholeFile";
   if (isOwnedInParts) {
     return [];
   }
 
   const { previous } = ownership;
+
   const isRecordedPriorBytes = previous._tag === "priorFile" && bytesEqual(operation.bytes, previous.bytes);
   if (isRecordedPriorBytes) {
     return [];
@@ -107,23 +109,23 @@ const restoreBytesIssues = (operation: RestoreFields): ReadonlyArray<ZodIssueDet
   ];
 };
 
-const refineRestoreBytes = (operation: RestoreFields, context: z.RefinementCtx): void =>
-  addZodIssueDetails(context, restoreBytesIssues(operation));
+const pickRestoreBytes = (operation: RestoreFields, scope: z.RefinementCtx): void =>
+  addZodIssueDetails(scope, restoreBytesIssues(operation));
 
-const restoreOperationSchema = restoreFieldsSchema.superRefine(refineRestoreBytes);
+const restoreOperationSchema = restoreFieldsSchema.superRefine(pickRestoreBytes);
 
 const emptyBytesSchema = z
   .instanceof(Uint8Array)
   .refine((bytes) => bytes.byteLength === 0, { message: "File removal requires proof that no unowned bytes remain." });
 
-const ownershipAllowsRemoval = (ownership: Ownership): boolean => {
+const isOwnershipAllowsRemoval = (ownership: Ownership): boolean => {
   switch (ownership._tag) {
     case "wholeFile":
       return ownership.previous._tag === "missing";
     case "managedBlock":
       return !ownership.filePreviouslyPresent;
     case "jsonValues":
-      return !ownership.filePreviouslyPresent && ownership.values.every((value) => value.previous._tag === "missing");
+      return !ownership.filePreviouslyPresent && ownership.values.every((field) => field.previous._tag === "missing");
     case "hookEntries":
       return !ownership.filePreviouslyPresent && ownership.events.every((event) => !event.previouslyPresent);
     case "yamlSequenceValue":
@@ -141,8 +143,8 @@ const removeFieldsSchema = z.strictObject({
 
 type RemoveFields = z.infer<typeof removeFieldsSchema>;
 
-const removalOwnershipIssues = (operation: RemoveFields): ReadonlyArray<ZodIssueDetail> => {
-  const isRemovalAllowed = ownershipAllowsRemoval(operation.file.ownership);
+const listRemovalOwnershipIssues = (operation: RemoveFields): ReadonlyArray<ZodIssueDetail> => {
+  const isRemovalAllowed = isOwnershipAllowsRemoval(operation.file.ownership);
   if (isRemovalAllowed) {
     return [];
   }
@@ -155,10 +157,10 @@ const removalOwnershipIssues = (operation: RemoveFields): ReadonlyArray<ZodIssue
   ];
 };
 
-const refineRemoval = (operation: RemoveFields, context: z.RefinementCtx): void =>
-  addZodIssueDetails(context, removalOwnershipIssues(operation));
+const pickRemoval = (operation: RemoveFields, scope: z.RefinementCtx): void =>
+  addZodIssueDetails(scope, listRemovalOwnershipIssues(operation));
 
-const removeFileOperationSchema = removeFieldsSchema.superRefine(refineRemoval);
+const removeFileOperationSchema = removeFieldsSchema.superRefine(pickRemoval);
 
 const expectedCurrentShape = {
   expectedCurrent: expectedCurrentSchema.describe(
@@ -185,8 +187,8 @@ const restorationSchema = z.discriminatedUnion("_tag", [restoreOperationSchema, 
 export type Restoration = z.infer<typeof restorationSchema>;
 
 export const plannedWriteOperationSchema = writeOperationSchema.extend(expectedCurrentShape);
-const plannedRestoreOperationSchema = restoreFieldsSchema.extend(expectedCurrentShape).superRefine(refineRestoreBytes);
-const plannedRemoveOperationSchema = removeFieldsSchema.extend(expectedCurrentShape).superRefine(refineRemoval);
+const plannedRestoreOperationSchema = restoreFieldsSchema.extend(expectedCurrentShape).superRefine(pickRestoreBytes);
+const plannedRemoveOperationSchema = removeFieldsSchema.extend(expectedCurrentShape).superRefine(pickRemoval);
 
 export const plannedRestorationSchema = z.discriminatedUnion("_tag", [
   plannedRestoreOperationSchema,
@@ -210,21 +212,21 @@ const receiptOperationSchema = z.discriminatedUnion("_tag", [
 
 export type ReceiptOperation = z.infer<typeof receiptOperationSchema>;
 
-const normalizedPath = (path: string): string => path.toLowerCase();
+const readNormalizedPath = (path: string): string => path.toLowerCase();
 
-export const reservedReceiptPaths = (receiptTarget: ReceiptTarget): ReadonlyArray<string> => [
+export const listReservedReceiptPaths = (receiptTarget: ReceiptTarget): ReadonlyArray<string> => [
   receiptTarget.path,
   `${receiptTarget.path.slice(0, -receiptFilename.length)}${recoveryFilename}`,
 ];
 
-const laterConflictIssues = (operation: FileChange, index: number, operations: ReadonlyArray<FileChange>) =>
+const listLaterConflictIssues = (operation: FileChange, index: number, operations: ReadonlyArray<FileChange>) =>
   operations.slice(index + 1).flatMap((candidate, offset) => {
-    const isPathClear = !pathsConflict(operation.file.path, candidate.file.path);
+    const isPathClear = !isPathsConflict(operation.file.path, candidate.file.path);
     if (isPathClear) {
       return [];
     }
 
-    const isSamePath = normalizedPath(operation.file.path) === normalizedPath(candidate.file.path);
+    const isSamePath = readNormalizedPath(operation.file.path) === readNormalizedPath(candidate.file.path);
     const message = isSamePath
       ? "File change paths must be unique."
       : `File change path ${candidate.file.path} conflicts with ${operation.file.path}.`;
@@ -232,13 +234,17 @@ const laterConflictIssues = (operation: FileChange, index: number, operations: R
     return [{ path: ["operations", index + offset + 1, "file", "path"], message }];
   });
 
-const reservedPathIssues = (
+const listReservedPathIssues = (
   operation: FileChange,
   index: number,
   receiptTarget: ReceiptTarget,
 ): ReadonlyArray<ZodIssueDetail> => {
-  const reservedPath = reservedReceiptPaths(receiptTarget).find((path) => pathsConflict(operation.file.path, path));
-  if (reservedPath == null) {
+  const reservedPath = listReservedReceiptPaths(receiptTarget).find((path) =>
+    isPathsConflict(operation.file.path, path),
+  );
+
+  const isReservedPathMissing = reservedPath == null;
+  if (isReservedPathMissing) {
     return [];
   }
 
@@ -250,26 +256,29 @@ const reservedPathIssues = (
   ];
 };
 
-const operationPathIssues = (
+const listOperationPathIssues = (
   operations: ReadonlyArray<FileChange>,
   receiptTarget: ReceiptTarget,
 ): ReadonlyArray<ZodIssueDetail> =>
   operations.flatMap((operation, index) => [
-    ...laterConflictIssues(operation, index, operations),
-    ...reservedPathIssues(operation, index, receiptTarget),
+    ...listLaterConflictIssues(operation, index, operations),
+    ...listReservedPathIssues(operation, index, receiptTarget),
   ]);
 
-const receiptFileIssues = (receipt: Receipt, receiptTarget: ReceiptTarget): ReadonlyArray<ZodIssueDetail> =>
+const listReceiptFileIssues = (receipt: Receipt, receiptTarget: ReceiptTarget): ReadonlyArray<ZodIssueDetail> =>
   receipt.ownedFiles.flatMap((file, index) => {
     const path = ["receipt", "receipt", "ownedFiles", index];
-    const isReceiptEntry = file.kind._tag === "receipt";
-    const reservedPath = reservedReceiptPaths(receiptTarget).find((reserved) => pathsConflict(file.path, reserved));
+    const isReceiptLine = file.kind._tag === "receipt";
+    const reservedPath = listReservedReceiptPaths(receiptTarget).find((reserved) =>
+      isPathsConflict(file.path, reserved),
+    );
 
+    const isReservedPathMissing = reservedPath == null;
     return [
-      ...(isReceiptEntry
+      ...(isReceiptLine
         ? [{ path: [...path, "kind"], message: "Published receipt entries cannot contain the receipt itself." }]
         : []),
-      ...(reservedPath == null
+      ...(isReservedPathMissing
         ? []
         : [
             {
@@ -282,11 +291,11 @@ const receiptFileIssues = (receipt: Receipt, receiptTarget: ReceiptTarget): Read
 
 type PlanFields = z.infer<typeof planFieldsSchema>;
 
-const preconditionIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => [
+const listPreconditionIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => [
   ...plan.preconditions.flatMap((precondition, index) => {
     const isPathRepeated = plan.preconditions
       .slice(0, index)
-      .some((candidate) => normalizedPath(candidate.path) === normalizedPath(precondition.path));
+      .some((candidate) => readNormalizedPath(candidate.path) === readNormalizedPath(precondition.path));
     if (isPathRepeated) {
       return [
         { path: ["preconditions", index, "path"], message: `Precondition path ${precondition.path} must be unique.` },
@@ -297,7 +306,7 @@ const preconditionIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => 
   }),
   ...plan.preconditions.flatMap((precondition, index) => {
     const isMutationTarget = plan.operations.some(
-      (operation) => normalizedPath(operation.file.path) === normalizedPath(precondition.path),
+      (operation) => readNormalizedPath(operation.file.path) === readNormalizedPath(precondition.path),
     );
     if (isMutationTarget) {
       return [
@@ -321,11 +330,17 @@ const publishScopeIssues = (plan: PlanFields, publish: ReceiptPublishOperation):
   return [{ path: ["receipt", "receipt", "scope"], message: "Published receipt scope must match the plan scope." }];
 };
 
-const operationReceiptIssues = (plan: PlanFields, publish: ReceiptPublishOperation): ReadonlyArray<ZodIssueDetail> =>
+const listOperationReceiptIssues = (
+  plan: PlanFields,
+  publish: ReceiptPublishOperation,
+): ReadonlyArray<ZodIssueDetail> =>
   plan.operations.flatMap((operation, index) => {
     const receiptFile = publish.receipt.ownedFiles.find((file) => file.path === operation.file.path);
-    if (operation._tag !== "write") {
-      if (receiptFile == null) {
+
+    const isNotWriteOperation = operation._tag !== "write";
+    if (isNotWriteOperation) {
+      const isReceiptFileMissing = receiptFile == null;
+      if (isReceiptFileMissing) {
         return [];
       }
 
@@ -337,8 +352,8 @@ const operationReceiptIssues = (plan: PlanFields, publish: ReceiptPublishOperati
       ];
     }
 
-    const isExactReceiptEntry = receiptFile != null && ownedFilesEqual(operation.file, receiptFile);
-    if (isExactReceiptEntry) {
+    const isExactReceiptLine = receiptFile != null && isOwnedFilesEqual(operation.file, receiptFile);
+    if (isExactReceiptLine) {
       return [];
     }
 
@@ -350,14 +365,17 @@ const operationReceiptIssues = (plan: PlanFields, publish: ReceiptPublishOperati
     ];
   });
 
-const receiptEntryCoverageIssues = (
+const listReceiptLineCoverageIssues = (
   plan: PlanFields,
   publish: ReceiptPublishOperation,
 ): ReadonlyArray<ZodIssueDetail> =>
   publish.receipt.ownedFiles.flatMap((file, index) => {
     const isMutated = plan.operations.some((operation) => operation.file.path === file.path);
+
     const isGuarded = plan.preconditions.filter((precondition) => precondition.path === file.path).length === 1;
-    if (isMutated || isGuarded) {
+
+    const isMutatedOrGuarded = isMutated || isGuarded;
+    if (isMutatedOrGuarded) {
       return [];
     }
 
@@ -369,7 +387,10 @@ const receiptEntryCoverageIssues = (
     ];
   });
 
-const preconditionReceiptIssues = (plan: PlanFields, publish: ReceiptPublishOperation): ReadonlyArray<ZodIssueDetail> =>
+const listPreconditionReceiptIssues = (
+  plan: PlanFields,
+  publish: ReceiptPublishOperation,
+): ReadonlyArray<ZodIssueDetail> =>
   plan.preconditions.flatMap((precondition, index) => {
     const isPublished = publish.receipt.ownedFiles.some((file) => file.path === precondition.path);
     if (isPublished) {
@@ -386,34 +407,39 @@ const preconditionReceiptIssues = (plan: PlanFields, publish: ReceiptPublishOper
 
 const publishIssues = (plan: PlanFields, publish: ReceiptPublishOperation): ReadonlyArray<ZodIssueDetail> => [
   ...publishScopeIssues(plan, publish),
-  ...receiptFileIssues(publish.receipt, publish.target),
-  ...operationReceiptIssues(plan, publish),
-  ...receiptEntryCoverageIssues(plan, publish),
-  ...preconditionReceiptIssues(plan, publish),
+  ...listReceiptFileIssues(publish.receipt, publish.target),
+  ...listOperationReceiptIssues(plan, publish),
+  ...listReceiptLineCoverageIssues(plan, publish),
+  ...listPreconditionReceiptIssues(plan, publish),
 ];
 
-const removalIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => [
+const listRemovalIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => [
   ...plan.preconditions.map((_, index) => ({
     path: ["preconditions", index],
     message: "Receipt-removal plans cannot retain validation-only desired files.",
   })),
-  ...plan.operations.flatMap((operation, index) =>
-    operation._tag === "write"
+  ...plan.operations.flatMap((operation, index) => {
+    const isWriteOperation = operation._tag === "write";
+    return isWriteOperation
       ? [
           {
             path: ["operations", index, "_tag"],
             message: "A receipt-removal plan can contain only file restorations or removals.",
           },
         ]
-      : [],
-  ),
+      : [];
+  }),
 ];
 
-const planIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => [
-  ...operationPathIssues(plan.operations, plan.receipt.target),
-  ...preconditionIssues(plan),
-  ...(plan.receipt._tag === "receiptPublish" ? publishIssues(plan, plan.receipt) : removalIssues(plan)),
-];
+const planIssues = (plan: PlanFields): ReadonlyArray<ZodIssueDetail> => {
+  const receipt = plan.receipt;
+  const isReceiptPublishing = receipt._tag === "receiptPublish";
+  return [
+    ...listOperationPathIssues(plan.operations, receipt.target),
+    ...listPreconditionIssues(plan),
+    ...(isReceiptPublishing ? publishIssues(plan, receipt) : listRemovalIssues(plan)),
+  ];
+};
 
 const planFieldsSchema = z.strictObject({
   scope: scopeSchema.describe("Installation scope shared by the plan and published receipt."),
@@ -427,12 +453,13 @@ const planFieldsSchema = z.strictObject({
   receipt: receiptOperationSchema.describe("Receipt publication or removal represented separately and committed last."),
 });
 
-const planSchema = planFieldsSchema.superRefine((plan, context) => addZodIssueDetails(context, planIssues(plan)));
+const planSchema = planFieldsSchema.superRefine((plan, scope) => addZodIssueDetails(scope, planIssues(plan)));
 
 export type Plan = z.infer<typeof planSchema>;
 
 export const checkPlan = (candidatePlan: unknown): Plan => {
   const planCheck = planSchema.safeParse(candidatePlan);
+
   const isPlanAccepted = planCheck.success;
   if (isPlanAccepted) {
     return planCheck.data;

@@ -13,11 +13,11 @@ import { planRestorations } from "./restore.js";
 
 const notAbortedSignal = new AbortController().signal;
 
-const textEncoder = new TextEncoder();
+const stringEncoder = new TextEncoder();
 
 const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
 const CODEX_HOOKS_PATH = ".codex/hooks.json";
-const CONFIG_PATH = ".claude/agent-setup/config.json";
+const SETTINGS_PATH = ".claude/agent-setup/config.json";
 const RECEIPT_PATH = ".claude/agent-setup/receipt.json";
 const SCRATCH_GUARD_HOOK_PATH = ".claude/agent-setup/hooks/scratch-folder-guard/hooks/scratch-folder-guard.js";
 const MAKE_CODE_READABLE_SKILL_PATH = ".claude/skills/make-code-readable/SKILL.md";
@@ -49,7 +49,7 @@ afterEach(async () => {
   await Promise.all(directoriesToRemove.map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-const sha256 = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
+const createSha256Hex = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
 const makeTemporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
@@ -73,25 +73,26 @@ const writeFiles = async (base: string, files: Readonly<Record<string, string>>)
   }
 };
 
-const readFileContents = (root: string, relativePath: string): Promise<string> =>
+const readFileMessages = (root: string, relativePath: string): Promise<string> =>
   readFile(join(root, relativePath), "utf8");
 
 const readReceipt = async (root: string) => {
-  const receiptContents = await readFileContents(root, RECEIPT_PATH);
+  const receiptMessages = await readFileMessages(root, RECEIPT_PATH);
 
-  return JSON.parse(receiptContents);
+  return JSON.parse(receiptMessages);
 };
 
 // e.g. {"hooks":{"Stop":[{"hooks":[{"command":"node \\"/x.js\\""}]}]}} → ['node "/x.js"']
-const hookCommands = (settingsText: string): ReadonlyArray<string> =>
-  [...settingsText.matchAll(/"command"\s*:\s*("(?:[^"\\]|\\.)*")/g)].flatMap((commandMatch) =>
-    commandMatch[1] == null ? [] : [String(JSON.parse(commandMatch[1]))],
-  );
+const readHookCommands = (settingsString: string): ReadonlyArray<string> =>
+  [...settingsString.matchAll(/"command"\s*:\s*("(?:[^"\\]|\\.)*")/g)].flatMap((commandHit) => {
+    const isCommandMissing = commandHit[1] == null;
+    return isCommandMissing ? [] : [String(JSON.parse(commandHit[1]))];
+  });
 
-const installRequest = (input: { root: string; preparedRoot: string }) => ({
-  destination: { _tag: "project", root: input.root },
-  host: { homeRoot: input.root },
-  preparedPackage: { root: input.preparedRoot, version: "0.12.0" },
+const installRequest = (roots: { root: string; preparedRoot: string }) => ({
+  destination: { _tag: "project", root: roots.root },
+  host: { homeRoot: roots.root },
+  preparedPackage: { root: roots.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code"] },
   interaction: { _tag: "scripted" },
@@ -116,10 +117,10 @@ describe("install", () => {
       agents: ["claude-code"],
     });
     expect(installation.platformRequirements).toEqual([{ featureId: "scratch-folder-guard", platform: "any" }]);
-    expect(await readFileContents(root, SCRATCH_GUARD_HOOK_PATH)).toBe("export {};\n");
-    expect(JSON.parse(await readFileContents(root, CONFIG_PATH))).toEqual(defaultConfig);
+    expect(await readFileMessages(root, SCRATCH_GUARD_HOOK_PATH)).toBe("export {};\n");
+    expect(JSON.parse(await readFileMessages(root, SETTINGS_PATH))).toEqual(defaultConfig);
 
-    const settings = await readFileContents(root, CLAUDE_SETTINGS_PATH);
+    const settings = await readFileMessages(root, CLAUDE_SETTINGS_PATH);
     expect(settings).toContain('"theme": "dark"');
     expect(settings).toContain("user-command");
     expect(settings).toContain("scratch-folder-guard/hooks/scratch-folder-guard.js");
@@ -154,7 +155,7 @@ describe("install", () => {
     expect((await readReceipt(root)).features).toEqual(["scratch-folder-guard", "session-rehome"]);
     expect(existsSync(join(root, SCRATCH_GUARD_HOOK_PATH))).toBe(true);
 
-    const commands = hookCommands(await readFileContents(root, CLAUDE_SETTINGS_PATH));
+    const commands = readHookCommands(await readFileMessages(root, CLAUDE_SETTINGS_PATH));
     expect(commands.some((command) => command.includes("scratch-folder-guard/hooks/scratch-folder-guard.js"))).toBe(
       true,
     );
@@ -178,12 +179,12 @@ describe("install", () => {
       notAbortedSignal,
     );
 
-    const codex = await readFileContents(root, CODEX_HOOKS_PATH);
+    const codex = await readFileMessages(root, CODEX_HOOKS_PATH);
     expect(codex).toContain('"keep": true');
     expect(codex).toContain("user-stop");
     expect(codex).toContain("AGENT_SETUP_AGENT_ID=codex node ");
 
-    const grok = await readFileContents(root, ".grok/hooks/agent-setup.json");
+    const grok = await readFileMessages(root, ".grok/hooks/agent-setup.json");
     expect(grok).toContain("AGENT_SETUP_AGENT_ID=grok");
     expect(grok).toContain("rehome-ended-session.js");
     expect(existsSync(join(root, CLAUDE_SETTINGS_PATH))).toBe(false);
@@ -205,9 +206,9 @@ describe("install", () => {
       notAbortedSignal,
     );
 
-    expect(await readFileContents(root, CLAUDE_SETTINGS_PATH)).toContain("AGENT_SETUP_AGENT_ID=claude-code node ");
-    expect(await readFileContents(root, CODEX_HOOKS_PATH)).toContain("AGENT_SETUP_AGENT_ID=codex node ");
-    expect(await readFileContents(root, ".grok/hooks/agent-setup.json")).toContain("AGENT_SETUP_AGENT_ID=grok node ");
+    expect(await readFileMessages(root, CLAUDE_SETTINGS_PATH)).toContain("AGENT_SETUP_AGENT_ID=claude-code node ");
+    expect(await readFileMessages(root, CODEX_HOOKS_PATH)).toContain("AGENT_SETUP_AGENT_ID=codex node ");
+    expect(await readFileMessages(root, ".grok/hooks/agent-setup.json")).toContain("AGENT_SETUP_AGENT_ID=grok node ");
   });
 
   it("returns unchanged without rewriting an identical installation", async () => {
@@ -216,11 +217,11 @@ describe("install", () => {
     await writeFiles(preparedRoot, scratchFolderRuntime);
 
     await install(request, notAbortedSignal);
-    const receiptBefore = await readFileContents(root, RECEIPT_PATH);
+    const receiptBefore = await readFileMessages(root, RECEIPT_PATH);
     const installation = await install(request, notAbortedSignal);
 
     expect(installation._tag).toBe("unchanged");
-    expect(await readFileContents(root, RECEIPT_PATH)).toBe(receiptBefore);
+    expect(await readFileMessages(root, RECEIPT_PATH)).toBe(receiptBefore);
   });
 
   it("adopts a receipted skill file an external sync rewrote with the exact desired bytes", async () => {
@@ -243,14 +244,14 @@ describe("install", () => {
     const installation = await install(request, notAbortedSignal);
 
     expect(installation._tag).toBe("installed");
-    expect(await readFileContents(root, MAKE_CODE_READABLE_SKILL_PATH)).toBe(synced);
+    expect(await readFileMessages(root, MAKE_CODE_READABLE_SKILL_PATH)).toBe(synced);
 
     // The refreshed receipt must describe the adopted bytes, so the next install stays clean.
-    const adoptedSkillEntry = (await readReceipt(root)).ownedFiles.find(
+    const adoptedSkillLine = (await readReceipt(root)).ownedFiles.find(
       (file: { path: string }) => file.path === MAKE_CODE_READABLE_SKILL_PATH,
     );
     const adoptedSkillBytes = await readFile(join(root, MAKE_CODE_READABLE_SKILL_PATH));
-    expect(adoptedSkillEntry.ownership.installedHash).toBe(sha256(adoptedSkillBytes));
+    expect(adoptedSkillLine.ownership.installedHash).toBe(createSha256Hex(adoptedSkillBytes));
 
     // The next install must still succeed on the adopted bytes.
     await install(request, notAbortedSignal);
@@ -269,7 +270,7 @@ describe("install", () => {
     await writeFiles(root, { [MAKE_CODE_READABLE_SKILL_PATH]: handWritten });
 
     await expect(install(request, notAbortedSignal)).rejects.toThrow();
-    expect(await readFileContents(root, MAKE_CODE_READABLE_SKILL_PATH)).toBe(handWritten);
+    expect(await readFileMessages(root, MAKE_CODE_READABLE_SKILL_PATH)).toBe(handWritten);
   });
 
   it("plans all four native agent formats without duplicate instruction destinations", async () => {
@@ -285,16 +286,16 @@ describe("install", () => {
       notAbortedSignal,
     );
 
-    expect(await readFileContents(root, MAKE_CODE_READABLE_SKILL_PATH)).toContain("Run");
-    expect(await readFileContents(root, ".agents/skills/make-code-readable/SKILL.md")).toContain("Run");
+    expect(await readFileMessages(root, MAKE_CODE_READABLE_SKILL_PATH)).toContain("Run");
+    expect(await readFileMessages(root, ".agents/skills/make-code-readable/SKILL.md")).toContain("Run");
     expect(existsSync(join(root, ".codex/skills/make-code-readable/SKILL.md"))).toBe(false);
-    expect(await readFileContents(root, ".cursor/rules/make-code-readable.mdc")).toContain("Run the steps.");
+    expect(await readFileMessages(root, ".cursor/rules/make-code-readable.mdc")).toContain("Run the steps.");
 
-    const instructions = await readFileContents(root, AGENTS_INSTRUCTIONS_PATH);
+    const instructions = await readFileMessages(root, AGENTS_INSTRUCTIONS_PATH);
     expect(instructions.match(/<!-- agent-setup:skills start -->/g)).toHaveLength(1);
     expect(instructions).toContain("## make-code-readable");
-    expect(await readFileContents(root, ".aider.conf.yml")).toContain("AGENTS.md");
-    expect(JSON.parse(await readFileContents(root, ".continue/config.json")).rules).toEqual(["AGENTS.md"]);
+    expect(await readFileMessages(root, ".aider.conf.yml")).toContain("AGENTS.md");
+    expect(JSON.parse(await readFileMessages(root, ".continue/config.json")).rules).toEqual(["AGENTS.md"]);
 
     const instructionFiles = (await readReceipt(root)).ownedFiles.filter(
       (file: { kind: { _tag: string }; path: string }) =>
@@ -318,28 +319,28 @@ describe("install", () => {
 
     await expect(install(extraFileRequest, notAbortedSignal)).rejects.toThrow();
     expect(existsSync(join(root, RECEIPT_PATH))).toBe(false);
-    expect(existsSync(join(root, CONFIG_PATH))).toBe(false);
+    expect(existsSync(join(root, SETTINGS_PATH))).toBe(false);
   });
 
   it("copies a validated global config once into a first project installation", async () => {
     const { root: homeRoot, preparedRoot } = await createWorkspace();
     const projectRoot = await makeTemporaryDirectory("agent-setup-install-project-");
-    const globalConfig = { ...defaultConfig, sessionRehomeRoots: ["vendor"] };
-    const writeGlobalConfig = (config: object) =>
-      writeFiles(homeRoot, { [CONFIG_PATH]: `${JSON.stringify(config, null, 2)}\n` });
+    const globalSettings = { ...defaultConfig, sessionRehomeRoots: ["vendor"] };
+    const writeGlobalSettings = (globalSettings: object) =>
+      writeFiles(homeRoot, { [SETTINGS_PATH]: `${JSON.stringify(globalSettings, null, 2)}\n` });
     const request = {
       ...installRequest({ root: projectRoot, preparedRoot }),
       host: { homeRoot },
       configuration: { _tag: "automatic" },
     };
     await writeFiles(preparedRoot, scratchFolderRuntime);
-    await writeGlobalConfig(globalConfig);
+    await writeGlobalSettings(globalSettings);
 
     await install(request, notAbortedSignal);
-    await writeGlobalConfig({ ...globalConfig, sessionRehomeRoots: ["generated"] });
+    await writeGlobalSettings({ ...globalSettings, sessionRehomeRoots: ["generated"] });
     await install(request, notAbortedSignal);
 
-    expect(JSON.parse(await readFileContents(projectRoot, CONFIG_PATH))).toEqual(globalConfig);
+    expect(JSON.parse(await readFileMessages(projectRoot, SETTINGS_PATH))).toEqual(globalSettings);
   });
 
   it("uses one canonical root for inspection, writes, and generated commands", async () => {
@@ -353,7 +354,7 @@ describe("install", () => {
 
     await install(installRequest({ root: linkedRoot, preparedRoot }), notAbortedSignal);
 
-    const settings = await readFileContents(realRoot, CLAUDE_SETTINGS_PATH);
+    const settings = await readFileMessages(realRoot, CLAUDE_SETTINGS_PATH);
     expect(settings).toContain(realRoot);
     expect(settings).not.toContain(linkedRoot);
   });
@@ -363,7 +364,7 @@ describe("install", () => {
     const driftedPath = SCRATCH_GUARD_HOOK_PATH;
     const exactPath = ".claude/agent-setup/hooks/scratch-folder-guard/lib/hook-config.js";
     await writeFiles(root, { [driftedPath]: "drifted after install\n", [exactPath]: "exact\n" });
-    const wholeFile = (filePath: string, hash: string) => ({
+    const createWholeFileLine = (filePath: string, hash: string) => ({
       owner: { _tag: "application" as const },
       path: filePath,
       kind: { _tag: "runtime" as const },
@@ -373,9 +374,12 @@ describe("install", () => {
     const restorations = await planRestorations({
       root,
       files: [
-        wholeFile(driftedPath, sha256("old\n")),
-        wholeFile(".claude/agent-setup/hooks/scratch-folder-guard/lib/scratchState.js", sha256("old\n")),
-        wholeFile(exactPath, sha256("exact\n")),
+        createWholeFileLine(driftedPath, createSha256Hex("old\n")),
+        createWholeFileLine(
+          ".claude/agent-setup/hooks/scratch-folder-guard/lib/scratchState.js",
+          createSha256Hex("old\n"),
+        ),
+        createWholeFileLine(exactPath, createSha256Hex("exact\n")),
       ],
     });
 
@@ -397,8 +401,8 @@ describe("install", () => {
             kind: { _tag: "runtime" },
             ownership: {
               _tag: "wholeFile",
-              installedHash: sha256("installed\n"),
-              previous: { _tag: "priorFile", bytes: textEncoder.encode("prior\n") },
+              installedHash: createSha256Hex("installed\n"),
+              previous: { _tag: "priorFile", bytes: stringEncoder.encode("prior\n") },
             },
           },
         ],

@@ -6,40 +6,45 @@ import { findAgent } from "#src/catalog/agent-catalog.js";
 import type { FileChange } from "#src/install/plan.js";
 import { type InstructionLinkPlan, planInstructionLink } from "./instruction-link.js";
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+const stringEncoder = new TextEncoder();
+const stringDecoder = new TextDecoder();
 const aider = findAgent("aider")!;
 const continueAgent = findAgent("continue")!;
 
-const encode = (text: string): Uint8Array => textEncoder.encode(text);
+const encode = (string: string): Uint8Array => stringEncoder.encode(string);
 
-const decode = (bytes: Uint8Array): string => textDecoder.decode(bytes);
+const decode = (bytes: Uint8Array): string => stringDecoder.decode(bytes);
 
-const hashJson = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const hashDocument = (field: unknown): string => createHash("sha256").update(JSON.stringify(field)).digest("hex");
 
-type RequestInput = {
+type RequestOverrides = {
   agent?: typeof aider | typeof continueAgent;
   current?: Uint8Array | string;
   desired?: "present" | "absent";
   previousFile?: FileChange["file"];
 };
 
-const request = (input: RequestInput = {}) => ({
-  agent: input.agent || aider,
-  desired: { _tag: input.desired || "present" },
-  currentFile:
-    input.current === undefined
+const request = (overrides: RequestOverrides = {}) => {
+  const current = overrides.current;
+  const isCurrentUnset = current == null;
+  const isCurrentGivenAsString = typeof current === "string";
+  const isPreviousFileUnset = overrides.previousFile == null;
+  return {
+    agent: overrides.agent || aider,
+    desired: { _tag: overrides.desired || "present" },
+    currentFile: isCurrentUnset
       ? { _tag: "missing" }
-      : { _tag: "file", bytes: typeof input.current === "string" ? encode(input.current) : input.current },
-  previousFile: input.previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: input.previousFile },
-});
+      : { _tag: "file", bytes: isCurrentGivenAsString ? encode(current) : current },
+    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: overrides.previousFile },
+  };
+};
 
-const plan = (input?: RequestInput): InstructionLinkPlan => planInstructionLink(request(input));
+const plan = (overrides?: RequestOverrides): InstructionLinkPlan => planInstructionLink(request(overrides));
 
 // True only when planning throws an Error, which is how a rejected request shows up.
-const rejects = (input: unknown): boolean => {
+const findRejectionMessage = (uncheckedRequest: unknown): boolean => {
   try {
-    planInstructionLink(input);
+    planInstructionLink(uncheckedRequest);
 
     return false;
   } catch (error) {
@@ -47,18 +52,22 @@ const rejects = (input: unknown): boolean => {
   }
 };
 
-const write = (input?: RequestInput) => {
-  const operation = plan(input);
-  if (operation._tag !== "write") {
+const write = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
+
+  const isNotWriteOperation = operation._tag !== "write";
+  if (isNotWriteOperation) {
     throw new Error("Expected one instruction-link write.");
   }
 
   return operation;
 };
 
-const restore = (input?: RequestInput) => {
-  const operation = plan(input);
-  if (operation._tag !== "restore") {
+const restore = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
+
+  const isNotRestoreOperation = operation._tag !== "restore";
+  if (isNotRestoreOperation) {
     throw new Error("Expected one instruction-link restoration.");
   }
 
@@ -66,11 +75,11 @@ const restore = (input?: RequestInput) => {
 };
 
 // Installs the reference into `original`, then removes it again and returns the restoration.
-const roundTrip = (input: { agent?: typeof aider | typeof continueAgent; original: string }) => {
-  const installed = write({ agent: input.agent, current: input.original });
+const readAfterWrite = (readBack: { agent?: typeof aider | typeof continueAgent; original: string }) => {
+  const installed = write({ agent: readBack.agent, current: readBack.original });
 
   return restore({
-    agent: input.agent,
+    agent: readBack.agent,
     desired: "absent",
     current: installed.bytes,
     previousFile: installed.file,
@@ -84,9 +93,9 @@ describe("planInstructionLink", () => {
 
   it("plans only Aider native configuration with its exact catalog owner", () => {
     const aiderWrite = write();
-    const exactConfigKind: "instructionLink" = aiderWrite.file.kind._tag;
+    const exactSettingsKind: "instructionLink" = aiderWrite.file.kind._tag;
 
-    expectTypeOf(exactConfigKind).toEqualTypeOf<"instructionLink">();
+    expectTypeOf(exactSettingsKind).toEqualTypeOf<"instructionLink">();
     expectTypeOf(aiderWrite.file.owner._tag).toEqualTypeOf<"agent">();
     expectTypeOf(aiderWrite.file.ownership._tag).toEqualTypeOf<"jsonValues" | "yamlSequenceValue">();
     expect(aiderWrite.file.path).toBe(".aider.conf.yml");
@@ -116,7 +125,7 @@ describe("planInstructionLink", () => {
   it.each(["model: sonnet\n", "model: sonnet", "read:\n  - USER.md", "read:\r\n  - USER.md"])(
     "round-trips Aider configuration %j byte for byte",
     (original) => {
-      expect(decode(roundTrip({ original }).bytes)).toBe(original);
+      expect(decode(readAfterWrite({ original }).bytes)).toBe(original);
     },
   );
 
@@ -148,7 +157,7 @@ describe("planInstructionLink", () => {
   ])("rejects edits to %s", (_case, current) => {
     const installed = write();
 
-    expect(rejects(request({ desired: "absent", current, previousFile: installed.file }))).toBe(true);
+    expect(findRejectionMessage(request({ desired: "absent", current, previousFile: installed.file }))).toBe(true);
   });
 
   it.each(['"read":\n  - "AGENTS.md"\n', "read:\n  - AGENTS.md # user-owned\n"])(
@@ -167,16 +176,16 @@ describe("planInstructionLink", () => {
 
   it("restores the exact prior Continue rules value while preserving unrelated JSON bytes", () => {
     const original = '{ "theme" : "dark", "rules" : ["USER.md"] }\n';
-    const restoredSource = decode(roundTrip({ agent: continueAgent, original }).bytes);
+    const restoredOrigin = decode(readAfterWrite({ agent: continueAgent, original }).bytes);
 
-    expect(restoredSource.startsWith('{ "theme" : "dark", "rules" : ')).toBe(true);
-    expect(JSON.parse(restoredSource)).toEqual(JSON.parse(original));
+    expect(restoredOrigin.startsWith('{ "theme" : "dark", "rules" : ')).toBe(true);
+    expect(JSON.parse(restoredOrigin)).toEqual(JSON.parse(original));
   });
 
   it("preserves unrelated Continue JSON bytes when the rules member was initially missing", () => {
     const original = '{ "theme" : "dark" }\n';
 
-    expect(decode(roundTrip({ agent: continueAgent, original }).bytes)).toBe(original);
+    expect(decode(readAfterWrite({ agent: continueAgent, original }).bytes)).toBe(original);
   });
 
   it("adds one Continue reference without duplicating an existing one", () => {
@@ -192,10 +201,10 @@ describe("planInstructionLink", () => {
       _tag: "jsonValues",
       filePreviouslyPresent: false,
       createdContainers: [],
-      values: [
+      fields: [
         {
           pointer: "/rules",
-          installed: { _tag: "value", hash: hashJson(["AGENTS.md"]) },
+          installed: { _tag: "value", hash: hashDocument(["AGENTS.md"]) },
           previous: { _tag: "missing" },
         },
       ],
@@ -209,7 +218,7 @@ describe("planInstructionLink", () => {
     ["non-array rules", '{"rules":"AGENTS.md"}'],
     ["non-string rule", '{"rules":[1]}'],
   ])("rejects %s instead of overwriting Continue configuration", (_case, current) => {
-    expect(rejects(request({ agent: continueAgent, current }))).toBe(true);
+    expect(findRejectionMessage(request({ agent: continueAgent, current }))).toBe(true);
   });
 
   it.each([
@@ -222,55 +231,63 @@ describe("planInstructionLink", () => {
     "read: # user note",
     'read:\n  - AGENTS.md\n  - "AGENTS.md"\n',
   ])("rejects malformed or unsupported Aider YAML %j without an operation", (current) => {
-    expect(rejects(request({ current }))).toBe(true);
+    expect(findRejectionMessage(request({ current }))).toBe(true);
   });
 
   it.each([aider, continueAgent])("rejects malformed UTF-8 and a leading BOM for $id configuration", (agent) => {
-    const bomSource = agent.id === "aider" ? "read:\n  - USER.md\n" : '{"rules":["USER.md"]}\n';
+    const isAiderAgent = agent.id === "aider";
+    const bomOrigin = isAiderAgent ? "read:\n  - USER.md\n" : '{"rules":["USER.md"]}\n';
 
-    expect(rejects(request({ agent, current: new Uint8Array([255]) }))).toBe(true);
-    expect(rejects(request({ agent, current: `﻿${bomSource}` }))).toBe(true);
+    expect(findRejectionMessage(request({ agent, current: new Uint8Array([255]) }))).toBe(true);
+    expect(findRejectionMessage(request({ agent, current: `﻿${bomOrigin}` }))).toBe(true);
   });
 
   it("rejects an agent without a native instruction-link target", () => {
-    expect(rejects({ ...request(), agent: findAgent("cursor")! })).toBe(true);
+    expect(findRejectionMessage({ ...request(), agent: findAgent("cursor")! })).toBe(true);
   });
 
   it("rejects prior ownership that does not match the exact native target", () => {
     const installed = write();
     const wrongOwner = { ...installed.file, owner: { _tag: "agent", agentIds: ["continue"] } };
+
+    const isYamlSequenceOwnership = installed.file.ownership._tag === "yamlSequenceValue";
     const wrongReference = {
       ...installed.file,
-      ownership:
-        installed.file.ownership._tag === "yamlSequenceValue"
-          ? { ...installed.file.ownership, reference: "OTHER.md" }
-          : installed.file.ownership,
+      ownership: isYamlSequenceOwnership
+        ? { ...installed.file.ownership, reference: "OTHER.md" }
+        : installed.file.ownership,
     };
 
     for (const file of [wrongOwner, wrongReference]) {
-      expect(rejects({ ...request({ current: installed.bytes }), previousFile: { _tag: "owned", file } })).toBe(true);
+      expect(
+        findRejectionMessage({ ...request({ current: installed.bytes }), previousFile: { _tag: "owned", file } }),
+      ).toBe(true);
     }
   });
 
   it("rejects non-string-array Continue restoration history during update planning", () => {
     const installed = write({ agent: continueAgent });
-    if (installed.file.ownership._tag !== "jsonValues") {
+
+    const installedOwnership = installed.file.ownership;
+    const isNotJsonValuesOwnership = installedOwnership._tag !== "jsonValues";
+
+    if (isNotJsonValuesOwnership) {
       throw new Error("Expected Continue JSON ownership.");
     }
 
     const invalidHistory = {
       ...installed.file,
       ownership: {
-        ...installed.file.ownership,
-        values: installed.file.ownership.values.map((value) => ({
-          ...value,
+        ...installedOwnership,
+        values: installedOwnership.values.map((ownedValue) => ({
+          ...ownedValue,
           previous: { _tag: "value", value: { unexpected: true } },
         })),
       },
     };
 
     expect(
-      rejects({
+      findRejectionMessage({
         ...request({ agent: continueAgent, current: installed.bytes }),
         previousFile: { _tag: "owned", file: invalidHistory },
       }),
@@ -282,7 +299,7 @@ describe("planInstructionLink", () => {
     const aiderWrite = write();
 
     expect(
-      rejects(
+      findRejectionMessage(
         request({
           agent: continueAgent,
           current: '{"rules":["AGENTS.md","UNRECEIPTED.md"]}\n',
@@ -290,10 +307,12 @@ describe("planInstructionLink", () => {
         }),
       ),
     ).toBe(true);
-    expect(rejects(request({ current: "read:\n  - USER.md\n", previousFile: aiderWrite.file }))).toBe(true);
+    expect(findRejectionMessage(request({ current: "read:\n  - USER.md\n", previousFile: aiderWrite.file }))).toBe(
+      true,
+    );
   });
 
   it("strictly rejects unknown request properties", () => {
-    expect(rejects({ ...request(), unexpected: true })).toBe(true);
+    expect(findRejectionMessage({ ...request(), unexpected: true })).toBe(true);
   });
 });

@@ -50,8 +50,9 @@ const wrapAsUninstallError = (error: unknown): Error => {
   return createUninstallError(readErrorMessage(error), error);
 };
 
-const parseUninstallRequest = (input: unknown): UninstallRequest => {
-  const requestCheck = uninstallRequestSchema.safeParse(input);
+const parseUninstallRequest = (uncheckedRequest: unknown): UninstallRequest => {
+  const requestCheck = uninstallRequestSchema.safeParse(uncheckedRequest);
+
   const isRequestInvalid = !requestCheck.success;
   if (isRequestInvalid) {
     throw createUninstallError(joinZodIssueMessages(requestCheck.error));
@@ -60,14 +61,14 @@ const parseUninstallRequest = (input: unknown): UninstallRequest => {
   return requestCheck.data;
 };
 
-const uninstallSummary = (tag: UninstallSummary["_tag"], request: UninstallRequest): UninstallSummary => ({
+const readUninstallSummary = (tag: UninstallSummary["_tag"], request: UninstallRequest): UninstallSummary => ({
   _tag: tag,
   scope: request.destination._tag,
   interaction: request.interaction,
 });
 
 // A generated plan that fails its own checks is an uninstall failure, not an internal error.
-const planCheckedUninstall = (input: {
+const planCheckedUninstall = (checkedUninstall: {
   root: string;
   receipt: Receipt;
   receiptBytes: Uint8Array;
@@ -75,24 +76,24 @@ const planCheckedUninstall = (input: {
 }): Plan => {
   try {
     return planUninstall({
-      root: input.root,
-      receipt: input.receipt,
-      restorations: input.restorations,
+      root: checkedUninstall.root,
+      receipt: checkedUninstall.receipt,
+      restorations: checkedUninstall.restorations,
       receiptTarget: {
         path: receiptPath,
         kind: { _tag: "receipt" },
         owner: { _tag: "application" },
       },
-      receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(input.receiptBytes) },
+      receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(checkedUninstall.receiptBytes) },
     });
   } catch (error) {
     throw createUninstallError(`Generated uninstall plan is invalid: ${readErrorMessage(error)}`, error);
   }
 };
 
-export const uninstall = async (input: unknown, signal: AbortSignal): Promise<UninstallSummary> => {
+export const uninstall = async (uncheckedRequest: unknown, signal: AbortSignal): Promise<UninstallSummary> => {
   try {
-    const decoded = parseUninstallRequest(input);
+    const decoded = parseUninstallRequest(uncheckedRequest);
     const destinationRoot = await realpath(decoded.destination.root);
     const homeRoot = await realpath(decoded.host.homeRoot);
     const request = parseUninstallRequest({
@@ -103,9 +104,10 @@ export const uninstall = async (input: unknown, signal: AbortSignal): Promise<Un
 
     // The receipt is the only authority to remove anything, so no receipt means nothing to do.
     const receiptSnapshot = await readReceipt(path.join(request.destination.root, receiptPath));
+
     const isReceiptMissing = receiptSnapshot._tag === "missing";
     if (isReceiptMissing) {
-      return uninstallSummary("absent", request);
+      return readUninstallSummary("absent", request);
     }
 
     const isScopeMismatched = receiptSnapshot.receipt.scope !== request.destination._tag;
@@ -125,7 +127,7 @@ export const uninstall = async (input: unknown, signal: AbortSignal): Promise<Un
     });
     await applyPlan(plannedUninstall, signal);
 
-    return uninstallSummary("uninstalled", request);
+    return readUninstallSummary("uninstalled", request);
   } catch (error) {
     throw wrapAsUninstallError(error);
   }

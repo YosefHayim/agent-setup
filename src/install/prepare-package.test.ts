@@ -18,14 +18,15 @@ const packageIsBuilt = existsSync(compiledHooksRoot);
 // e.g. `from "../lib/hook-config.js"` or `import("./hook-output.js")` in a compiled runtime file
 const RELATIVE_IMPORT_PATTERN = /(?:from\s+|import\s*\(\s*)"(\.{1,2}\/[^"]+)"/g;
 
-const unresolvedRuntimeImports = (preparedRuntimeRoot: string): ReadonlyArray<string> =>
+const findUnloadableRuntimeImports = (preparedRuntimeRoot: string): ReadonlyArray<string> =>
   readdirSync(preparedRuntimeRoot, { recursive: true, encoding: "utf8" })
     .filter((relativePath) => relativePath.endsWith(".js"))
     .flatMap((relativePath) => {
       const preparedFile = path.join(preparedRuntimeRoot, relativePath);
-      const specifiers = [...readFileSync(preparedFile, "utf8").matchAll(RELATIVE_IMPORT_PATTERN)].flatMap((match) =>
-        match[1] === undefined ? [] : [match[1]],
-      );
+      const specifiers = [...readFileSync(preparedFile, "utf8").matchAll(RELATIVE_IMPORT_PATTERN)].flatMap((hit) => {
+        const isImportMissing = hit[1] === undefined;
+        return isImportMissing ? [] : [hit[1]];
+      });
       return specifiers
         .filter((specifier) => !existsSync(path.resolve(path.dirname(preparedFile), specifier)))
         .map((specifier) => `${relativePath} -> ${specifier}`);
@@ -49,7 +50,7 @@ describe("preparePackage", () => {
       expect(prepared.version).toMatch(/^\d+\.\d+\.\d+/);
 
       const preparedRuntimeRoot = path.join(prepared.root, "hooks");
-      expect(unresolvedRuntimeImports(preparedRuntimeRoot)).toEqual([]);
+      expect(findUnloadableRuntimeImports(preparedRuntimeRoot)).toEqual([]);
 
       const scratchFolderGuardRoot = path.join(preparedRuntimeRoot, "scratch-folder-guard");
       const scratchFolderGuard = path.join(scratchFolderGuardRoot, "hooks/scratch-folder-guard.js");

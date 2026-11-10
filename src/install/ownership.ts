@@ -5,7 +5,7 @@ import { addZodIssueDetails, type ZodIssueDetail } from "#src/zod-issue-messages
 import { replaceBytesWithBase64 } from "./file-bytes.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
-// e.g. "skills/make-code-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
+// e.g. "skills/make-documentString-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
 export const relativePathSchema = nonEmptyTrimmedTextSchema
   .regex(
     /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/,
@@ -19,7 +19,7 @@ export const sha256Schema = z
   .describe("Lowercase SHA-256 digest.");
 
 // e.g. "/hooks/0/command", "/a~1b" (~0/~1 escapes) — not "hooks" (relative) or "/a~2"
-export const jsonPointerSchema = z
+export const documentPointerSchema = z
   .string()
   .regex(/^(?:\/(?:[^~/]|~[01])*)+$/, "JSON pointers must be absolute RFC 6901 paths with valid escape sequences.")
   .describe("Absolute RFC 6901 pointer to one owned JSON value.");
@@ -38,54 +38,66 @@ const priorBytesSchema = z
   ])
   .describe("Original bytes decoded from their receipt-safe base64 representation.");
 
-const isJsonValue = (jsonCandidate: unknown): boolean => {
-  const isJsonPrimitive =
-    jsonCandidate === null || typeof jsonCandidate === "string" || typeof jsonCandidate === "boolean";
-  if (isJsonPrimitive) {
+const isDocumentField = (documentCandidate: unknown): boolean => {
+  const isDocumentPrimitive =
+    documentCandidate === null || typeof documentCandidate === "string" || typeof documentCandidate === "boolean";
+  if (isDocumentPrimitive) {
     return true;
   }
 
-  const isJsonNumber = typeof jsonCandidate === "number";
-  if (isJsonNumber) {
-    return Number.isFinite(jsonCandidate);
+  const isDocumentNumber = typeof documentCandidate === "number";
+  if (isDocumentNumber) {
+    return Number.isFinite(documentCandidate);
   }
 
-  if (Array.isArray(jsonCandidate)) {
-    return jsonCandidate.every(isJsonValue);
+  const isDocumentArray = Array.isArray(documentCandidate);
+  if (isDocumentArray) {
+    return documentCandidate.every(isDocumentField);
   }
 
   const isPlainObject =
-    typeof jsonCandidate === "object" &&
-    jsonCandidate !== null &&
-    Object.getPrototypeOf(jsonCandidate) === Object.prototype;
+    typeof documentCandidate === "object" &&
+    documentCandidate !== null &&
+    Object.getPrototypeOf(documentCandidate) === Object.prototype;
 
   const isNotPlainObject = !isPlainObject;
   if (isNotPlainObject) {
     return false;
   }
 
-  return Object.values(jsonCandidate).every(isJsonValue);
+  return Object.values(documentCandidate).every(isDocumentField);
 };
 
-const jsonValueSchema = z.unknown().refine(isJsonValue, "Previous JSON values must contain only JSON-compatible data.");
+const documentFieldSchema = z
+  .unknown()
+  .refine(isDocumentField, "Previous JSON values must contain only JSON-compatible data.");
 
 const hasUniqueEntries = <Entry>(entries: ReadonlyArray<Entry>): boolean => entries.length === new Set(entries).size;
 
 const knownAgentIds = new Set<string>(agentCatalog.map((agent) => agent.id));
 
-const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
+const listAgentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const unknownIndex = agentIds.findIndex((agentId) => !knownAgentIds.has(agentId));
-  if (unknownIndex >= 0) {
+
+  const hasUnknownId = unknownIndex >= 0;
+  if (hasUnknownId) {
     return [{ path: [unknownIndex], message: `Agent ownership ID ${agentIds[unknownIndex]} is unknown.` }];
   }
 
   const selectedIds = new Set(agentIds);
-  const orderedIds = agentCatalog.flatMap((agent) => (selectedIds.has(agent.id) ? [agent.id] : []));
+  const orderedIds = agentCatalog.flatMap((agent) => {
+    const isAgentSelected = selectedIds.has(agent.id);
+    return isAgentSelected ? [agent.id] : [];
+  });
+
   const mismatchIndex = agentIds.findIndex((agentId, index) => agentId !== orderedIds[index]);
-  if (mismatchIndex >= 0 || agentIds.length !== orderedIds.length) {
+
+  const hasAgentOrderMismatch = mismatchIndex >= 0 || agentIds.length !== orderedIds.length;
+  if (hasAgentOrderMismatch) {
+    const hasOrderMismatch = mismatchIndex >= 0;
     return [
       {
-        path: [mismatchIndex >= 0 ? mismatchIndex : agentIds.length],
+        path: [hasOrderMismatch ? mismatchIndex : agentIds.length],
         message: "Agent ownership IDs must use exact catalog order.",
       },
     ];
@@ -94,7 +106,7 @@ const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssu
   return [];
 };
 
-const agentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
+const listAgentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const isAgentIdsUnique = hasUniqueEntries(agentIds);
 
   const hasDuplicateAgentIds = !isAgentIdsUnique;
@@ -102,13 +114,13 @@ const agentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> 
     return [{ path: [], message: "Agent ownership IDs must be unique." }];
   }
 
-  return agentCatalogOrderIssues(agentIds);
+  return listAgentCatalogOrderIssues(agentIds);
 };
 
 const agentIdsSchema = z
   .array(agentIdSchema)
   .min(1)
-  .superRefine((agentIds, context) => addZodIssueDetails(context, agentIdsIssues(agentIds)));
+  .superRefine((agentIds, scope) => addZodIssueDetails(scope, listAgentIdsIssues(agentIds)));
 
 export const agentOwnerSchema = z.strictObject({
   _tag: z.literal("agent"),
@@ -140,41 +152,43 @@ export const fileKindSchema = z
 
 type FileKind = z.infer<typeof fileKindSchema>;
 
-export const previousFileValueSchema = z
+export const previousFileFieldSchema = z
   .discriminatedUnion("_tag", [
     z.strictObject({ _tag: z.literal("missing") }),
     z.strictObject({ _tag: z.literal("priorFile"), bytes: priorBytesSchema }),
   ])
   .describe("Original whole-file state needed for exact restoration.");
 
-export type PreviousFileValue = z.infer<typeof previousFileValueSchema>;
+export type PreviousFileValue = z.infer<typeof previousFileFieldSchema>;
 
-const previousJsonLexicalSchema = z
+const previousDocumentLexicalSchema = z
   .strictObject({
     _tag: z.literal("value"),
     source: z.string().min(1).describe("Exact JSON value token replaced while this pointer is owned."),
   })
   .describe("Exact lexical evidence needed to restore one settings value without reformatting user bytes.");
 
-export const previousJsonValueSchema = z
+export const previousDocumentFieldSchema = z
   .discriminatedUnion("_tag", [
     z.strictObject({ _tag: z.literal("missing") }),
     z.strictObject({
       _tag: z.literal("value"),
-      value: jsonValueSchema.describe("Exact JSON-compatible value present before this pointer first became owned."),
-      lexical: previousJsonLexicalSchema
+      value: documentFieldSchema.describe(
+        "Exact JSON-compatible value present before this pointer first became owned.",
+      ),
+      lexical: previousDocumentLexicalSchema
         .optional()
         .describe("Settings-only lexical evidence correlated with the previous semantic value."),
     }),
   ])
   .describe("JSON pointer state recorded before the pointer first became owned.");
 
-export type PreviousJsonValue = z.infer<typeof previousJsonValueSchema>;
+export type PreviousDocumentField = z.infer<typeof previousDocumentFieldSchema>;
 
 export const wholeFileOwnershipSchema = z.strictObject({
   _tag: z.literal("wholeFile"),
   installedHash: sha256Schema.describe("Hash of the complete installed file."),
-  previous: previousFileValueSchema,
+  previous: previousFileFieldSchema,
 });
 
 const managedBlockFieldsSchema = z.strictObject({
@@ -187,7 +201,7 @@ const managedBlockFieldsSchema = z.strictObject({
   installedBodyHash: sha256Schema.describe("Hash of the exact managed block body."),
 });
 
-const managedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSchema>): ZodIssueDetail | null => {
+const readManagedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSchema>): ZodIssueDetail | null => {
   const areMarkersDistinct = ownership.startMarker !== ownership.endMarker;
   if (areMarkersDistinct) {
     return null;
@@ -196,99 +210,101 @@ const managedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSch
   return { path: ["endMarker"], message: "Managed block markers must be distinct." };
 };
 
-export const managedBlockOwnershipSchema = managedBlockFieldsSchema.superRefine((ownership, context) =>
-  addZodIssueDetails(context, [managedBlockMarkerIssue(ownership)]),
+export const managedBlockOwnershipSchema = managedBlockFieldsSchema.superRefine((ownership, scope) =>
+  addZodIssueDetails(scope, [readManagedBlockMarkerIssue(ownership)]),
 );
 
-const installedJsonValueSchema = z
+const installedDocumentFieldSchema = z
   .strictObject({
     _tag: z.literal("value"),
     hash: sha256Schema.describe("Hash of the canonical JSON value present after installation."),
   })
   .describe("Exact installed state required before one managed JSON pointer can be restored.");
 
-export type InstalledJsonValue = z.infer<typeof installedJsonValueSchema>;
+export type InstalledDocumentField = z.infer<typeof installedDocumentFieldSchema>;
 
-const ownedJsonValueSchema = z.strictObject({
-  pointer: jsonPointerSchema,
-  installed: installedJsonValueSchema.describe("Exact hashed value state installed at this pointer."),
-  previous: previousJsonValueSchema.describe("State recorded before this JSON pointer first became owned."),
+const ownedDocumentFieldSchema = z.strictObject({
+  pointer: documentPointerSchema,
+  installed: installedDocumentFieldSchema.describe("Exact hashed value state installed at this pointer."),
+  previous: previousDocumentFieldSchema.describe("State recorded before this JSON pointer first became owned."),
 });
 
-export type OwnedJsonValue = z.infer<typeof ownedJsonValueSchema>;
+export type OwnedDocumentField = z.infer<typeof ownedDocumentFieldSchema>;
 
-const nestedOrEqual = (left: string, right: string): boolean =>
+const isNestedOrEqual = (left: string, right: string): boolean =>
   left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 
 // Owned paths compare case-insensitively so a case-folding filesystem can never hold two owners of one file.
-export const pathsConflict = (left: string, right: string): boolean =>
-  nestedOrEqual(left.toLowerCase(), right.toLowerCase());
+export const isPathsConflict = (left: string, right: string): boolean =>
+  isNestedOrEqual(left.toLowerCase(), right.toLowerCase());
 
-const pointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }>): Array<ZodIssueDetail> =>
-  owned.flatMap((ownedEntry, index) =>
+const listPointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }>): Array<ZodIssueDetail> =>
+  owned.flatMap((ownedLine, index) =>
     owned.slice(index + 1).flatMap((candidate, offset) =>
-      nestedOrEqual(ownedEntry.pointer, candidate.pointer)
+      isNestedOrEqual(ownedLine.pointer, candidate.pointer)
         ? [
             {
               path: [index + offset + 1, "pointer"],
-              message: `JSON pointer ${candidate.pointer} conflicts with ${ownedEntry.pointer}.`,
+              message: `JSON pointer ${candidate.pointer} conflicts with ${ownedLine.pointer}.`,
             },
           ]
         : [],
     ),
   );
 
-const createdContainerIssues = (ownership: {
+const listCreatedContainerIssues = (ownership: {
   readonly createdContainers: ReadonlyArray<string>;
   readonly pointers: ReadonlyArray<string>;
 }): Array<ZodIssueDetail> => [
-  ...ownership.createdContainers.flatMap((container, index) =>
-    ownership.createdContainers.indexOf(container) === index
+  ...ownership.createdContainers.flatMap((container, index) => {
+    const isFirstOccurrence = ownership.createdContainers.indexOf(container) === index;
+    return isFirstOccurrence
       ? []
-      : [{ path: ["createdContainers", index], message: `Created JSON container ${container} must be unique.` }],
-  ),
-  ...ownership.createdContainers.flatMap((container, index) =>
-    ownership.pointers.some((pointer) => pointer.startsWith(`${container}/`))
+      : [{ path: ["createdContainers", index], message: `Created JSON container ${container} must be unique.` }];
+  }),
+  ...ownership.createdContainers.flatMap((container, index) => {
+    const hasOwnedDescendant = ownership.pointers.some((pointer) => pointer.startsWith(`${container}/`));
+    return hasOwnedDescendant
       ? []
       : [
           {
             path: ["createdContainers", index],
             message: `Created JSON container ${container} must be a proper ancestor of an owned value.`,
           },
-        ],
-  ),
+        ];
+  }),
 ];
 
-const ownedJsonValuesSchema = z
-  .array(ownedJsonValueSchema)
+const ownedDocumentFieldsSchema = z
+  .array(ownedDocumentFieldSchema)
   .min(1, "JSON ownership must record at least one pointer.")
-  .superRefine((ownedValues, context) => addZodIssueDetails(context, pointerConflictIssues(ownedValues)));
+  .superRefine((ownedFields, scope) => addZodIssueDetails(scope, listPointerConflictIssues(ownedFields)));
 
-export const jsonValuesOwnershipSchema = z
+export const documentFieldsOwnershipSchema = z
   .strictObject({
     _tag: z.literal("jsonValues"),
     filePreviouslyPresent: z
       .boolean()
       .describe("Whether the host file existed before this receipt entry first managed it."),
     createdContainers: z
-      .array(jsonPointerSchema)
+      .array(documentPointerSchema)
       .describe("Exact JSON object pointers created to reach owned values and removable only when empty."),
-    values: ownedJsonValuesSchema,
+    values: ownedDocumentFieldsSchema,
   })
-  .superRefine((ownership, context) =>
+  .superRefine((ownership, scope) =>
     addZodIssueDetails(
-      context,
-      createdContainerIssues({
+      scope,
+      listCreatedContainerIssues({
         createdContainers: ownership.createdContainers,
-        pointers: ownership.values.map((ownedValue) => ownedValue.pointer),
+        pointers: ownership.values.map((ownedField) => ownedField.pointer),
       }),
     ),
   );
 
-export type JsonValuesOwnership = z.infer<typeof jsonValuesOwnershipSchema>;
+export type DocumentFieldsOwnership = z.infer<typeof documentFieldsOwnershipSchema>;
 
 const ownedHookEventSchema = z.strictObject({
-  pointer: jsonPointerSchema.regex(/^\/hooks\/[^~/]+$/, "Hook event pointers must name one /hooks/<event> array."),
+  pointer: documentPointerSchema.regex(/^\/hooks\/[^~/]+$/, "Hook event pointers must name one /hooks/<event> array."),
   previouslyPresent: z
     .boolean()
     .describe("Whether the event array existed before agent-setup first added an entry to it."),
@@ -300,31 +316,31 @@ const ownedHookEventSchema = z.strictObject({
 
 export type OwnedHookEvent = z.infer<typeof ownedHookEventSchema>;
 
-export const hookEntriesOwnershipSchema = z
+export const hookLinesOwnershipSchema = z
   .strictObject({
     _tag: z.literal("hookEntries"),
     filePreviouslyPresent: z
       .boolean()
       .describe("Whether the host file existed before this receipt entry first managed it."),
     createdContainers: z
-      .array(jsonPointerSchema)
+      .array(documentPointerSchema)
       .describe("Exact JSON object pointers created to reach owned events and removable only when empty."),
     events: z
       .array(ownedHookEventSchema)
       .min(1, "Hook entry ownership must record at least one event.")
-      .superRefine((ownedEvents, context) => addZodIssueDetails(context, pointerConflictIssues(ownedEvents))),
+      .superRefine((ownedEvents, scope) => addZodIssueDetails(scope, listPointerConflictIssues(ownedEvents))),
   })
-  .superRefine((ownership, context) =>
+  .superRefine((ownership, scope) =>
     addZodIssueDetails(
-      context,
-      createdContainerIssues({
+      scope,
+      listCreatedContainerIssues({
         createdContainers: ownership.createdContainers,
         pointers: ownership.events.map((ownedEvent) => ownedEvent.pointer),
       }),
     ),
   );
 
-export type HookEntriesOwnership = z.infer<typeof hookEntriesOwnershipSchema>;
+export type HookLinesOwnership = z.infer<typeof hookLinesOwnershipSchema>;
 
 const yamlSequenceFieldsSchema = z.strictObject({
   _tag: z.literal("yamlSequenceValue"),
@@ -346,7 +362,7 @@ const yamlSequenceFieldsSchema = z.strictObject({
 
 type YamlSequenceFields = z.infer<typeof yamlSequenceFieldsSchema>;
 
-const yamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
+const readYamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
   const isReferenceAfterKey = ownership.keyPreviouslyPresent || !ownership.previouslyPresent;
   if (isReferenceAfterKey) {
     return null;
@@ -355,7 +371,7 @@ const yamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | nul
   return { path: ["previouslyPresent"], message: "A YAML reference cannot predate a key that did not exist." };
 };
 
-const yamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
+const readYamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
   const isPrefixAllowed = !ownership.keyPreviouslyPresent || ownership.insertedPrefix.length === 0;
   if (isPrefixAllowed) {
     return null;
@@ -364,23 +380,23 @@ const yamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | nul
   return { path: ["insertedPrefix"], message: "A pre-existing YAML key cannot own an inserted key prefix." };
 };
 
-export const yamlSequenceValueOwnershipSchema = yamlSequenceFieldsSchema.superRefine((ownership, context) =>
-  addZodIssueDetails(context, [yamlReferenceIssue(ownership), yamlKeyPrefixIssue(ownership)]),
+export const yamlSequenceFieldOwnershipSchema = yamlSequenceFieldsSchema.superRefine((ownership, scope) =>
+  addZodIssueDetails(scope, [readYamlReferenceIssue(ownership), readYamlKeyPrefixIssue(ownership)]),
 );
 
-export type YamlSequenceValueOwnership = z.infer<typeof yamlSequenceValueOwnershipSchema>;
+export type YamlSequenceFieldOwnership = z.infer<typeof yamlSequenceFieldOwnershipSchema>;
 
 const ownershipSchema = z.union([
   wholeFileOwnershipSchema,
   managedBlockOwnershipSchema,
-  jsonValuesOwnershipSchema,
-  hookEntriesOwnershipSchema,
-  yamlSequenceValueOwnershipSchema,
+  documentFieldsOwnershipSchema,
+  hookLinesOwnershipSchema,
+  yamlSequenceFieldOwnershipSchema,
 ]);
 
 export type Ownership = z.infer<typeof ownershipSchema>;
 
-const ownerMatchesKind = (kind: FileKind, owner: FileOwner): boolean => {
+const isOwnerHitsKind = (kind: FileKind, owner: FileOwner): boolean => {
   switch (kind._tag) {
     case "runtime":
     case "settings":
@@ -395,7 +411,7 @@ const ownerMatchesKind = (kind: FileKind, owner: FileOwner): boolean => {
   }
 };
 
-const ownershipMatchesKind = (kind: FileKind, ownership: Ownership): boolean => {
+const isOwnershipHitsKind = (kind: FileKind, ownership: Ownership): boolean => {
   switch (kind._tag) {
     case "runtime":
     case "skill":
@@ -412,19 +428,20 @@ const ownershipMatchesKind = (kind: FileKind, ownership: Ownership): boolean => 
   }
 };
 
-const parseJsonSourceOrNull = (source: string): { readonly parsedValue: unknown } | null => {
+const parseDocumentStringOrNull = (documentString: string): { readonly parsedField: unknown } | null => {
   try {
-    return { parsedValue: JSON.parse(source) };
+    return { parsedField: JSON.parse(documentString) };
   } catch {
     // Source that is not JSON simply cannot match the value, so the caller reports it as not restorable.
     return null;
   }
 };
 
-const jsonValuesEqual = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+const isDocumentFieldsEqual = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
 
-const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
-  const previous = ownedValue.previous;
+const isLexicalHitsPrevious = (ownedField: OwnedDocumentField): boolean => {
+  const previous = ownedField.previous;
 
   const isPreviousMissing = previous._tag === "missing";
   if (isPreviousMissing) {
@@ -438,33 +455,41 @@ const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
     return false;
   }
 
-  const lexicalSource = parseJsonSourceOrNull(lexical.source);
+  const lexicalParsed = parseDocumentStringOrNull(lexical.source);
 
-  const isLexicalSourceUnparsed = lexicalSource === null;
-  if (isLexicalSourceUnparsed) {
+  const isLexicalUnparsed = lexicalParsed === null;
+  if (isLexicalUnparsed) {
     return false;
   }
 
-  const isLexicalJsonValid = jsonValueSchema.safeParse(lexicalSource.parsedValue).success;
+  const isLexicalDocumentValid = documentFieldSchema.safeParse(lexicalParsed.parsedField).success;
 
-  return isLexicalJsonValid && jsonValuesEqual(lexicalSource.parsedValue, previous.value);
+  return isLexicalDocumentValid && isDocumentFieldsEqual(lexicalParsed.parsedField, previous.value);
 };
 
-const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {
-  if (entry.ownership._tag !== "jsonValues") {
+const listSettingsLexicalIssues = (file: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {
+  const ownership = file.ownership;
+  const isNotDocumentValuesOwnership = ownership._tag !== "jsonValues";
+  if (isNotDocumentValuesOwnership) {
     return [];
   }
 
-  return entry.ownership.values.flatMap((ownedValue, index) => {
+  return ownership.values.flatMap((ownedField, index) => {
     const path = ["ownership", "values", index, "previous", "lexical"];
-    const lexical = ownedValue.previous._tag === "value" ? ownedValue.previous.lexical : null;
-    if (entry.kind._tag !== "settings") {
-      return lexical == null
+
+    const previousField = ownedField.previous;
+    const hasStoredPreviousField = previousField._tag === "value";
+    const lexical = hasStoredPreviousField ? previousField.lexical : null;
+
+    const isNotSettingsFile = file.kind._tag !== "settings";
+    if (isNotSettingsFile) {
+      const isLexicalMissing = lexical == null;
+      return isLexicalMissing
         ? []
         : [{ path, message: "Only settings ownership may carry lexical JSON restoration evidence." }];
     }
 
-    const isLexicalEvidenceMatched = ownedValue.previous._tag === "missing" || lexicalMatchesPrevious(ownedValue);
+    const isLexicalEvidenceMatched = ownedField.previous._tag === "missing" || isLexicalHitsPrevious(ownedField);
     if (isLexicalEvidenceMatched) {
       return [];
     }
@@ -473,25 +498,25 @@ const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }):
   });
 };
 
-const ownerKindIssue = (entry: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
-  if (ownerMatchesKind(entry.kind, entry.owner)) {
+const readOwnerKindIssue = (file: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
+  if (isOwnerHitsKind(file.kind, file.owner)) {
     return null;
   }
 
   return {
     path: ["owner"],
-    message: `File kind ${entry.kind._tag} has incompatible owner ${entry.owner._tag}.`,
+    message: `File kind ${file.kind._tag} has incompatible owner ${file.owner._tag}.`,
   };
 };
 
-const ownershipKindIssue = (entry: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
-  if (ownershipMatchesKind(entry.kind, entry.ownership)) {
+const readOwnershipKindIssue = (file: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
+  if (isOwnershipHitsKind(file.kind, file.ownership)) {
     return null;
   }
 
   return {
     path: ["ownership"],
-    message: `File kind ${entry.kind._tag} has incompatible ownership ${entry.ownership._tag}.`,
+    message: `File kind ${file.kind._tag} has incompatible ownership ${file.ownership._tag}.`,
   };
 };
 
@@ -502,15 +527,19 @@ export const ownedFileSchema = z
     kind: fileKindSchema,
     ownership: ownershipSchema,
   })
-  .superRefine((entry, context) =>
-    addZodIssueDetails(context, [ownerKindIssue(entry), ownershipKindIssue(entry), ...settingsLexicalIssues(entry)]),
+  .superRefine((file, scope) =>
+    addZodIssueDetails(scope, [
+      readOwnerKindIssue(file),
+      readOwnershipKindIssue(file),
+      ...listSettingsLexicalIssues(file),
+    ]),
   );
 
 export type OwnedFile = z.infer<typeof ownedFileSchema>;
 
-const stringifyOwnedFile = (file: OwnedFile): string =>
+const serializeOwnedFile = (file: OwnedFile): string =>
   JSON.stringify(ownedFileSchema.parse(file), replaceBytesWithBase64);
 
 // Compares two owned files by their canonical JSON, so key order and byte copies never matter.
-export const ownedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
-  stringifyOwnedFile(left) === stringifyOwnedFile(right);
+export const isOwnedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
+  serializeOwnedFile(left) === serializeOwnedFile(right);
