@@ -101,7 +101,7 @@ const restoreInstructionLink = (target: RestoreTarget): Either.Either<FileChange
 };
 
 const restoreRequestSchema = Schema.Struct({
-  root: absoluteRootSchema.annotations({
+  root: zodAsEffectSchema(absoluteRootSchema).annotations({
     description: "Canonical installation root containing the receipted files.",
   }),
   files: Schema.Array(zodAsEffectSchema(ownedFileSchema)).annotations({

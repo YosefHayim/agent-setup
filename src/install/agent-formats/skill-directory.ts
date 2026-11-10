@@ -1,7 +1,7 @@
-import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { z } from "zod";
 import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
 import { installedSkillSchema } from "../../catalog/feature-catalog.js";
-import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../../zod-issue-messages.js";
 import { hashBytes } from "../file-bytes.js";
 import {
   agentOwnerSchema,
@@ -12,121 +12,129 @@ import {
 } from "../ownership.js";
 import { writeOperationSchema } from "../plan.js";
 
-export class SkillDirectoryPlanError extends Schema.TaggedError<SkillDirectoryPlanError>()("SkillDirectoryPlanError", {
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable skill-directory request issue.",
-  }),
-}) {
-  get message(): string {
-    return `Cannot plan a skill directory: ${this.issue}`;
-  }
-}
+const createSkillPlanError = (issue: string): Error => new Error(`Cannot plan a skill directory: ${issue}`);
 
-type PathIssue = { path: ReadonlyArray<PropertyKey>; message: string };
-
-const underPath = (prefix: PropertyKey, issues: ReadonlyArray<PathIssue>) =>
+const underPath = (prefix: PropertyKey, issues: ReadonlyArray<ZodIssueDetail>): ReadonlyArray<ZodIssueDetail> =>
   issues.map((issue) => ({ ...issue, path: [prefix, ...issue.path] }));
 
 // Destinations may land on case-insensitive filesystems, so paths are compared lowercased.
 const normalizedPath = (path: string): string => path.toLowerCase();
 
-const duplicatePathIssues = (paths: ReadonlyArray<string>): ReadonlyArray<PathIssue> =>
-  paths.flatMap((path, index) =>
-    paths.findIndex((candidate) => normalizedPath(candidate) === normalizedPath(path)) === index
-      ? []
-      : [{ path: [index], message: `Path ${path} conflicts with an earlier case-insensitive path.` }],
-  );
+const duplicatePathIssues = (paths: ReadonlyArray<string>): ReadonlyArray<ZodIssueDetail> =>
+  paths.flatMap((path, index) => {
+    const isFirstOccurrence =
+      paths.findIndex((candidate) => normalizedPath(candidate) === normalizedPath(path)) === index;
+    if (isFirstOccurrence) {
+      return [];
+    }
 
-const parentFileIssues = (paths: ReadonlyArray<string>): ReadonlyArray<PathIssue> =>
-  paths.flatMap((path, index) =>
-    paths.some((candidate) => normalizedPath(candidate).startsWith(`${normalizedPath(path)}/`))
-      ? [{ path: [index], message: `Path ${path} cannot be both a file and directory.` }]
-      : [],
-  );
+    return [{ path: [index], message: `Path ${path} conflicts with an earlier case-insensitive path.` }];
+  });
+
+const parentFileIssues = (paths: ReadonlyArray<string>): ReadonlyArray<ZodIssueDetail> =>
+  paths.flatMap((path, index) => {
+    const hasDescendant = paths.some((candidate) => normalizedPath(candidate).startsWith(`${normalizedPath(path)}/`));
+    const isThereNoDescendant = !hasDescendant;
+    if (isThereNoDescendant) {
+      return [];
+    }
+
+    return [{ path: [index], message: `Path ${path} cannot be both a file and directory.` }];
+  });
 
 const isShippedFilePath = (path: string): boolean => /(?:^|\/)[^/]+\.[^/]+$/.test(path);
 
 const matchesShippedPath = (path: string, shippedPath: string): boolean =>
   path === shippedPath || (!isShippedFilePath(shippedPath) && path.startsWith(`${shippedPath}/`));
 
-const preparedSkillFieldsSchema = Schema.Struct({
-  installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
-    description: "Catalog-owned installed skill and its exact shipped-path allowlist.",
-  }),
-  sourceFiles: Schema.Array(
-    Schema.Struct({
-      path: zodAsEffectSchema(relativePathSchema).annotations({
-        description: "File path relative to one prepared installed-skill directory.",
-      }),
-      bytes: Schema.Uint8ArrayFromSelf.annotations({
-        description: "Exact prepared source bytes read before pure format planning.",
-      }),
-    }),
-  ).annotations({
-    description: "Complete prepared file snapshot for this installed skill.",
-  }),
+const preparedSourceFileSchema = z.strictObject({
+  path: relativePathSchema.describe("File path relative to one prepared installed-skill directory."),
+  bytes: z.instanceof(Uint8Array).describe("Exact prepared source bytes read before pure format planning."),
 });
 
-type PreparedSkillFields = Schema.Schema.Type<typeof preparedSkillFieldsSchema>;
+type PreparedSourceFile = z.infer<typeof preparedSourceFileSchema>;
 
-const shippedPathShapeIssues = (skill: PreparedSkillFields) =>
-  skill.installedSkill.shippedPaths.flatMap((shippedPath) => {
-    const rootIndex = skill.sourceFiles.findIndex((file) => normalizedPath(file.path) === normalizedPath(shippedPath));
-    const descendantIndex = skill.sourceFiles.findIndex((file) =>
-      normalizedPath(file.path).startsWith(`${normalizedPath(shippedPath)}/`),
-    );
-    const shippedPathIsFile = isShippedFilePath(shippedPath);
+const preparedSkillFieldsSchema = z.strictObject({
+  installedSkill: installedSkillSchema.describe("Catalog-owned installed skill and its exact shipped-path allowlist."),
+  sourceFiles: z.array(preparedSourceFileSchema).describe("Complete prepared file snapshot for this installed skill."),
+});
 
-    return [
-      shippedPathIsFile && descendantIndex >= 0
-        ? {
-            path: ["sourceFiles", descendantIndex, "path"],
-            message: `Shipped file path ${shippedPath} cannot be prepared as a directory.`,
-          }
-        : undefined,
-      !shippedPathIsFile && rootIndex >= 0
-        ? {
-            path: ["sourceFiles", rootIndex, "path"],
-            message: `Shipped directory root ${shippedPath} must contain prepared descendant files.`,
-          }
-        : undefined,
-    ];
-  });
+type PreparedSkillFields = z.infer<typeof preparedSkillFieldsSchema>;
 
-const preparedSkillSchema = preparedSkillFieldsSchema.pipe(
-  Schema.filter((skill) => {
-    const paths = skill.sourceFiles.map((file) => file.path);
+// A shipped file path cannot also have descendants prepared under it.
+const shippedFileWithDescendantIssue = (
+  sourceFiles: ReadonlyArray<PreparedSourceFile>,
+  shippedPath: string,
+): ZodIssueDetail | null => {
+  const isShippedFile = isShippedFilePath(shippedPath);
+  const descendantIndex = sourceFiles.findIndex((file) =>
+    normalizedPath(file.path).startsWith(`${normalizedPath(shippedPath)}/`),
+  );
+  const isThereNoIssue = !isShippedFile || descendantIndex < 0;
+  if (isThereNoIssue) {
+    return null;
+  }
 
-    return [
-      ...underPath("sourceFiles", duplicatePathIssues(paths)),
-      ...underPath("sourceFiles", parentFileIssues(paths)),
-      ...shippedPathShapeIssues(skill),
-    ];
-  }),
+  return {
+    path: ["sourceFiles", descendantIndex, "path"],
+    message: `Shipped file path ${shippedPath} cannot be prepared as a directory.`,
+  };
+};
+
+// A shipped directory root cannot also be a prepared file.
+const shippedDirectoryRootIssue = (
+  sourceFiles: ReadonlyArray<PreparedSourceFile>,
+  shippedPath: string,
+): ZodIssueDetail | null => {
+  const isShippedFile = isShippedFilePath(shippedPath);
+  const rootIndex = sourceFiles.findIndex((file) => normalizedPath(file.path) === normalizedPath(shippedPath));
+  const isThereNoIssue = isShippedFile || rootIndex < 0;
+  if (isThereNoIssue) {
+    return null;
+  }
+
+  return {
+    path: ["sourceFiles", rootIndex, "path"],
+    message: `Shipped directory root ${shippedPath} must contain prepared descendant files.`,
+  };
+};
+
+const shippedPathShapeIssues = (skill: PreparedSkillFields): ReadonlyArray<ZodIssueDetail | null> =>
+  skill.installedSkill.shippedPaths.flatMap((shippedPath) => [
+    shippedFileWithDescendantIssue(skill.sourceFiles, shippedPath),
+    shippedDirectoryRootIssue(skill.sourceFiles, shippedPath),
+  ]);
+
+const preparedSkillIssues = (skill: PreparedSkillFields): ReadonlyArray<ZodIssueDetail | null> => {
+  const paths = skill.sourceFiles.map((file) => file.path);
+
+  return [
+    ...underPath("sourceFiles", duplicatePathIssues(paths)),
+    ...underPath("sourceFiles", parentFileIssues(paths)),
+    ...shippedPathShapeIssues(skill),
+  ];
+};
+
+const preparedSkillSchema = preparedSkillFieldsSchema.superRefine((skill, context) =>
+  addZodIssueDetails(context, preparedSkillIssues(skill)),
 );
 
-const skillDirectoryRequestFieldsSchema = Schema.Struct({
-  agent: zodAsEffectSchema(agentDefinitionSchema.extend({ target: agentTargetSchema.options[0] })).annotations({
-    description: "Catalog agent whose skill-directory target receives the desired files.",
-  }),
-  skills: Schema.Array(preparedSkillSchema).annotations({
-    description: "Ordered installed skills with complete prepared source snapshots.",
-  }),
-  previousFiles: Schema.Array(
-    Schema.Struct({
-      path: zodAsEffectSchema(relativePathSchema).annotations({
-        description: "Exact desired destination whose restoration state is known.",
+const skillDirectoryRequestFieldsSchema = z.strictObject({
+  agent: agentDefinitionSchema
+    .extend({ target: agentTargetSchema.options[0] })
+    .describe("Catalog agent whose skill-directory target receives the desired files."),
+  skills: z.array(preparedSkillSchema).describe("Ordered installed skills with complete prepared source snapshots."),
+  previousFiles: z
+    .array(
+      z.strictObject({
+        path: relativePathSchema.describe("Exact desired destination whose restoration state is known."),
+        previous: previousFileValueSchema.describe("Exact file state from before this destination first became owned."),
       }),
-      previous: zodAsEffectSchema(previousFileValueSchema).annotations({
-        description: "Exact file state from before this destination first became owned.",
-      }),
-    }),
-  ).annotations({
-    description: "One exact restoration state for every desired destination.",
-  }),
+    )
+    .describe("One exact restoration state for every desired destination."),
 });
 
-type SkillDirectoryRequestFields = Schema.Schema.Type<typeof skillDirectoryRequestFieldsSchema>;
+type SkillDirectoryRequestFields = z.infer<typeof skillDirectoryRequestFieldsSchema>;
 
 const byPath = (left: { path: string }, right: { path: string }): number => {
   if (left.path === right.path) {
@@ -144,100 +152,112 @@ const selectedSourceFiles = (request: SkillDirectoryRequestFields) =>
       .map((file) => ({ destination: `${request.agent.target.path}/${installedSkill.id}/${file.path}`, source: file })),
   );
 
-const missingShippedPathIssues = (skills: ReadonlyArray<PreparedSkillFields>) =>
+const missingShippedPathIssues = (skills: ReadonlyArray<PreparedSkillFields>): ReadonlyArray<ZodIssueDetail> =>
   skills.flatMap((skill, skillIndex) =>
-    skill.installedSkill.shippedPaths.flatMap((shippedPath, shippedPathIndex) =>
-      skill.sourceFiles.some((file) => matchesShippedPath(file.path, shippedPath))
-        ? []
-        : [
-            {
-              path: ["skills", skillIndex, "installedSkill", "shippedPaths", shippedPathIndex],
-              message: `Shipped path ${shippedPath} has no prepared file or directory descendants.`,
-            },
-          ],
-    ),
+    skill.installedSkill.shippedPaths.flatMap((shippedPath, shippedPathIndex) => {
+      const hasPreparedFile = skill.sourceFiles.some((file) => matchesShippedPath(file.path, shippedPath));
+      if (hasPreparedFile) {
+        return [];
+      }
+
+      return [
+        {
+          path: ["skills", skillIndex, "installedSkill", "shippedPaths", shippedPathIndex],
+          message: `Shipped path ${shippedPath} has no prepared file or directory descendants.`,
+        },
+      ];
+    }),
   );
 
-const duplicateInstalledSkillIssues = (skills: ReadonlyArray<PreparedSkillFields>) =>
-  skills.flatMap((skill, index) =>
-    skills.findIndex((candidate) => candidate.installedSkill.id === skill.installedSkill.id) === index
-      ? []
-      : [
-          {
-            path: ["skills", index, "installedSkill", "id"],
-            message: `Installed skill ${skill.installedSkill.id} appears more than once.`,
-          },
-        ],
-  );
-
-const previousFileIssues = (request: SkillDirectoryRequestFields, desiredPaths: ReadonlyArray<string>) => [
-  ...desiredPaths.flatMap((path) =>
-    request.previousFiles.some((file) => file.path === path)
-      ? []
-      : [{ path: ["previousFiles"], message: `Desired skill file ${path} requires one exact previous-file state.` }],
-  ),
-  ...request.previousFiles.flatMap((file, index) =>
-    desiredPaths.includes(file.path)
-      ? []
-      : [
-          {
-            path: ["previousFiles", index, "path"],
-            message: `Previous-file state ${file.path} does not belong to a desired skill file.`,
-          },
-        ],
-  ),
-];
-
-const skillDirectoryRequestSchema = skillDirectoryRequestFieldsSchema.pipe(
-  Schema.filter((request) => {
-    const desiredPaths = selectedSourceFiles(request).map((file) => file.destination);
+const duplicateInstalledSkillIssues = (skills: ReadonlyArray<PreparedSkillFields>): ReadonlyArray<ZodIssueDetail> =>
+  skills.flatMap((skill, index) => {
+    const isFirstOccurrence =
+      skills.findIndex((candidate) => candidate.installedSkill.id === skill.installedSkill.id) === index;
+    if (isFirstOccurrence) {
+      return [];
+    }
 
     return [
-      ...duplicateInstalledSkillIssues(request.skills),
-      ...missingShippedPathIssues(request.skills),
-      ...underPath("previousFiles", duplicatePathIssues(request.previousFiles.map((file) => file.path))),
-      ...underPath("skills", duplicatePathIssues(desiredPaths)),
-      ...previousFileIssues(request, desiredPaths),
+      {
+        path: ["skills", index, "installedSkill", "id"],
+        message: `Installed skill ${skill.installedSkill.id} appears more than once.`,
+      },
+    ];
+  });
+
+const previousFileIssues = (
+  request: SkillDirectoryRequestFields,
+  desiredPaths: ReadonlyArray<string>,
+): ReadonlyArray<ZodIssueDetail> => [
+  ...desiredPaths.flatMap((path) => {
+    const hasPreviousState = request.previousFiles.some((file) => file.path === path);
+    if (hasPreviousState) {
+      return [];
+    }
+
+    return [{ path: ["previousFiles"], message: `Desired skill file ${path} requires one exact previous-file state.` }];
+  }),
+  ...request.previousFiles.flatMap((file, index) => {
+    const isDesiredPath = desiredPaths.includes(file.path);
+    if (isDesiredPath) {
+      return [];
+    }
+
+    return [
+      {
+        path: ["previousFiles", index, "path"],
+        message: `Previous-file state ${file.path} does not belong to a desired skill file.`,
+      },
     ];
   }),
+];
+
+const skillDirectoryRequestIssues = (request: SkillDirectoryRequestFields): ReadonlyArray<ZodIssueDetail | null> => {
+  const desiredPaths = selectedSourceFiles(request).map((file) => file.destination);
+
+  return [
+    ...duplicateInstalledSkillIssues(request.skills),
+    ...missingShippedPathIssues(request.skills),
+    ...underPath("previousFiles", duplicatePathIssues(request.previousFiles.map((file) => file.path))),
+    ...underPath("skills", duplicatePathIssues(desiredPaths)),
+    ...previousFileIssues(request, desiredPaths),
+  ];
+};
+
+const skillDirectoryRequestSchema = skillDirectoryRequestFieldsSchema.superRefine((request, context) =>
+  addZodIssueDetails(context, skillDirectoryRequestIssues(request)),
 );
 
-type SkillDirectoryRequest = Schema.Schema.Type<typeof skillDirectoryRequestSchema>;
+type SkillDirectoryRequest = z.infer<typeof skillDirectoryRequestSchema>;
 
-const skillWriteSchema = Schema.TaggedStruct("write", {
-  file: Schema.Struct({
-    owner: zodAsEffectSchema(agentOwnerSchema),
-    path: zodAsEffectSchema(relativePathSchema),
-    kind: zodAsEffectSchema(fileKindSchema.options[1]),
-    ownership: zodAsEffectSchema(wholeFileOwnershipSchema),
+const skillWriteSchema = z.strictObject({
+  _tag: z.literal("write"),
+  file: z.strictObject({
+    owner: agentOwnerSchema,
+    path: relativePathSchema,
+    kind: fileKindSchema.options[1],
+    ownership: wholeFileOwnershipSchema,
   }),
-  bytes: writeOperationSchema.fields.bytes,
+  bytes: writeOperationSchema.shape.bytes,
 });
 
-type SkillWrite = Schema.Schema.Type<typeof skillWriteSchema>;
+type SkillWrite = z.infer<typeof skillWriteSchema>;
 
-const skillDirectoryPlanSchema = Schema.Struct({
-  writes: Schema.Array(skillWriteSchema).annotations({
-    description: "Exact desired skill-file writes with matching whole-file ownership.",
-  }),
-});
-
-export type SkillDirectoryPlan = Schema.Schema.Type<typeof skillDirectoryPlanSchema>;
+// Ordered desired skill-file writes, each with matching whole-file ownership.
+export type SkillDirectoryPlan = { writes: SkillWrite[] };
 
 const createSkillWrite = (
   request: SkillDirectoryRequest,
   file: { destination: string; source: { bytes: Uint8Array } },
-): Either.Either<SkillWrite, SkillDirectoryPlanError> => {
+): SkillWrite => {
   const previous = request.previousFiles.find((candidate) => candidate.path === file.destination);
-  if (previous === undefined) {
-    return Either.left(
-      new SkillDirectoryPlanError({ issue: `Missing previous-file state for desired skill file ${file.destination}.` }),
-    );
+  if (previous == null) {
+    throw createSkillPlanError(`Missing previous-file state for desired skill file ${file.destination}.`);
   }
 
   const bytes = file.source.bytes;
 
-  return Either.right({
+  return {
     _tag: "write",
     file: {
       owner: { _tag: "agent", agentIds: [request.agent.id] },
@@ -246,20 +266,18 @@ const createSkillWrite = (
       ownership: { _tag: "wholeFile", installedHash: hashBytes(bytes), previous: previous.previous },
     },
     bytes,
-  });
+  };
 };
 
-const toPlanError = (error: SchemaParseIssue.ParseError) =>
-  new SkillDirectoryPlanError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) });
-
 // Plan one skill-directory target without I/O: every shipped file becomes one whole-file write.
-export const planSkillDirectory = (input: unknown): Either.Either<SkillDirectoryPlan, SkillDirectoryPlanError> =>
-  Either.mapLeft(
-    Schema.decodeUnknownEither(skillDirectoryRequestSchema, { onExcessProperty: "error" })(input),
-    toPlanError,
-  ).pipe(
-    Either.flatMap((request) =>
-      Either.all(selectedSourceFiles(request).map((file) => createSkillWrite(request, file))),
-    ),
-    Either.map((writes) => ({ writes })),
-  );
+export const planSkillDirectory = (candidateRequest: unknown): SkillDirectoryPlan => {
+  const requestCheck = skillDirectoryRequestSchema.safeParse(candidateRequest);
+  const isRequestAccepted = requestCheck.success;
+  if (isRequestAccepted) {
+    const request = requestCheck.data;
+
+    return { writes: selectedSourceFiles(request).map((file) => createSkillWrite(request, file)) };
+  }
+
+  throw createSkillPlanError(joinZodIssueMessages(requestCheck.error));
+};

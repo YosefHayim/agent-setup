@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { Either, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { findAgent } from "../../catalog/agent-catalog.js";
 import { featureCatalog, findFeature } from "../../catalog/feature-catalog.js";
 import type { PreviousFileValue } from "../ownership.js";
-import { planSkillDirectory, type SkillDirectoryPlan, SkillDirectoryPlanError } from "./skill-directory.js";
+import { planSkillDirectory, type SkillDirectoryPlan } from "./skill-directory.js";
 
 const textEncoder = new TextEncoder();
 const claudeAgent = findAgent("claude-code")!;
@@ -44,26 +43,29 @@ const request = () => ({
   previousFiles: previousFiles(),
 });
 
-const unwrap = (skillInstallation: Either.Either<SkillDirectoryPlan, SkillDirectoryPlanError>): SkillDirectoryPlan =>
-  Either.getOrThrowWith(skillInstallation, (error) => new Error(error.message));
-
-const writeAt = (plan: SkillDirectoryPlan, path: string) =>
-  Option.getOrThrow(Option.fromNullable(plan.writes.find((write) => write.file.path === path)));
-
-const errorMessage = (input: unknown): string => {
-  const skillInstallation = planSkillDirectory(input);
-  if (Either.isRight(skillInstallation)) {
-    throw new Error("Expected skill-directory planning to fail.");
+const writeAt = (plan: SkillDirectoryPlan, path: string) => {
+  const write = plan.writes.find((candidate) => candidate.file.path === path);
+  const isThereNoWrite = write == null;
+  if (isThereNoWrite) {
+    throw new Error(`No planned write at ${path}.`);
   }
 
-  expect(skillInstallation.left).toBeInstanceOf(SkillDirectoryPlanError);
+  return write;
+};
 
-  return skillInstallation.left.message;
+const errorMessage = (input: unknown): string => {
+  try {
+    planSkillDirectory(input);
+  } catch (error) {
+    return String(error);
+  }
+
+  throw new Error("Expected skill-directory planning to fail.");
 };
 
 describe("planSkillDirectory", () => {
   it("copies only exact shipped paths and every file below an allowed directory", () => {
-    const plan = unwrap(planSkillDirectory(request()));
+    const plan = planSkillDirectory(request());
 
     expect(plan.writes.map((write) => write.file.path)).toEqual([skillPath, binaryPath, guidePath, plainPath]);
     expect(plan.writes.some((write) => write.file.path.includes("PRIVATE"))).toBe(false);
@@ -99,13 +101,13 @@ describe("planSkillDirectory", () => {
       previousFiles: expectedPaths.map((path) => ({ path, previous: missingPrevious })),
     };
 
-    const plan = unwrap(planSkillDirectory(catalogRequest));
+    const plan = planSkillDirectory(catalogRequest);
 
     expect(plan.writes.map((write) => write.file.path)).toEqual(expectedPaths);
   });
 
   it("returns whole-file ownership with matching hashes and exact previous states", () => {
-    const plan = unwrap(planSkillDirectory(request()));
+    const plan = planSkillDirectory(request());
     const skillWrite = writeAt(plan, skillPath);
 
     expect(skillWrite.file).toMatchObject({
@@ -196,6 +198,6 @@ describe("planSkillDirectory", () => {
   });
 
   it("strictly rejects unknown request properties", () => {
-    expect(Either.isLeft(planSkillDirectory({ ...request(), unexpected: true }))).toBe(true);
+    expect(() => planSkillDirectory({ ...request(), unexpected: true })).toThrow();
   });
 });

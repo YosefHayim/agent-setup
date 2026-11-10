@@ -2,6 +2,7 @@
 
 import { Schema } from "effect";
 
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { absoluteRootSchema } from "./plan.js";
 
 export const receiptPath = ".claude/agent-setup/receipt.json";
@@ -12,7 +13,7 @@ export const hooksPath = ".claude/agent-setup/hooks";
 const isUnsafeRootCharacter = (character: string): boolean =>
   '"`$\\'.includes(character) || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127;
 
-const installationRootSchema = absoluteRootSchema.pipe(
+const installationRootSchema = zodAsEffectSchema(absoluteRootSchema).pipe(
   Schema.filter((root) => !Array.from(root).some(isUnsafeRootCharacter), {
     message: () => "Installation roots must not contain shell-expanding or control characters.",
   }),

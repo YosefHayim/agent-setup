@@ -11,7 +11,9 @@ import * as TerminalUI from "./terminal-ui.js";
 
 export const workflowTemplateDirectory = Effect.gen(function* () {
   const path = yield* Path.Path;
-  return path.join(yield* findPackageRoot, "src", "templates", "workflows");
+  const packageRoot = yield* Effect.tryPromise({ try: findPackageRoot, catch: (error) => error });
+
+  return path.join(packageRoot, "src", "templates", "workflows");
 });
 
 export const showCopiedWorkflows = (copiedWorkflows: {

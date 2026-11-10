@@ -6,7 +6,7 @@ import type { PlatformError } from "@effect/platform/Error";
 import { Effect, Schema } from "effect";
 
 import { featureCatalog } from "../catalog/feature-catalog.js";
-import type { preparedPackageSchema } from "./install-request.js";
+import { errorMessage, type preparedPackageSchema } from "./install-request.js";
 import { findPackageRoot, readPackageVersion } from "./package-root.js";
 
 class PreparePackageError extends Schema.TaggedError<PreparePackageError>()("PreparePackageError", {
@@ -157,7 +157,10 @@ const copySkillFeature = (input: {
 export const preparePackage = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const packageRoot = yield* findPackageRoot;
+  const packageRoot = yield* Effect.tryPromise({
+    try: findPackageRoot,
+    catch: (error) => new PreparePackageError({ issue: errorMessage(error) }),
+  });
   const compiledHooksRoot = path.join(packageRoot, "dist", "src", "hooks");
   if (!(yield* fileSystem.exists(compiledHooksRoot))) {
     return yield* new PreparePackageError({
@@ -165,7 +168,10 @@ export const preparePackage = Effect.gen(function* () {
     });
   }
 
-  const version = yield* readPackageVersion;
+  const version = yield* Effect.tryPromise({
+    try: readPackageVersion,
+    catch: (error) => new PreparePackageError({ issue: errorMessage(error) }),
+  });
   const preparedRoot = path.join(packageRoot, "dist", "prepared");
   yield* fileSystem.remove(preparedRoot, { recursive: true }).pipe(Effect.catchAll(() => Effect.void));
   yield* fileSystem.makeDirectory(path.join(preparedRoot, "hooks"), { recursive: true });

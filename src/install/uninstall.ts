@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";
@@ -52,7 +52,7 @@ const toUninstallError = (error: unknown): UninstallError => {
 
 const decodeUninstallRequest = (input: unknown) =>
   Schema.decodeUnknown(uninstallRequestSchema, { onExcessProperty: "error" })(input).pipe(
-    Effect.mapError((error) => new UninstallError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) })),
+    Effect.mapError((error) => new UninstallError({ issue: ParseResult.TreeFormatter.formatErrorSync(error) })),
   );
 
 const uninstallSummary = (tag: UninstallSummary["_tag"], request: UninstallRequest): UninstallSummary => ({
@@ -88,24 +88,23 @@ export const uninstall = (input: unknown) =>
       root: request.destination.root,
       files: receiptSnapshot.receipt.ownedFiles,
     });
-    const plannedUninstall = planUninstall({
-      root: request.destination.root,
-      receipt: receiptSnapshot.receipt,
-      restorations,
-      receiptTarget: {
-        path: receiptPath,
-        kind: { _tag: "receipt" },
-        owner: { _tag: "application" },
-      },
-      receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
+    const plannedUninstall = yield* Effect.try({
+      try: () =>
+        planUninstall({
+          root: request.destination.root,
+          receipt: receiptSnapshot.receipt,
+          restorations,
+          receiptTarget: {
+            path: receiptPath,
+            kind: { _tag: "receipt" },
+            owner: { _tag: "application" },
+          },
+          receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
+        }),
+      catch: (error) => new UninstallError({ issue: `Generated uninstall plan is invalid: ${errorMessage(error)}` }),
     });
-    if (Either.isLeft(plannedUninstall)) {
-      return yield* new UninstallError({
-        issue: `Generated uninstall plan is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(plannedUninstall.left)}`,
-      });
-    }
 
-    yield* applyPlan(plannedUninstall.right);
+    yield* applyPlan(plannedUninstall);
 
     return uninstallSummary("uninstalled", request);
   }).pipe(Effect.mapError(toUninstallError));
