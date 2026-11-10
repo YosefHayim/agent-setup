@@ -201,7 +201,7 @@ describe("planInstructionLink", () => {
       _tag: "jsonValues",
       filePreviouslyPresent: false,
       createdContainers: [],
-      fields: [
+      values: [
         {
           pointer: "/rules",
           installed: { _tag: "value", hash: hashDocument(["AGENTS.md"]) },
