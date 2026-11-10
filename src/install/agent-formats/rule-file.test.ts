@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { Either, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { findAgent } from "../../catalog/agent-catalog.js";
@@ -44,17 +43,21 @@ const ruleFileRequest = {
   ],
 };
 
-const unwrap = <Right, Left>(ruleMerge: Either.Either<Right, Left>): Right =>
-  Either.getOrThrowWith(ruleMerge, (error) => new Error(String(error)));
-
 const hashBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
-const writeAt = <Write>(plan: { writes: ReadonlyArray<Write> }, index: number): Write =>
-  Option.getOrThrow(Option.fromNullable(plan.writes.at(index)));
+const writeAt = <Write>(plan: { writes: ReadonlyArray<Write> }, index: number): Write => {
+  const write = plan.writes.at(index);
+  const isThereNoWrite = write == null;
+  if (isThereNoWrite) {
+    throw new Error(`No planned write at index ${index}.`);
+  }
+
+  return write;
+};
 
 describe("planRuleFiles", () => {
   it("plans one ordered rule write per installed skill with exact ownership", () => {
-    const plan = unwrap(planRuleFiles(ruleFileRequest));
+    const plan = planRuleFiles(ruleFileRequest);
 
     expect(plan.writes.map((write) => write.file.path)).toEqual([
       ".cursor/rules/make-code-readable.mdc",
@@ -94,7 +97,7 @@ describe("planRuleFiles", () => {
       previousFiles: [{ path: ".cursor/rules/make-code-readable.mdc", previous: missingPrevious }],
     };
 
-    const plan = unwrap(planRuleFiles(request));
+    const plan = planRuleFiles(request);
     const write = writeAt(plan, 0);
 
     expect(textDecoder.decode(write.bytes)).toBe("\r\n  Run the steps.\r\n");
@@ -176,21 +179,15 @@ describe("planRuleFiles", () => {
       issue: "unexpected",
     },
   ])("rejects $name", ({ request, issue }) => {
-    const ruleMerge = planRuleFiles(request);
-
-    expect(Either.isLeft(ruleMerge)).toBe(true);
-    expect(String(Option.getOrThrow(Either.getLeft(ruleMerge)))).toContain(issue);
+    expect(() => planRuleFiles(request)).toThrow(issue);
   });
 
   it("strictly rejects unknown nested request properties", () => {
-    const ruleMerge = Schema.decodeUnknownEither(ruleFileRequestSchema, {
-      onExcessProperty: "error",
-    })({
-      ...ruleFileRequest,
-      skills: [{ ...ruleFileRequest.skills[0], unexpected: true }],
-    });
-
-    expect(Either.isLeft(ruleMerge)).toBe(true);
-    expect(String(Option.getOrThrow(Either.getLeft(ruleMerge)))).toContain("unexpected");
+    expect(() =>
+      ruleFileRequestSchema.parse({
+        ...ruleFileRequest,
+        skills: [{ ...ruleFileRequest.skills[0], unexpected: true }],
+      }),
+    ).toThrow("unexpected");
   });
 });

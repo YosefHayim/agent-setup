@@ -66,7 +66,7 @@ export const configurationChoiceSchema = Schema.Union(
 });
 
 export const preparedPackageSchema = Schema.Struct({
-  root: absoluteRootSchema.annotations({
+  root: zodAsEffectSchema(absoluteRootSchema).annotations({
     description: "Absolute prepared dist root containing only verified skills and runtime files.",
   }),
   version: zodAsEffectSchema(versionSchema).annotations({

@@ -324,16 +324,20 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       features: featureIds,
       ownedFiles: writes.map((write) => write.file),
     };
-    const plan = yield* planInstall({
-      root: request.destination.root,
-      previous: previousReceipt === undefined ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
-      restorations,
-      desired: { receipt, writes },
-      receiptTarget,
-      receiptExpectedCurrent:
-        receiptSnapshot._tag === "missing"
-          ? { _tag: "missing" }
-          : { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
+    const plan = yield* Effect.try({
+      try: () =>
+        planInstall({
+          root: request.destination.root,
+          previous: previousReceipt === undefined ? { _tag: "missing" } : { _tag: "receipt", receipt: previousReceipt },
+          restorations,
+          desired: { receipt, writes },
+          receiptTarget,
+          receiptExpectedCurrent:
+            receiptSnapshot._tag === "missing"
+              ? { _tag: "missing" }
+              : { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
+        }),
+      catch: toInstallError,
     });
 
     const unchanged =

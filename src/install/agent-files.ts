@@ -83,14 +83,15 @@ const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
         ),
       ),
     );
-    const plan = yield* Either.mapLeft(
-      planSkillDirectory({
-        agent: input.agent,
-        skills: input.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
-        previousFiles: files.map(({ path, previous }) => ({ path, previous })),
-      }),
-      toInstallError,
-    );
+    const plan = yield* Effect.try({
+      try: () =>
+        planSkillDirectory({
+          agent: input.agent,
+          skills: input.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
+          previousFiles: files.map(({ path, previous }) => ({ path, previous })),
+        }),
+      catch: toInstallError,
+    });
 
     return yield* withExpectedCurrent(plan.writes, files);
   });
@@ -111,14 +112,15 @@ const createRuleFileWrites = (input: FormatWritesRequest) =>
         ]),
       ),
     );
-    const plan = yield* Either.mapLeft(
-      planRuleFiles({
-        agent: input.agent,
-        skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
-        previousFiles: files.map(({ path, previous }) => ({ path, previous })),
-      }),
-      toInstallError,
-    );
+    const plan = yield* Effect.try({
+      try: () =>
+        planRuleFiles({
+          agent: input.agent,
+          skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
+          previousFiles: files.map(({ path, previous }) => ({ path, previous })),
+        }),
+      catch: toInstallError,
+    });
 
     return yield* withExpectedCurrent(plan.writes, files);
   });

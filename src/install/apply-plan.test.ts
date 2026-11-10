@@ -4,7 +4,7 @@ import { FileSystem, Path } from "@effect/platform";
 import { type PlatformError, SystemError } from "@effect/platform/Error";
 import { NodeContext, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it, layer } from "@effect/vitest";
-import { Cause, Deferred, Effect, Either, Exit, Fiber, Layer, Ref } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect";
 
 import { applyPlan } from "./apply-plan.js";
 import { checkPlan, type ExpectedCurrent, type Plan } from "./plan.js";
@@ -31,9 +31,6 @@ const expectedFile = (bytes: Uint8Array): ExpectedCurrent => ({
   sha256: createHash("sha256").update(bytes).digest("hex"),
 });
 
-const unwrapPlan = (input: unknown): Plan =>
-  Either.getOrThrowWith(checkPlan(input), (error) => new Error(String(error)));
-
 const configFile = (path: string, previous: object = { _tag: "missing" }) => ({
   path,
   kind: { _tag: "managedConfig" },
@@ -57,7 +54,7 @@ type WritePlanRequest = {
 const writePlan = (root: string, { files, receipt = expectedMissing }: WritePlanRequest): Plan => {
   const planned = Object.entries(files).map(([path, expectedCurrent]) => ({ file: configFile(path), expectedCurrent }));
 
-  return unwrapPlan({
+  return checkPlan({
     scope: "project",
     root,
     operations: planned.map(({ file, expectedCurrent }) => ({
@@ -79,7 +76,7 @@ const writePlan = (root: string, { files, receipt = expectedMissing }: WritePlan
 const missingFiles = (paths: ReadonlyArray<string>) => Object.fromEntries(paths.map((path) => [path, expectedMissing]));
 
 const receiptRemovalPlan = (root: string, expectedCurrent: ExpectedCurrent): Plan =>
-  unwrapPlan({
+  checkPlan({
     scope: "project",
     root,
     operations: [],
@@ -300,7 +297,7 @@ layer(NodeContext.layer)("applyPlan", (it) => {
       const plan = receiptRemovalPlan(workspace.root, expectedFile(inspectedReceiptBytes));
       yield* workspace.seed({ [receiptFile]: changedReceiptBytes });
 
-      yield* expectFailure(applyPlan(unwrapPlan(JSON.parse(JSON.stringify(plan)))));
+      yield* expectFailure(applyPlan(checkPlan(JSON.parse(JSON.stringify(plan)))));
 
       yield* workspace.expectBytes(receiptFile, changedReceiptBytes);
     }),
@@ -311,7 +308,7 @@ layer(NodeContext.layer)("applyPlan", (it) => {
       const workspace = yield* makeWorkspace;
       const stableFile = configFile("stable.txt");
       const changedFile = configFile("changed.txt");
-      const plan = unwrapPlan({
+      const plan = checkPlan({
         scope: "project",
         root: workspace.root,
         operations: [{ _tag: "write", file: changedFile, bytes: installedBytes, expectedCurrent: expectedMissing }],
@@ -364,7 +361,7 @@ layer(NodeContext.layer)("applyPlan", (it) => {
     Effect.gen(function* () {
       const workspace = yield* makeWorkspace;
       const writtenFile = configFile("write.txt");
-      const plan = unwrapPlan({
+      const plan = checkPlan({
         scope: "project",
         root: workspace.root,
         operations: [

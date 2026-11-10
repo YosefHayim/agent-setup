@@ -3,6 +3,7 @@
 import { FileSystem } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { InstallError } from "./install-request.js";
 import type { FileOwner, OwnedFile, PreviousFileValue } from "./ownership.js";
@@ -40,7 +41,7 @@ export const previousFileValue = (snapshot: FileSnapshot): PreviousFileValue =>
 
 export const checkFileChange = (input: unknown): Either.Either<FileChange, InstallError> =>
   Either.mapLeft(
-    Schema.validateEither(fileChangeSchema, {
+    Schema.validateEither(zodAsEffectSchema(fileChangeSchema), {
       onExcessProperty: "error",
     })(input),
     (error) =>

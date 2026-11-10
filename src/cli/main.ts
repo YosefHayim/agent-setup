@@ -53,7 +53,8 @@ const showCliFailure = (error: unknown) => {
 export const isBareArgv = (argv: ReadonlyArray<string>): boolean => argv.length <= 2;
 
 const program = Effect.gen(function* () {
-  const cli = Command.run(agentSetup, { name: "agent-setup", version: yield* readPackageVersion });
+  const packageVersion = yield* Effect.tryPromise({ try: readPackageVersion, catch: (error) => error });
+  const cli = Command.run(agentSetup, { name: "agent-setup", version: packageVersion });
 
   if (isBareArgv(process.argv)) {
     yield* cli(["node", "agent-setup", "--help"]);
