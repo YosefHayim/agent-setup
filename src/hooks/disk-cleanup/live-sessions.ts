@@ -70,7 +70,7 @@ const isCodexLockHeld = (request: { readonly homeRoot: string; readonly threadId
 export const readLiveSessions = (request: {
   readonly homeRoot: string;
   readonly endedSessionId: string;
-}): LiveSessions | undefined => {
+}): LiveSessions | null => {
   const isOtherSession = (sessionId: string) => sessionId !== "" && sessionId !== request.endedSessionId;
   try {
     const jobs = listUnfinishedClaudeJobs(request.homeRoot);
@@ -83,7 +83,7 @@ export const readLiveSessions = (request: {
       jobFolders: jobs.map((job) => job.folder).filter(Boolean),
     };
   } catch {
-    return undefined;
+    return null;
   }
 };
 

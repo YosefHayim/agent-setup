@@ -56,7 +56,7 @@ const BLOCK_REASON =
 export type ToolCall = {
   toolName: string;
   toolInput: unknown;
-  workingDirectory: string | undefined;
+  workingDirectory: string | null;
 };
 
 type ScratchWriteRequest = ToolCall & { systemScratchFolder: string };
@@ -64,8 +64,8 @@ type ScratchWriteRequest = ToolCall & { systemScratchFolder: string };
 export type ScratchWriteDecision = { _tag: "allow" } | { _tag: "block"; reason: string };
 
 type ScratchPathCheck = {
-  candidate: string | undefined;
-  workingDirectory: string | undefined;
+  candidate: string | null;
+  workingDirectory: string | null;
   systemScratchFolder: string;
 };
 
@@ -128,7 +128,7 @@ const readToolCommandString = (toolDetails: unknown): string => {
 };
 
 // A shell left inside a scratch folder must still be able to leave it.
-const readCommandFolder = (commandString: string, workingDirectory: string | undefined): string | undefined => {
+const readCommandFolder = (commandString: string, workingDirectory: string | null): string | null => {
   const folderChange = LEADING_FOLDER_CHANGE.exec(commandString);
 
   const isFolderChangeMissing = folderChange === null;

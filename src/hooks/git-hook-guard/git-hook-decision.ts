@@ -31,18 +31,18 @@ const readHomeExpanded = (folder: string): string => {
 };
 
 // A folder that holds a shell value, such as cd "$WORKTREE", is only known when the command runs.
-const readRepoFolder = (gitCall: GitCall, startFolder: string): string | undefined => {
+const readRepoFolder = (gitCall: GitCall, startFolder: string): string | null => {
   const steps = [gitCall.changedFolder, ...gitCall.repoFolders].filter((step) => step != null);
 
   const hasShellStep = steps.some((step) => step.includes(SHELL_FIELD));
   if (hasShellStep) {
-    return undefined;
+    return null;
   }
 
   return steps.reduce((folder, step) => path.resolve(folder, readHomeExpanded(step)), startFolder);
 };
 
-const readMissingHooksReason = (repoStatus: RepoHooksStatus): string | undefined => {
+const readMissingHooksReason = (repoStatus: RepoHooksStatus): string | null => {
   const isInstallNeeded = repoStatus._tag === "needsInstall";
   if (isInstallNeeded) {
     return `git-hook-guard: Git hooks are not installed in this worktree. Run \`${repoStatus.installCommand}\` in ${repoStatus.toplevel} first, then retry.`;
@@ -53,11 +53,11 @@ const readMissingHooksReason = (repoStatus: RepoHooksStatus): string | undefined
     return `git-hook-guard: Run \`git config core.hooksPath .githooks\` in ${repoStatus.toplevel} first, then retry.`;
   }
 
-  return undefined;
+  return null;
 };
 
 export const decideGitHook = (check: GitHookCheck): GitHookDecision => {
-  const facts = readCommandFactsIn(check.command, undefined);
+  const facts = readCommandFactsIn(check.command, null);
   const skipReason = skipReasonOf(facts);
 
   const hasSkipReason = skipReason != null;

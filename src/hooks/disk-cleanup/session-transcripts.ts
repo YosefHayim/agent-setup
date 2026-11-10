@@ -51,12 +51,12 @@ const listCodexRollouts = (request: { readonly homeRoot: string; readonly thread
     .map((name) => path.join(sessionsFolder, name));
 };
 
-// The named sessions' transcripts, or undefined when a folder that could hold one cannot be listed.
+// The named sessions' transcripts, or null when a folder that could hold one cannot be listed.
 export const readSessionTranscripts = (request: {
   readonly homeRoot: string;
   readonly claudeSessionIds: ReadonlyArray<string>;
   readonly codexThreadIds: ReadonlyArray<string>;
-}): ReadonlyArray<SessionTranscript> | undefined => {
+}): ReadonlyArray<SessionTranscript> | null => {
   try {
     const claudeTranscripts = listClaudeTranscripts({
       homeRoot: request.homeRoot,
@@ -68,17 +68,17 @@ export const readSessionTranscripts = (request: {
       ...codexRollouts.map((transcriptFile) => ({ transcriptFile, readEvidence: readCodexEvidence })),
     ];
   } catch {
-    return undefined;
+    return null;
   }
 };
 
-// The folders a transcript's commands, edits, and working folders name by either of their paths, or undefined when it
+// The folders a transcript's commands, edits, and working folders name by either of their paths, or null when it
 // cannot be read.
 export const readFoldersNamedIn = (request: {
   readonly transcript: SessionTranscript;
   readonly folders: ReadonlyArray<FolderPaths>;
   readonly homeRoot: string;
-}): ReadonlyArray<string> | undefined => {
+}): ReadonlyArray<string> | null => {
   const namedFolders = request.folders.flatMap(({ folder, paths }) => paths.map((root) => ({ name: folder, root })));
   const matchers = { matchPaths: createPathMatcher(namedFolders), matchKeywords: NO_KEYWORDS };
   const { transcriptFile, readEvidence } = request.transcript;
@@ -86,7 +86,7 @@ export const readFoldersNamedIn = (request: {
     const evidence = readEvidence({ transcriptFile, matchers, homeRoot: request.homeRoot });
     return [...evidence.pathHits.keys()];
   } catch {
-    return undefined;
+    return null;
   }
 };
 

@@ -19,7 +19,7 @@ export type TranscriptLine = {
   readonly type: string;
   readonly role: string;
   readonly model: string;
-  readonly usage: TokenUsage | undefined;
+  readonly usage: TokenUsage | null;
   /** `message.content` when the entry wraps a message, else the entry's own `content`. */
   readonly content: unknown;
   readonly stopReason: string | null;
@@ -42,10 +42,10 @@ const readStringProperty = (fields: Record<string, unknown>, property: string): 
   return isStringCandidate ? candidate : "";
 };
 
-const decodeTokenUsage = (candidate: unknown): TokenUsage | undefined => {
+const decodeTokenUsage = (candidate: unknown): TokenUsage | null => {
   const isNotPlainObject = !isPlainObject(candidate);
   if (isNotPlainObject) {
-    return undefined;
+    return null;
   }
 
   return {
@@ -56,13 +56,13 @@ const decodeTokenUsage = (candidate: unknown): TokenUsage | undefined => {
   };
 };
 
-const decodeTranscriptObject = (candidate: unknown): TranscriptLine | undefined => {
+const decodeTranscriptObject = (candidate: unknown): TranscriptLine | null => {
   const isNotPlainObject = !isPlainObject(candidate);
   if (isNotPlainObject) {
-    return undefined;
+    return null;
   }
 
-  const message = isPlainObject(candidate.message) ? candidate.message : undefined;
+  const message = isPlainObject(candidate.message) ? candidate.message : null;
   const hasMessage = message != null;
   const stopReason = message?.stop_reason;
   const isStopReasonString = typeof stopReason === "string";
@@ -71,25 +71,25 @@ const decodeTranscriptObject = (candidate: unknown): TranscriptLine | undefined 
     type: readStringProperty(candidate, "type"),
     role: readStringProperty(candidate, "role"),
     model: hasMessage ? readStringProperty(message, "model") : "",
-    usage: hasMessage ? decodeTokenUsage(message.usage) : undefined,
+    usage: hasMessage ? decodeTokenUsage(message.usage) : null,
     content: hasMessage ? message.content : candidate.content,
     stopReason: isStopReasonString ? stopReason : null,
   };
 };
 
-// A blank or malformed line gives undefined.
-export const decodeTranscriptLine = (line: string): TranscriptLine | undefined => {
+// A blank or malformed line gives null.
+export const decodeTranscriptLine = (line: string): TranscriptLine | null => {
   const trimmed = line.trim();
 
   const isTrimmedBlank = !trimmed;
   if (isTrimmedBlank) {
-    return undefined;
+    return null;
   }
 
   try {
     return decodeTranscriptObject(JSON.parse(trimmed));
   } catch {
-    return undefined;
+    return null;
   }
 };
 

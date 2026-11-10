@@ -34,7 +34,7 @@ const listLiveSessionIn = (registryFile: string): ReadonlyArray<LiveSession> => 
   try {
     const registryLine: unknown = JSON.parse(readFileSync(registryFile, "utf8"));
 
-    const registrySessionId = isPlainObject(registryLine) ? registryLine.sessionId : undefined;
+    const registrySessionId = isPlainObject(registryLine) ? registryLine.sessionId : null;
     const isRegistryLineInvalid = !isPlainObject(registryLine) || typeof registrySessionId !== "string";
     if (isRegistryLineInvalid) {
       return [];

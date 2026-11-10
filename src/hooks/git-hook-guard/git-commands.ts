@@ -8,7 +8,7 @@ export type Assignment = {
 export type GitCall = {
   readonly configKeys: ReadonlyArray<string>;
   readonly repoFolders: ReadonlyArray<string>;
-  readonly changedFolder: string | undefined;
+  readonly changedFolder: string | null;
   readonly subcommand: string;
   readonly args: ReadonlyArray<string>;
 };
@@ -16,7 +16,7 @@ export type GitCall = {
 export type CommandFacts = {
   readonly assignments: ReadonlyArray<Assignment>;
   readonly gitCalls: ReadonlyArray<GitCall>;
-  readonly changedFolder: string | undefined;
+  readonly changedFolder: string | null;
 };
 
 type GlobalSettings = {
@@ -77,7 +77,7 @@ const readGlobalSettings = (words: ReadonlyArray<string>, before: GlobalSettings
   return { options: before, subcommandWords: words };
 };
 
-const readGitCall = (gitArguments: ReadonlyArray<string>, changedFolder: string | undefined): GitCall => {
+const readGitCall = (gitArguments: ReadonlyArray<string>, changedFolder: string | null): GitCall => {
   const parsedGit = readGlobalSettings(gitArguments, { configKeys: [], repoFolders: [] });
   const [subcommand = "", ...argumentList] = parsedGit.subcommandWords;
   return { ...parsedGit.options, changedFolder, subcommand, args: argumentList };
@@ -102,18 +102,18 @@ const listAssignmentOf = (word: string): ReadonlyArray<Assignment> => {
   return [{ name, value: field }];
 };
 
-const readCommandString = (programArguments: ReadonlyArray<string>): string | undefined => {
+const readCommandString = (programArguments: ReadonlyArray<string>): string | null => {
   const optionIndex = programArguments.findIndex((word) => COMMAND_STRING_OPTION.test(word));
 
   const isOptionMissing = optionIndex === -1;
   if (isOptionMissing) {
-    return undefined;
+    return null;
   }
 
   return programArguments[optionIndex + 1];
 };
 
-const readFolderChangedBy = (cdArguments: ReadonlyArray<string>, before: string | undefined): string | undefined => {
+const readFolderChangedBy = (cdArguments: ReadonlyArray<string>, before: string | null): string | null => {
   const folder = cdArguments.find((word) => !word.startsWith("-"));
 
   const isFolderUnspecified = folder == null || folder === "-";
@@ -124,7 +124,7 @@ const readFolderChangedBy = (cdArguments: ReadonlyArray<string>, before: string 
   return folder;
 };
 
-const EMPTY_FACTS: CommandFacts = { assignments: [], gitCalls: [], changedFolder: undefined };
+const EMPTY_FACTS: CommandFacts = { assignments: [], gitCalls: [], changedFolder: null };
 
 const joinFacts = (earlier: CommandFacts, later: CommandFacts): CommandFacts => ({
   assignments: [...earlier.assignments, ...later.assignments],
@@ -132,7 +132,7 @@ const joinFacts = (earlier: CommandFacts, later: CommandFacts): CommandFacts => 
   changedFolder: later.changedFolder,
 });
 
-const readSegmentFacts = (segment: ShellSegment, changedFolder: string | undefined): CommandFacts => {
+const readSegmentFacts = (segment: ShellSegment, changedFolder: string | null): CommandFacts => {
   const [firstWord = ""] = segment.words;
   // The empty word at the end is never a prefix word, so a segment of only prefix words ends at its own length.
   const programIndex = [...segment.words, ""].findIndex((word) => !isPrefixWord(word, firstWord));
@@ -174,7 +174,7 @@ const readSegmentFacts = (segment: ShellSegment, changedFolder: string | undefin
 
 // Reads every environment assignment and git call of a shell command, including the ones inside bash -c "...", with the
 // folder the last cd before each git call moved to.
-export const readCommandFactsIn = (command: string, startFolder: string | undefined): CommandFacts =>
+export const readCommandFactsIn = (command: string, startFolder: string | null): CommandFacts =>
   listShellSegments(command).reduce(
     (facts, segment) => joinFacts(facts, readSegmentFacts(segment, facts.changedFolder)),
     {

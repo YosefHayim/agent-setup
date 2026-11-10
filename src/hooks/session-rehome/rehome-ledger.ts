@@ -51,14 +51,14 @@ const readStringOf = (fields: Record<string, unknown>, property: string): string
   return isStringCandidate ? candidate : "";
 };
 
-const decodeLedgerLine = (fields: Record<string, unknown>): LedgerLine | undefined => {
+const decodeLedgerLine = (fields: Record<string, unknown>): LedgerLine | null => {
   const agent = readRehomeAgentFrom(readStringOf(fields, "agent"));
 
   const decision = LEDGER_DECISIONS.find((candidate) => candidate === fields.decision);
 
   const hasNoRequiredField = !agent || !decision || !readStringOf(fields, "sessionId");
   if (hasNoRequiredField) {
-    return undefined;
+    return null;
   }
 
   const share = fields.share;
@@ -103,7 +103,7 @@ export const readLedgerLine = (request: {
   readonly ledger: ReadonlyMap<string, LedgerLine>;
   readonly agent: RehomeAgent;
   readonly sessionId: string;
-}): LedgerLine | undefined => request.ledger.get(readLedgerKey(request));
+}): LedgerLine | null => request.ledger.get(readLedgerKey(request)) ?? null;
 
 export const saveLedgerLine = (ledgerLine: LedgerLine): void => {
   mkdirSync(readStorageFolder(), { recursive: true });

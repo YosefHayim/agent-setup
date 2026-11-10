@@ -2,7 +2,7 @@ import { isPlainObject } from "./json-lines.js";
 
 // Claude Code names the shell command "command"; Codex names it "cmd".
 export const readShellCommand = (hookDetails: unknown): string => {
-  const toolDetails = isPlainObject(hookDetails) ? hookDetails.tool_input : undefined;
+  const toolDetails = isPlainObject(hookDetails) ? hookDetails.tool_input : null;
   const isToolDetailsMissing = !isPlainObject(toolDetails);
   if (isToolDetailsMissing) {
     return "";
@@ -20,7 +20,7 @@ export const readShellCommand = (hookDetails: unknown): string => {
 };
 
 export const startFolderOf = (hookDetails: unknown): string => {
-  const cwd = isPlainObject(hookDetails) ? hookDetails.cwd : undefined;
+  const cwd = isPlainObject(hookDetails) ? hookDetails.cwd : null;
   const hasWorkingFolder = typeof cwd === "string" && cwd !== "";
   if (hasWorkingFolder) {
     return cwd;

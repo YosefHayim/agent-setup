@@ -17,7 +17,7 @@ export const readMovedSessionNotice = (request: {
   readonly entry: LedgerLine;
   readonly cwd: string;
   readonly homeRoot: string;
-}): MovedSessionNotice | undefined => {
+}): MovedSessionNotice | null => {
   const { entry: line } = request;
   const movedOn = line.decidedAt.slice(0, 10);
   const from = readShortFolder({ folder: line.fromFolder, homeRoot: request.homeRoot });
@@ -25,14 +25,14 @@ export const readMovedSessionNotice = (request: {
 
   const isNotMovedDecision = line.decision !== "moved";
   if (isNotMovedDecision) {
-    return undefined;
+    return null;
   }
 
   const isCodexAgent = line.agent === "codex";
   if (isCodexAgent) {
     const isAlreadyNotified = line.notifiedAt !== "";
     return isAlreadyNotified
-      ? undefined
+      ? null
       : {
           userMessage: `Session moved to ${line.repoName} on ${movedOn} (from ${from}). It now runs in ${to}, and \`codex resume\` lists it there.`,
           agentContext: "",
@@ -40,7 +40,7 @@ export const readMovedSessionNotice = (request: {
   }
 
   return isInside({ folder: request.cwd, root: line.toFolder })
-    ? undefined
+    ? null
     : {
         userMessage: `Session moved to ${line.repoName} on ${movedOn} (from ${from}). It now lives in ${to}; next time resume it there: cd ${to} && claude --resume ${line.sessionId}`,
         agentContext: `session-rehome moved this session to the ${line.repoName} repo at ${line.toFolder}. The shell still starts in ${request.cwd}, so work in ${line.toFolder}.`,

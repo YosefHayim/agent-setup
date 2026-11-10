@@ -38,7 +38,7 @@ const readLinkedWorktreeFrom = (request: { readonly block: ReadonlyArray<string>
   };
 };
 
-type RepoWorktreeList = { readonly repoRoot: string; readonly listLines: ReadonlyArray<string> | undefined };
+type RepoWorktreeList = { readonly repoRoot: string; readonly listLines: ReadonlyArray<string> | null };
 
 // A repo git cannot list is named, rather than taken for one without worktrees.
 export type LinkedWorktreeListing = {

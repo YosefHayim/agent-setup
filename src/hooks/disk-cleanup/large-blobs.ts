@@ -16,7 +16,7 @@ const OMITTED_OBJECT_MARK = "~";
 export const readLargeBlobLines = (request: {
   readonly folder: string;
   readonly range: ReadonlyArray<string>;
-}): ReadonlyArray<string> | undefined =>
+}): ReadonlyArray<string> | null =>
   readGitAnswerLines({ folder: request.folder, query: [...LARGE_BLOB_QUERY, ...request.range] });
 
 export const hasLargeBlob = (largeBlobLines: ReadonlyArray<string>): boolean =>

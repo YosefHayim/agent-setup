@@ -32,7 +32,7 @@ const MAX_HOME_SHARE_WHEN_MOVING = 0.15;
 
 export const scoreSession = (request: {
   readonly evidence: SessionEvidence;
-  readonly folderRepoName: string | undefined;
+  readonly folderRepoName: string | null;
 }): ReadonlyArray<RepoScore> => {
   const weighted = new Map<string, number>();
   for (const [repoName, hits] of request.evidence.pathHits) {
@@ -74,7 +74,7 @@ export const isDeletedReposDominate = (request: {
 
 export const decideRehome = (request: {
   readonly scores: ReadonlyArray<RepoScore>;
-  /** The repo the session already lives in, or undefined for a generic folder such as ~/Desktop/Code. */
+  /** The repo the session already lives in, or null for a generic folder such as ~/Desktop/Code. */
   readonly homeRepoName: string | undefined;
 }): RehomeDecision => {
   const [top] = request.scores;

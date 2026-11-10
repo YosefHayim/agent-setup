@@ -11,14 +11,14 @@ import { decideScratchWrite, type ToolCall } from "../scratch-write-decision.js"
 const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const readStringField = (fields: Record<string, unknown>, property: string): string | undefined => {
+const readStringField = (fields: Record<string, unknown>, property: string): string | null => {
   const candidate = fields[property];
 
   const isCandidateString = typeof candidate === "string";
-  return isCandidateString ? candidate : undefined;
+  return isCandidateString ? candidate : null;
 };
 
-const readWorkingDirectory = (hookDetails: Record<string, unknown>): string | undefined => {
+const readWorkingDirectory = (hookDetails: Record<string, unknown>): string | null => {
   const hookDirectory = readStringField(hookDetails, "cwd");
 
   const hasHookDirectory = hookDirectory != null;
@@ -31,23 +31,23 @@ const readWorkingDirectory = (hookDetails: Record<string, unknown>): string | un
 
   const isToolDetailsInvalid = !isPlainObject(toolDetails);
   if (isToolDetailsInvalid) {
-    return undefined;
+    return null;
   }
 
   return readStringField(toolDetails, "cwd") || readStringField(toolDetails, "workdir");
 };
 
-const decodeToolCall = (candidate: unknown): ToolCall | undefined => {
+const decodeToolCall = (candidate: unknown): ToolCall | null => {
   const isCandidateInvalid = !isPlainObject(candidate);
   if (isCandidateInvalid) {
-    return undefined;
+    return null;
   }
 
   const toolName = readStringField(candidate, "tool_name");
 
   const isToolNameMissing = toolName == null;
   if (isToolNameMissing) {
-    return undefined;
+    return null;
   }
 
   return { toolName, toolInput: candidate.tool_input, workingDirectory: readWorkingDirectory(candidate) };

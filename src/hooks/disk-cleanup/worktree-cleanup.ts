@@ -90,7 +90,7 @@ const listPruneGoneWorktrees = (request: {
 const rememberKeptWorktrees = (request: {
   readonly lookedAtWorktrees: ReadonlyArray<LinkedWorktree>;
   readonly listedFolders: ReadonlyArray<string>;
-  readonly earlierKeptLines: ReadonlyArray<string> | undefined;
+  readonly earlierKeptLines: ReadonlyArray<string> | null;
   readonly dryRun: boolean;
 }): void => {
   const isDryRun = request.dryRun;

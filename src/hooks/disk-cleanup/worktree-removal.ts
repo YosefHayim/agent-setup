@@ -37,10 +37,10 @@ const readFailedPushDetail = (request: {
   readonly worktree: LinkedWorktree;
   readonly remote: string;
   readonly push: boolean;
-}): string | undefined => {
+}): string | null => {
   const isRequestPushMissing = !request.push;
   if (isRequestPushMissing) {
-    return undefined;
+    return null;
   }
 
   const { worktree } = request;
@@ -49,7 +49,7 @@ const readFailedPushDetail = (request: {
 
   const isPushStatus_tagPushed = pushStatus._tag === "pushed";
   if (isPushStatus_tagPushed) {
-    return undefined;
+    return null;
   }
 
   return `push failed: ${pushStatus.reason}`;

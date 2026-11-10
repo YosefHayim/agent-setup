@@ -29,12 +29,12 @@ const readNeedsInstall = (toplevel: string): RepoHooksStatus => ({
   installCommand: installCommandIn(toplevel),
 });
 
-const readFirstAnswerLine = (question: GitQuestion): string | undefined => {
+const readFirstAnswerLine = (question: GitQuestion): string | null => {
   const answerLines = readGitAnswerLines(question);
 
   const hasNoAnswerLines = !answerLines;
   if (hasNoAnswerLines) {
-    return undefined;
+    return null;
   }
 
   return answerLines[0];

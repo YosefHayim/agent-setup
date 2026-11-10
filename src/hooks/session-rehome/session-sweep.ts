@@ -86,9 +86,9 @@ const readPlacement = (request: Partial<Placement> & Pick<Placement, "action">):
 const isOwnCheckout = (request: { readonly repo: Repo; readonly folder: string }): boolean =>
   request.folder === request.repo.root || existsSync(path.join(request.folder, ".git"));
 
-const readAssignedRepo = (request: { readonly sweep: SweepScope; readonly sessionId: string }): Repo | undefined => {
+const readAssignedRepo = (request: { readonly sweep: SweepScope; readonly sessionId: string }): Repo | null => {
   const assignedName = [...request.sweep.assignments].find(([idPrefix]) => request.sessionId.startsWith(idPrefix))?.[1];
-  return request.sweep.repos.find((repo) => repo.name === assignedName);
+  return request.sweep.repos.find((repo) => repo.name === assignedName) ?? null;
 };
 
 const placeSession = (request: {
@@ -107,8 +107,8 @@ const placeSession = (request: {
   const homeRepo = readRepoContaining({ repos, folder: request.homeFolder });
 
   const isHomeRepoMissing = homeRepo == null;
-  const folderRepo = isHomeRepoMissing ? readRepoNamedByFolder({ repos, folder: request.homeFolder }) : undefined;
-  const scores = scoreSession({ evidence: request.evidence, folderRepoName: folderRepo?.name });
+  const folderRepo = isHomeRepoMissing ? readRepoNamedByFolder({ repos, folder: request.homeFolder }) : null;
+  const scores = scoreSession({ evidence: request.evidence, folderRepoName: folderRepo?.name ?? null });
   const decision = decideRehome({ scores, homeRepoName: homeRepo?.name });
   const isDecisionMoveOrStay = decision._tag === "move" || decision._tag === "stay";
   const ownerName = isDecisionMoveOrStay ? decision.repoName : (homeRepo || folderRepo)?.name;
@@ -332,7 +332,7 @@ const readDriftedCodexPlan = (request: { readonly sweep: SweepScope; readonly th
 
   const hasNoMoveToHome = line?.decision !== "moved" || line.toFolder === request.thread.homeFolder;
   if (hasNoMoveToHome) {
-    return undefined;
+    return null;
   }
 
   return {
@@ -347,7 +347,7 @@ const readDriftedCodexPlan = (request: { readonly sweep: SweepScope; readonly th
 
 const planCodexSweepLine = async (request: { readonly sweep: SweepScope; readonly thread: CodexThread }) => {
   const shouldReevaluate = request.sweep.reevaluate;
-  const isDrifted = shouldReevaluate ? undefined : readDriftedCodexPlan(request);
+  const isDrifted = shouldReevaluate ? null : readDriftedCodexPlan(request);
 
   const live = isDrifted
     ? await isCodexThreadLive({ homeRoot: request.sweep.homeRoot, thread: request.thread, quietSeconds: 0 })
@@ -359,7 +359,7 @@ const planCodexSweepLine = async (request: { readonly sweep: SweepScope; readonl
   }
 
   return isSettled({ sweep: request.sweep, agent: "codex", sessionId: request.thread.threadId })
-    ? undefined
+    ? null
     : planCodexThread(request);
 };
 
@@ -371,8 +371,8 @@ const listSweepCodex = async (sweep: SweepScope): Promise<ReadonlyArray<SessionP
   for (const thread of threads) {
     const plan = await planCodexSweepLine({ sweep, thread });
 
-    const isPlanPresent = plan != null;
-    if (!isPlanPresent) continue;
+    const isPlanMissing = plan == null;
+    if (isPlanMissing) continue;
 
     const isDryRun = sweep.dryRun;
     if (isDryRun) {

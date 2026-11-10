@@ -42,14 +42,14 @@ describe("decodeTranscriptLine", () => {
       role: "user",
       content: "hello",
       isSidechain: true,
-      usage: undefined,
+      usage: null,
     });
   });
 
   it("skips blank and malformed lines", () => {
-    expect(decodeTranscriptLine("   ")).toBeUndefined();
-    expect(decodeTranscriptLine("{not json")).toBeUndefined();
-    expect(decodeTranscriptLine("[1, 2]")).toBeUndefined();
+    expect(decodeTranscriptLine("   ")).toBeNull();
+    expect(decodeTranscriptLine("{not json")).toBeNull();
+    expect(decodeTranscriptLine("[1, 2]")).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ import { readCommandFactsIn } from "./git-commands.js";
 
 describe("commandFactsIn", () => {
   it("reads the global options, subcommand and arguments of a git call", () => {
-    const facts = readCommandFactsIn("git -C ../app -c Core.HooksPath=. --no-pager push origin --force", undefined);
+    const facts = readCommandFactsIn("git -C ../app -c Core.HooksPath=. --no-pager push origin --force", null);
 
     expect(facts.gitCalls).toEqual([
       {
@@ -18,7 +18,7 @@ describe("commandFactsIn", () => {
   });
 
   it("reads assignments before a program and after export or env", () => {
-    const facts = readCommandFactsIn("A=1 B=2 make; export C=3; env -i D=4 git status; echo E=5", undefined);
+    const facts = readCommandFactsIn("A=1 B=2 make; export C=3; env -i D=4 git status; echo E=5", null);
 
     expect(facts.assignments.map((assignment) => assignment.name)).toEqual(["A", "B", "C", "D"]);
   });

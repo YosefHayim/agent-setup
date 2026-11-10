@@ -45,24 +45,24 @@ const runGit = (question: GitQuestion) =>
   });
 
 // A git call that fails or runs out of time has no answer, which is not the same as an empty one.
-export const readGitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | undefined => {
+export const readGitAnswerLines = (question: GitQuestion): ReadonlyArray<string> | null => {
   const git = runGit(question);
 
   const hasGitFailed = git.status !== 0;
   if (hasGitFailed) {
-    return undefined;
+    return null;
   }
 
   return git.stdout.split("\n").filter((line) => line !== "");
 };
 
-// What git said on stderr when the call failed, "" when it said nothing, and undefined when the call succeeded.
-export const readGitFailureString = (question: GitQuestion): string | undefined => {
+// What git said on stderr when the call failed, "" when it said nothing, and null when the call succeeded.
+export const readGitFailureString = (question: GitQuestion): string | null => {
   const git = runGit(question);
 
   const isGitSuccessful = git.status === 0;
   if (isGitSuccessful) {
-    return undefined;
+    return null;
   }
 
   return git.stderr || "";

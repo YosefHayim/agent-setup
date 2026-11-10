@@ -22,7 +22,7 @@ const readPackageName = (repoRoot: string): string => {
   try {
     const manifest: unknown = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
-    const manifestName = isPlainObject(manifest) ? manifest.name : undefined;
+    const manifestName = isPlainObject(manifest) ? manifest.name : null;
     const hasManifestName = typeof manifestName === "string";
     return hasManifestName ? manifestName : "";
   } catch {
@@ -113,14 +113,16 @@ export const createKeywordMatcher = (repos: ReadonlyArray<Repo>): ((prompt: stri
 export const readRepoContaining = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) =>
   [...request.repos]
     .sort((left, right) => right.root.length - left.root.length)
-    .find((repo) => request.folder === repo.root || request.folder.startsWith(`${repo.root}/`));
+    .find((repo) => request.folder === repo.root || request.folder.startsWith(`${repo.root}/`)) ?? null;
 
 // A session started outside every repo can still name one in its folder, e.g. /private/tmp/vybekiit-buyer-eval-3.
 export const readRepoNamedByFolder = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) => {
   const segments = request.folder.toLowerCase().split("/");
-  return request.repos.find((repo) =>
-    segments.some(
-      (segment) => segment === repo.name.toLowerCase() || segment.startsWith(`${repo.name.toLowerCase()}-`),
-    ),
+  return (
+    request.repos.find((repo) =>
+      segments.some(
+        (segment) => segment === repo.name.toLowerCase() || segment.startsWith(`${repo.name.toLowerCase()}-`),
+      ),
+    ) ?? null
   );
 };

@@ -24,7 +24,7 @@ const STATUS_DATABASE_PATTERN = /^state_(\d+)\.sqlite$/u;
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
 const BUSY_TIMEOUT_MILLISECONDS = 5_000;
 
-const readStorageDatabaseFile = (homeRoot: string): string | undefined => {
+const readStorageDatabaseFile = (homeRoot: string): string | null => {
   const home = readCodexHome(homeRoot);
 
   const isCodexHomePresent = existsSync(home);
@@ -34,7 +34,7 @@ const readStorageDatabaseFile = (homeRoot: string): string | undefined => {
     .sort((left, right) => right.version - left.version)[0];
 
   const isDatabaseFound = newest != null;
-  return isDatabaseFound ? path.join(home, newest.name) : undefined;
+  return isDatabaseFound ? path.join(home, newest.name) : null;
 };
 
 // node:sqlite is unflagged from Node 22.13; on an older Node the Codex half of the feature stays off.
@@ -43,7 +43,7 @@ const openStorageDatabase = async (request: { readonly homeRoot: string; readonl
 
   const hasNoDatabaseFile = !databaseFile;
   if (hasNoDatabaseFile) {
-    return undefined;
+    return null;
   }
 
   const { DatabaseSync } = await import("node:sqlite");
@@ -173,24 +173,26 @@ const isSettingsLine = (line: Record<string, unknown>): boolean =>
   line.payload.type === "thread_settings_applied" &&
   isPlainObject(line.payload.thread_settings);
 
-const readLastSettingsLine = (rolloutFile: string): Record<string, unknown> | undefined => {
+const readLastSettingsLine = (rolloutFile: string): Record<string, unknown> | null => {
   const fromTail = readTranscriptTail(rolloutFile).map(decodeLine).filter(isSettingsLine).at(-1);
-  return fromTail || readFileSync(rolloutFile, "utf8").split("\n").map(decodeLine).filter(isSettingsLine).at(-1);
+  return (
+    fromTail || readFileSync(rolloutFile, "utf8").split("\n").map(decodeLine).filter(isSettingsLine).at(-1) || null
+  );
 };
 
-const readLastOrdinal = (rolloutFile: string): number | undefined =>
+const readLastOrdinal = (rolloutFile: string): number | null =>
   readTranscriptTail(rolloutFile)
     .map(decodeLine)
     .map((line) => line.ordinal)
     .filter((candidate): candidate is number => typeof candidate === "number")
-    .at(-1);
+    .at(-1) ?? null;
 
 // A resumed writer continues from the rollout's last ordinal, so the copied line takes the next one; legacy rollouts
 // carry no ordinals at all.
 const readRehomedSettingsLine = (request: {
   readonly settingsLine: Record<string, unknown>;
   readonly targetFolder: string;
-  readonly ordinal: number | undefined;
+  readonly ordinal: number | null;
 }): Record<string, unknown> => {
   const lineMessage = isPlainObject(request.settingsLine.payload) ? request.settingsLine.payload : {};
   const settings = isPlainObject(lineMessage.thread_settings) ? lineMessage.thread_settings : {};
@@ -211,7 +213,7 @@ const readRehomedSettingsLine = (request: {
 
 const appendRehomedSettings = (request: { readonly rolloutFile: string; readonly targetFolder: string }) => {
   const isRolloutPresent = existsSync(request.rolloutFile);
-  const settingsLine = isRolloutPresent ? readLastSettingsLine(request.rolloutFile) : undefined;
+  const settingsLine = isRolloutPresent ? readLastSettingsLine(request.rolloutFile) : null;
 
   const hasNoSettingsLine = !settingsLine;
   if (hasNoSettingsLine) {

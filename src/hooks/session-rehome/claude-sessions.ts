@@ -87,7 +87,7 @@ export const listClaudeSessions = (homeRoot: string): ReadonlyArray<ClaudeSessio
 export const findClaudeSession = (request: {
   readonly homeRoot: string;
   readonly sessionId: string;
-}): ClaudeSession | undefined => {
+}): ClaudeSession | null => {
   const root = readProjectsRoot(request.homeRoot);
 
   const isRootPresent = existsSync(root);
@@ -99,7 +99,7 @@ export const findClaudeSession = (request: {
 
   const isProjectFolderAmbiguous = !projectFolder || projectFolders.length > 1;
   if (isProjectFolderAmbiguous) {
-    return undefined;
+    return null;
   }
 
   const transcriptFile = path.join(projectFolder, `${request.sessionId}.jsonl`);

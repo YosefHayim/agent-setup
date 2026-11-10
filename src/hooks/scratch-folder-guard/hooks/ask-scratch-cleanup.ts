@@ -30,7 +30,7 @@ const isCodexThreadInteractive = (rolloutFile: unknown): boolean => {
 
   const [threadHeaderLine = ""] = readTranscriptHead(rolloutFile);
   const threadHeader: unknown = JSON.parse(threadHeaderLine);
-  const threadStart = isPlainObject(threadHeader) ? threadHeader.payload : undefined;
+  const threadStart = isPlainObject(threadHeader) ? threadHeader.payload : null;
   return isPlainObject(threadStart) && INTERACTIVE_CODEX_ORIGINS.some((origin) => origin === threadStart.source);
 };
 
@@ -50,7 +50,7 @@ const isSessionAttended = (hookDetails: Record<string, unknown>): boolean => {
 const runAskScratchCleanup = (): never => {
   const hookDetails: unknown = JSON.parse(readFileSync(0, "utf8"));
 
-  const sessionId = isPlainObject(hookDetails) ? hookDetails.session_id : undefined;
+  const sessionId = isPlainObject(hookDetails) ? hookDetails.session_id : null;
 
   const isInvalidHookDetails =
     !isPlainObject(hookDetails) || typeof sessionId !== "string" || !SESSION_ID_PATTERN.test(sessionId);

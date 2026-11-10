@@ -112,9 +112,7 @@ const readLiveCheck = async (request: { readonly homeRoot: string; readonly opti
   const { homeRoot, options: settings } = request;
 
   const isClaudeCodeSelected = settings.agents.includes("claude-code");
-  const claudeSession = isClaudeCodeSelected
-    ? findClaudeSession({ homeRoot, sessionId: settings.sessionId })
-    : undefined;
+  const claudeSession = isClaudeCodeSelected ? findClaudeSession({ homeRoot, sessionId: settings.sessionId }) : null;
 
   const isClaudeSessionFound = claudeSession != null;
   if (isClaudeSessionFound) {
@@ -127,7 +125,7 @@ const readLiveCheck = async (request: { readonly homeRoot: string; readonly opti
   const isCodexSelected = settings.agents.includes("codex");
   const codexThread = isCodexSelected
     ? (await listCodexThreads(homeRoot)).find((thread) => thread.threadId === settings.sessionId)
-    : undefined;
+    : null;
 
   const hasNoCodexThread = !codexThread;
   if (hasNoCodexThread) {

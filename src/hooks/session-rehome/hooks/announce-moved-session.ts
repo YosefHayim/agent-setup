@@ -27,11 +27,11 @@ const readStringProperty = (candidate: object, property: string): string => {
   return isStringField ? field : "";
 };
 
-const decodeSessionStart = (candidate: unknown): SessionStartEvent | undefined => {
+const decodeSessionStart = (candidate: unknown): SessionStartEvent | null => {
   const isNotSessionStartObject =
     typeof candidate !== "object" || candidate === null || !readStringProperty(candidate, "session_id");
   if (isNotSessionStartObject) {
-    return undefined;
+    return null;
   }
 
   return {
@@ -69,9 +69,7 @@ const readAnnounceMovedSession = (): never => {
   const homeRoot = os.homedir();
 
   const isResumedWithLine = sessionStart.source === "resume" && line != null;
-  const notice = isResumedWithLine
-    ? readMovedSessionNotice({ entry: line, cwd: sessionStart.cwd, homeRoot })
-    : undefined;
+  const notice = isResumedWithLine ? readMovedSessionNotice({ entry: line, cwd: sessionStart.cwd, homeRoot }) : null;
 
   const hasNoLineOrNotice = !line || !notice;
   if (hasNoLineOrNotice) {

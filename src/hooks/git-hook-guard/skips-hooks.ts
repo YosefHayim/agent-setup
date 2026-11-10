@@ -191,7 +191,7 @@ const callMovesHooks = (gitCall: GitCall): boolean => {
   return setsInlineHooksPath || changesSettings;
 };
 
-export const skipReasonOf = (facts: CommandFacts): string | undefined => {
+export const skipReasonOf = (facts: CommandFacts): string | null => {
   const turnsHuskyOff = facts.assignments.some((assignment) => assignment.name === "HUSKY" && assignment.value === "0");
 
   const isHuskyOffOrHooksSkipped = turnsHuskyOff || facts.gitCalls.some(callSkipsHooks);
@@ -204,5 +204,5 @@ export const skipReasonOf = (facts: CommandFacts): string | undefined => {
     return MOVED_HOOKS_REASON;
   }
 
-  return undefined;
+  return null;
 };

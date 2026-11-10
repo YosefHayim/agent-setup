@@ -27,7 +27,7 @@ type LocalBranch = {
 };
 
 // A repo git cannot list is reported, rather than taken for one without branches.
-type RepoBranchList = { readonly repoFolder: string; readonly branches: ReadonlyArray<LocalBranch> | undefined };
+type RepoBranchList = { readonly repoFolder: string; readonly branches: ReadonlyArray<LocalBranch> | null };
 
 // e.g. "login\t9b4d1c0...\t/Users/me/Code/app/.worktrees/login"
 const LOCAL_BRANCH_QUERY = [
@@ -48,10 +48,11 @@ const isMainCheckout = (repoFolder: string): boolean => {
 
 const readBranchList = (repoFolder: string): RepoBranchList => {
   const branchLines = readGitAnswerLines({ folder: repoFolder, query: LOCAL_BRANCH_QUERY });
-  const branches = branchLines?.map((line) => {
-    const [branch, tip, ...checkoutParts] = line.split("\t");
-    return { repoFolder, branch, tip, checkoutFolder: checkoutParts.join("\t") };
-  });
+  const branches =
+    branchLines?.map((line) => {
+      const [branch, tip, ...checkoutParts] = line.split("\t");
+      return { repoFolder, branch, tip, checkoutFolder: checkoutParts.join("\t") };
+    }) ?? null;
   return { repoFolder, branches };
 };
 

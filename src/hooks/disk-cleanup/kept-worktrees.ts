@@ -11,7 +11,7 @@ export const readKeptWorktreeLine = (worktree: LinkedWorktree): string => `${wor
 const readFolderOf = (keptLine: string): string => keptLine.slice(keptLine.indexOf("\t") + 1);
 
 // A missing file names no worktree, while one that cannot be read gives no answer.
-export const readKeptWorktrees = (): ReadonlyArray<string> | undefined => {
+export const readKeptWorktrees = (): ReadonlyArray<string> | null => {
   const keptFile = readKeptWorktreesFile();
 
   const isKeptFileMissing = !existsSync(keptFile);
@@ -22,7 +22,7 @@ export const readKeptWorktrees = (): ReadonlyArray<string> | undefined => {
   try {
     return readFileSync(keptFile, "utf8").split("\n").filter(Boolean);
   } catch {
-    return undefined;
+    return null;
   }
 };
 
@@ -31,7 +31,7 @@ export const readKeptWorktrees = (): ReadonlyArray<string> | undefined => {
 export const saveKeptWorktrees = (request: {
   readonly lookedAtWorktrees: ReadonlyArray<LinkedWorktree>;
   readonly listedFolders: ReadonlyArray<string>;
-  readonly earlierKeptLines: ReadonlyArray<string> | undefined;
+  readonly earlierKeptLines: ReadonlyArray<string> | null;
 }): void => {
   const isRequestEarlierKeptLinesMissing = !request.earlierKeptLines;
   if (isRequestEarlierKeptLinesMissing) {

@@ -83,8 +83,8 @@ describe("local repos", () => {
     const repos = [{ name: "vybekiit", root: "/code/vybekiit", keywords: [], checkedOut: true }];
 
     expect(readRepoContaining({ repos, folder: "/code/vybekiit/.worktrees/web" })?.name).toBe("vybekiit");
-    expect(readRepoContaining({ repos, folder: "/code" })).toBeUndefined();
+    expect(readRepoContaining({ repos, folder: "/code" })).toBeNull();
     expect(readRepoNamedByFolder({ repos, folder: "/private/tmp/vybekiit-buyer-eval-3" })?.name).toBe("vybekiit");
-    expect(readRepoNamedByFolder({ repos, folder: "/private/tmp/other" })).toBeUndefined();
+    expect(readRepoNamedByFolder({ repos, folder: "/private/tmp/other" })).toBeNull();
   });
 });

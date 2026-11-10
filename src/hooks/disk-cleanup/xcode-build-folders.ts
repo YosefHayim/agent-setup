@@ -19,13 +19,13 @@ const decodeXmlString = (encodedString: string): string =>
   encodedString.replace(XML_ENTITY_PATTERN, (entity) => XML_ENTITIES.get(entity) || entity);
 
 // An info.plist that is missing or cannot be read gives no path at all, and one without a WorkspacePath an empty one.
-const readWorkspacePathIn = (workspacePlist: string): string | undefined => {
+const readWorkspacePathIn = (workspacePlist: string): string | null => {
   try {
     const plistString = readFileSync(workspacePlist, "utf8");
     const encodedPath = WORKSPACE_PATH_PATTERN.exec(plistString)?.[1] || "";
     return decodeXmlString(encodedPath);
   } catch {
-    return undefined;
+    return null;
   }
 };
 

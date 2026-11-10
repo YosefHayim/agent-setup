@@ -22,12 +22,12 @@ const readSystemToolCall = (request: { readonly tool: string; readonly toolArgum
 
 // lsof -Fn prints every file each process holds, working folders included, as "n<path>". A listing that failed or
 // was cut short could miss one, so it is no answer at all.
-export const listOpenPaths = (): ReadonlyArray<string> | undefined => {
+export const listOpenPaths = (): ReadonlyArray<string> | null => {
   const lsof = readSystemToolCall({ tool: "lsof", toolArguments: OPEN_FILE_QUERY });
 
   const hasLsofFailed = lsof.error || lsof.status !== 0;
   if (hasLsofFailed) {
-    return undefined;
+    return null;
   }
 
   return lsof.stdout
@@ -37,14 +37,14 @@ export const listOpenPaths = (): ReadonlyArray<string> | undefined => {
 };
 
 // Without lsof or ps nothing can be ruled out, so the caller treats every folder as in use.
-export const readRunningProcesses = (): RunningProcesses | undefined => {
+export const readRunningProcesses = (): RunningProcesses | null => {
   const openPaths = listOpenPaths();
 
   const ps = readSystemToolCall({ tool: "ps", toolArguments: ["-axo", "command="] });
 
   const isListingFailed = !openPaths || ps.error || ps.status !== 0;
   if (isListingFailed) {
-    return undefined;
+    return null;
   }
 
   return { openPaths, commandLines: ps.stdout.split("\n").filter(Boolean) };
