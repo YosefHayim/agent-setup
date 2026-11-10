@@ -123,13 +123,15 @@ export type FileOwner = z.infer<typeof fileOwnerSchema>;
 
 export const instructionKindSchema = z.strictObject({ _tag: z.literal("instruction") });
 
+export const instructionLinkKindSchema = z.strictObject({ _tag: z.literal("instructionLink") });
+
 export const fileKindSchema = z
   .discriminatedUnion("_tag", [
     z.strictObject({ _tag: z.literal("runtime") }),
     z.strictObject({ _tag: z.literal("skill") }),
     z.strictObject({ _tag: z.literal("rule") }),
     instructionKindSchema,
-    z.strictObject({ _tag: z.literal("instructionLink") }),
+    instructionLinkKindSchema,
     z.strictObject({ _tag: z.literal("settings") }),
     z.strictObject({ _tag: z.literal("managedConfig") }),
     z.strictObject({ _tag: z.literal("receipt") }),

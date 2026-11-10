@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
+import { agentDefinitionSchema, instructionLinkTargetSchema } from "../../catalog/agent-catalog.js";
 import { joinZodIssueMessages } from "../../zod-issue-messages.js";
 import { readErrorMessage } from "../install-request.js";
 import {
   agentOwnerSchema,
-  fileKindSchema,
+  instructionLinkKindSchema,
   type JsonValuesOwnership,
   jsonValuesOwnershipSchema,
   relativePathSchema,
@@ -32,14 +32,14 @@ type LinkOwnership = JsonValuesOwnership | YamlSequenceValueOwnership;
 const ownedInstructionLinkSchema = z.strictObject({
   owner: agentOwnerSchema,
   path: relativePathSchema,
-  kind: fileKindSchema.options[4],
+  kind: instructionLinkKindSchema,
   ownership: z.union([jsonValuesOwnershipSchema, yamlSequenceValueOwnershipSchema]),
 });
 
 type OwnedInstructionLink = z.infer<typeof ownedInstructionLinkSchema>;
 
 const instructionLinkRequestFieldsSchema = z.strictObject({
-  agent: agentDefinitionSchema.extend({ target: agentTargetSchema.options[3] }),
+  agent: agentDefinitionSchema.extend({ target: instructionLinkTargetSchema }),
   desired: z.discriminatedUnion("_tag", [
     z.strictObject({ _tag: z.literal("present") }),
     z.strictObject({ _tag: z.literal("absent") }),

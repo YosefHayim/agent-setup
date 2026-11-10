@@ -71,6 +71,15 @@ const ruleExtensionSchema = nonEmptyTrimmedTextSchema
   .regex(RULE_EXTENSION_PATTERN, "Rule-file extensions must start with a dot and use lowercase letters or digits.")
   .describe("Extension used for one generated rule file per skill.");
 
+export const instructionLinkTargetSchema = z.strictObject({
+  _tag: z.literal("instructionLink"),
+  instructionPath: targetPathSchema.describe("Managed instruction file referenced from native agent configuration."),
+  configPath: targetPathSchema.describe("Native configuration file that stores the instruction reference."),
+  referenceFormat: z
+    .enum(["yamlReadArray", "jsonRulesArray"])
+    .describe("Native configuration structure used to reference the instruction file."),
+});
+
 export const agentTargetSchema = z
   .discriminatedUnion("_tag", [
     z.strictObject({
@@ -86,16 +95,7 @@ export const agentTargetSchema = z
       _tag: z.literal("instructionFile"),
       path: targetPathSchema.describe("Instruction file that receives one managed block."),
     }),
-    z.strictObject({
-      _tag: z.literal("instructionLink"),
-      instructionPath: targetPathSchema.describe(
-        "Managed instruction file referenced from native agent configuration.",
-      ),
-      configPath: targetPathSchema.describe("Native configuration file that stores the instruction reference."),
-      referenceFormat: z
-        .enum(["yamlReadArray", "jsonRulesArray"])
-        .describe("Native configuration structure used to reference the instruction file."),
-    }),
+    instructionLinkTargetSchema,
   ])
   .describe("Exactly one native output format and destination for an agent.");
 
