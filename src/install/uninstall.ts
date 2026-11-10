@@ -1,9 +1,10 @@
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";
-import { errorMessage, InstallError, interactionSchema } from "./install-request.js";
+import { errorMessage, InstallError, interactionSchema, toInstallError } from "./install-request.js";
 import { planUninstall } from "./plan-changes.js";
 import { readReceipt, scopeSchema } from "./receipt.js";
 import { planRestorations } from "./restore.js";
@@ -20,7 +21,7 @@ export const uninstallRequestSchema = Schema.extend(
 type UninstallRequest = Schema.Schema.Type<typeof uninstallRequestSchema>;
 
 const uninstallSummaryFieldsSchema = {
-  scope: scopeSchema,
+  scope: zodAsEffectSchema(scopeSchema),
   interaction: interactionSchema,
 };
 
@@ -72,7 +73,10 @@ export const uninstall = (input: unknown) =>
     });
 
     // The receipt is the only authority to remove anything, so no receipt means nothing to do.
-    const receiptSnapshot = yield* readReceipt(path.join(request.destination.root, receiptPath));
+    const receiptSnapshot = yield* Effect.tryPromise({
+      try: () => readReceipt(path.join(request.destination.root, receiptPath)),
+      catch: toInstallError,
+    });
     if (receiptSnapshot._tag === "missing") {
       return uninstallSummary("absent", request);
     }

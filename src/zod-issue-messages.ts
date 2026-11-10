@@ -5,3 +5,21 @@ export const joinZodIssueMessages = (error: z.ZodError): string =>
   error.issues
     .map((issue) => (issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`))
     .join("; ");
+
+export interface ZodIssueDetail {
+  readonly path: ReadonlyArray<PropertyKey>;
+  readonly message: string;
+}
+
+// Reports each detail that is not null at its own path, e.g. ["ownedFiles", 1, "path"], from one refinement.
+export const addZodIssueDetails = (
+  context: z.RefinementCtx,
+  issueDetails: ReadonlyArray<ZodIssueDetail | null>,
+): void => {
+  for (const issueDetail of issueDetails) {
+    const isIssueFound = issueDetail != null;
+    if (isIssueFound) {
+      context.addIssue({ code: "custom", path: [...issueDetail.path], message: issueDetail.message });
+    }
+  }
+};

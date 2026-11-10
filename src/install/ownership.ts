@@ -1,88 +1,79 @@
-/** What one receipt entry owns in a host file: owner, kind, path, and the exact record needed to restore it. */
-
-import { Either, Encoding, Predicate, Schema } from "effect";
+import { z } from "zod";
 
 import { agentCatalog, agentIdSchema } from "../catalog/agent-catalog.js";
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
+import { addZodIssueDetails, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { replaceBytesWithBase64 } from "./file-bytes.js";
+import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
 // e.g. "skills/make-code-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
-const RELATIVE_PATH_PATTERN = /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/;
-const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+export const relativePathSchema = nonEmptyTrimmedTextSchema
+  .regex(
+    /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/,
+    "Owned file paths must be relative, normalized, and stay inside the scope root.",
+  )
+  .describe("Normalized scope-relative file path.");
+
+export const sha256Schema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, "Hashes must be lowercase SHA-256 hex strings.")
+  .describe("Lowercase SHA-256 digest.");
+
 // e.g. "/hooks/0/command", "/a~1b" (~0/~1 escapes) — not "hooks" (relative) or "/a~2"
-const JSON_POINTER_PATTERN = /^(?:\/(?:[^~/]|~[01])*)+$/;
+export const jsonPointerSchema = z
+  .string()
+  .regex(/^(?:\/(?:[^~/]|~[01])*)+$/, "JSON pointers must be absolute RFC 6901 paths with valid escape sequences.")
+  .describe("Absolute RFC 6901 pointer to one owned JSON value.");
 
-export const relativePathSchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(RELATIVE_PATH_PATTERN, {
-    message: () => "Owned file paths must be relative, normalized, and stay inside the scope root.",
-  }),
-  Schema.annotations({
-    description: "Normalized scope-relative file path.",
-  }),
-);
+const isCanonicalBase64 = (encoded: string): boolean => Buffer.from(encoded, "base64").toString("base64") === encoded;
 
-export const sha256Schema = Schema.String.pipe(
-  Schema.pattern(SHA256_HEX_PATTERN, {
-    message: () => "Hashes must be lowercase SHA-256 hex strings.",
-  }),
-  Schema.annotations({
-    description: "Lowercase SHA-256 digest.",
-  }),
-);
+const copyBytes = (bytes: Uint8Array): Uint8Array => new Uint8Array(bytes);
 
-export const jsonPointerSchema = Schema.String.pipe(
-  Schema.pattern(JSON_POINTER_PATTERN, {
-    message: () => "JSON pointers must be absolute RFC 6901 paths with valid escape sequences.",
-  }),
-  Schema.annotations({
-    description: "Absolute RFC 6901 pointer to one owned JSON value.",
-  }),
-);
+const decodeBase64Bytes = (encoded: string): Uint8Array => new Uint8Array(Buffer.from(encoded, "base64"));
 
-const base64BytesSchema = Schema.String.pipe(
-  Schema.filter(
-    (encoded) => {
-      const decoded = Encoding.decodeBase64(encoded);
+// Bytes are held as Uint8Array in memory and as canonical base64 in the receipt JSON.
+const priorBytesSchema = z
+  .union([
+    z.instanceof(Uint8Array).transform(copyBytes),
+    z.string().refine(isCanonicalBase64, "Prior file bytes must use canonical base64.").transform(decodeBase64Bytes),
+  ])
+  .describe("Original bytes decoded from their receipt-safe base64 representation.");
 
-      return Either.isRight(decoded) && Encoding.encodeBase64(decoded.right) === encoded;
-    },
-    {
-      message: () => "Prior file bytes must use canonical base64.",
-    },
-  ),
-  Schema.compose(Schema.Uint8ArrayFromBase64),
-);
-
-const isJsonValue = (value: unknown): boolean => {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+const isJsonValue = (jsonCandidate: unknown): boolean => {
+  const isJsonPrimitive =
+    jsonCandidate === null || typeof jsonCandidate === "string" || typeof jsonCandidate === "boolean";
+  if (isJsonPrimitive) {
     return true;
   }
 
-  if (typeof value === "number") {
-    return Number.isFinite(value);
+  const isJsonNumber = typeof jsonCandidate === "number";
+  if (isJsonNumber) {
+    return Number.isFinite(jsonCandidate);
   }
 
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
+  if (Array.isArray(jsonCandidate)) {
+    return jsonCandidate.every(isJsonValue);
   }
 
-  if (!Predicate.isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+  const isPlainObject =
+    typeof jsonCandidate === "object" &&
+    jsonCandidate !== null &&
+    Object.getPrototypeOf(jsonCandidate) === Object.prototype;
+
+  const isNotPlainObject = !isPlainObject;
+  if (isNotPlainObject) {
     return false;
   }
 
-  return Object.values(value).every(isJsonValue);
+  return Object.values(jsonCandidate).every(isJsonValue);
 };
 
-const jsonValueSchema = Schema.Unknown.pipe(
-  Schema.filter(isJsonValue, {
-    message: () => "Previous JSON values must contain only JSON-compatible data.",
-  }),
-);
+const jsonValueSchema = z.unknown().refine(isJsonValue, "Previous JSON values must contain only JSON-compatible data.");
 
-const uniqueValues = <Value>(values: ReadonlyArray<Value>): boolean => values.length === new Set(values).size;
+const hasUniqueEntries = <Entry>(entries: ReadonlyArray<Entry>): boolean => entries.length === new Set(entries).size;
 
 const knownAgentIds = new Set<string>(agentCatalog.map((agent) => agent.id));
 
-const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>) => {
+const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const unknownIndex = agentIds.findIndex((agentId) => !knownAgentIds.has(agentId));
   if (unknownIndex >= 0) {
     return [{ path: [unknownIndex], message: `Agent ownership ID ${agentIds[unknownIndex]} is unknown.` }];
@@ -103,127 +94,126 @@ const agentCatalogOrderIssues = (agentIds: ReadonlyArray<string>) => {
   return [];
 };
 
-const agentIdsSchema = Schema.NonEmptyArray(zodAsEffectSchema(agentIdSchema)).pipe(
-  Schema.filter(uniqueValues, {
-    message: () => "Agent ownership IDs must be unique.",
-  }),
-  Schema.filter(agentCatalogOrderIssues),
-);
+const agentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
+  const isAgentIdsUnique = hasUniqueEntries(agentIds);
 
-export const fileOwnerSchema = Schema.Union(
-  Schema.TaggedStruct("application", {}),
-  Schema.TaggedStruct("agent", {
-    agentIds: agentIdsSchema.annotations({
-      description: "Agents that share ownership of this exact file path.",
+  const hasDuplicateAgentIds = !isAgentIdsUnique;
+  if (hasDuplicateAgentIds) {
+    return [{ path: [], message: "Agent ownership IDs must be unique." }];
+  }
+
+  return agentCatalogOrderIssues(agentIds);
+};
+
+const agentIdsSchema = z
+  .array(agentIdSchema)
+  .min(1)
+  .superRefine((agentIds, context) => addZodIssueDetails(context, agentIdsIssues(agentIds)));
+
+export const agentOwnerSchema = z.strictObject({
+  _tag: z.literal("agent"),
+  agentIds: agentIdsSchema.describe("Agents that share ownership of this exact file path."),
+});
+
+export const fileOwnerSchema = z
+  .discriminatedUnion("_tag", [z.strictObject({ _tag: z.literal("application") }), agentOwnerSchema])
+  .describe("Application or shared agent ownership authority.");
+
+export type FileOwner = z.infer<typeof fileOwnerSchema>;
+
+export const instructionKindSchema = z.strictObject({ _tag: z.literal("instruction") });
+
+export const fileKindSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("runtime") }),
+    z.strictObject({ _tag: z.literal("skill") }),
+    z.strictObject({ _tag: z.literal("rule") }),
+    instructionKindSchema,
+    z.strictObject({ _tag: z.literal("instructionLink") }),
+    z.strictObject({ _tag: z.literal("settings") }),
+    z.strictObject({ _tag: z.literal("managedConfig") }),
+    z.strictObject({ _tag: z.literal("receipt") }),
+  ])
+  .describe("File role used to constrain ownership and restoration metadata.");
+
+type FileKind = z.infer<typeof fileKindSchema>;
+
+export const previousFileValueSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("missing") }),
+    z.strictObject({ _tag: z.literal("priorFile"), bytes: priorBytesSchema }),
+  ])
+  .describe("Original whole-file state needed for exact restoration.");
+
+export type PreviousFileValue = z.infer<typeof previousFileValueSchema>;
+
+const previousJsonLexicalSchema = z
+  .strictObject({
+    _tag: z.literal("value"),
+    source: z.string().min(1).describe("Exact JSON value token replaced while this pointer is owned."),
+  })
+  .describe("Exact lexical evidence needed to restore one settings value without reformatting user bytes.");
+
+export const previousJsonValueSchema = z
+  .discriminatedUnion("_tag", [
+    z.strictObject({ _tag: z.literal("missing") }),
+    z.strictObject({
+      _tag: z.literal("value"),
+      value: jsonValueSchema.describe("Exact JSON-compatible value present before this pointer first became owned."),
+      lexical: previousJsonLexicalSchema
+        .optional()
+        .describe("Settings-only lexical evidence correlated with the previous semantic value."),
     }),
-  }),
-).annotations({
-  description: "Application or shared agent ownership authority.",
-});
+  ])
+  .describe("JSON pointer state recorded before the pointer first became owned.");
 
-export type FileOwner = Schema.Schema.Type<typeof fileOwnerSchema>;
+export type PreviousJsonValue = z.infer<typeof previousJsonValueSchema>;
 
-export const fileKindSchema = Schema.Union(
-  Schema.TaggedStruct("runtime", {}),
-  Schema.TaggedStruct("skill", {}),
-  Schema.TaggedStruct("rule", {}),
-  Schema.TaggedStruct("instruction", {}),
-  Schema.TaggedStruct("instructionLink", {}),
-  Schema.TaggedStruct("settings", {}),
-  Schema.TaggedStruct("managedConfig", {}),
-  Schema.TaggedStruct("receipt", {}),
-).annotations({
-  description: "File role used to constrain ownership and restoration metadata.",
-});
-
-type FileKind = Schema.Schema.Type<typeof fileKindSchema>;
-
-export const previousFileValueSchema = Schema.Union(
-  Schema.TaggedStruct("missing", {}),
-  Schema.TaggedStruct("priorFile", {
-    bytes: base64BytesSchema.annotations({
-      description: "Original bytes decoded from their receipt-safe base64 representation.",
-    }),
-  }),
-).annotations({
-  description: "Original whole-file state needed for exact restoration.",
-});
-
-export type PreviousFileValue = Schema.Schema.Type<typeof previousFileValueSchema>;
-
-const previousJsonLexicalSchema = Schema.TaggedStruct("value", {
-  source: Schema.NonEmptyString.annotations({
-    description: "Exact JSON value token replaced while this pointer is owned.",
-  }),
-}).annotations({
-  description: "Exact lexical evidence needed to restore one settings value without reformatting user bytes.",
-});
-
-export const previousJsonValueSchema = Schema.Union(
-  Schema.TaggedStruct("missing", {}),
-  Schema.TaggedStruct("value", {
-    value: jsonValueSchema.annotations({
-      description: "Exact JSON-compatible value present before this pointer first became owned.",
-    }),
-    lexical: Schema.optional(previousJsonLexicalSchema).annotations({
-      description: "Settings-only lexical evidence correlated with the previous semantic value.",
-    }),
-  }),
-).annotations({
-  description: "JSON pointer state recorded before the pointer first became owned.",
-});
-
-export type PreviousJsonValue = Schema.Schema.Type<typeof previousJsonValueSchema>;
-
-export const wholeFileOwnershipSchema = Schema.TaggedStruct("wholeFile", {
-  installedHash: sha256Schema.annotations({
-    description: "Hash of the complete installed file.",
-  }),
+export const wholeFileOwnershipSchema = z.strictObject({
+  _tag: z.literal("wholeFile"),
+  installedHash: sha256Schema.describe("Hash of the complete installed file."),
   previous: previousFileValueSchema,
 });
 
-export const managedBlockOwnershipSchema = Schema.TaggedStruct("managedBlock", {
-  filePreviouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the host file existed before this receipt entry first managed it.",
-  }),
-  startMarker: Schema.NonEmptyTrimmedString.annotations({
-    description: "Exact opening marker delimiting the managed block.",
-  }),
-  endMarker: Schema.NonEmptyTrimmedString.annotations({
-    description: "Exact closing marker delimiting the managed block.",
-  }),
-  installedBodyHash: sha256Schema.annotations({
-    description: "Hash of the exact managed block body.",
-  }),
-}).pipe(
-  Schema.filter((ownership) =>
-    ownership.startMarker === ownership.endMarker
-      ? { path: ["endMarker"], message: "Managed block markers must be distinct." }
-      : undefined,
-  ),
+const managedBlockFieldsSchema = z.strictObject({
+  _tag: z.literal("managedBlock"),
+  filePreviouslyPresent: z
+    .boolean()
+    .describe("Whether the host file existed before this receipt entry first managed it."),
+  startMarker: nonEmptyTrimmedTextSchema.describe("Exact opening marker delimiting the managed block."),
+  endMarker: nonEmptyTrimmedTextSchema.describe("Exact closing marker delimiting the managed block."),
+  installedBodyHash: sha256Schema.describe("Hash of the exact managed block body."),
+});
+
+const managedBlockMarkerIssue = (ownership: z.infer<typeof managedBlockFieldsSchema>): ZodIssueDetail | null => {
+  const areMarkersDistinct = ownership.startMarker !== ownership.endMarker;
+  if (areMarkersDistinct) {
+    return null;
+  }
+
+  return { path: ["endMarker"], message: "Managed block markers must be distinct." };
+};
+
+export const managedBlockOwnershipSchema = managedBlockFieldsSchema.superRefine((ownership, context) =>
+  addZodIssueDetails(context, [managedBlockMarkerIssue(ownership)]),
 );
 
-export const installedJsonValueSchema = Schema.TaggedStruct("value", {
-  hash: sha256Schema.annotations({
-    description: "Hash of the canonical JSON value present after installation.",
-  }),
-}).annotations({
-  description: "Exact installed state required before one managed JSON pointer can be restored.",
-});
+const installedJsonValueSchema = z
+  .strictObject({
+    _tag: z.literal("value"),
+    hash: sha256Schema.describe("Hash of the canonical JSON value present after installation."),
+  })
+  .describe("Exact installed state required before one managed JSON pointer can be restored.");
 
-export type InstalledJsonValue = Schema.Schema.Type<typeof installedJsonValueSchema>;
+export type InstalledJsonValue = z.infer<typeof installedJsonValueSchema>;
 
-const ownedJsonValueSchema = Schema.Struct({
+const ownedJsonValueSchema = z.strictObject({
   pointer: jsonPointerSchema,
-  installed: installedJsonValueSchema.annotations({
-    description: "Exact hashed value state installed at this pointer.",
-  }),
-  previous: previousJsonValueSchema.annotations({
-    description: "State recorded before this JSON pointer first became owned.",
-  }),
+  installed: installedJsonValueSchema.describe("Exact hashed value state installed at this pointer."),
+  previous: previousJsonValueSchema.describe("State recorded before this JSON pointer first became owned."),
 });
 
-export type OwnedJsonValue = Schema.Schema.Type<typeof ownedJsonValueSchema>;
+export type OwnedJsonValue = z.infer<typeof ownedJsonValueSchema>;
 
 const nestedOrEqual = (left: string, right: string): boolean =>
   left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
@@ -232,14 +222,14 @@ const nestedOrEqual = (left: string, right: string): boolean =>
 export const pathsConflict = (left: string, right: string): boolean =>
   nestedOrEqual(left.toLowerCase(), right.toLowerCase());
 
-const pointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }>) =>
-  owned.flatMap((value, index) =>
+const pointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }>): Array<ZodIssueDetail> =>
+  owned.flatMap((ownedEntry, index) =>
     owned.slice(index + 1).flatMap((candidate, offset) =>
-      nestedOrEqual(value.pointer, candidate.pointer)
+      nestedOrEqual(ownedEntry.pointer, candidate.pointer)
         ? [
             {
               path: [index + offset + 1, "pointer"],
-              message: `JSON pointer ${candidate.pointer} conflicts with ${value.pointer}.`,
+              message: `JSON pointer ${candidate.pointer} conflicts with ${ownedEntry.pointer}.`,
             },
           ]
         : [],
@@ -249,7 +239,7 @@ const pointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }
 const createdContainerIssues = (ownership: {
   readonly createdContainers: ReadonlyArray<string>;
   readonly pointers: ReadonlyArray<string>;
-}) => [
+}): Array<ZodIssueDetail> => [
   ...ownership.createdContainers.flatMap((container, index) =>
     ownership.createdContainers.indexOf(container) === index
       ? []
@@ -267,121 +257,126 @@ const createdContainerIssues = (ownership: {
   ),
 ];
 
-const ownedJsonValuesSchema = Schema.Array(ownedJsonValueSchema).pipe(
-  Schema.minItems(1, {
-    message: () => "JSON ownership must record at least one pointer.",
-  }),
-  Schema.filter(pointerConflictIssues),
-);
+const ownedJsonValuesSchema = z
+  .array(ownedJsonValueSchema)
+  .min(1, "JSON ownership must record at least one pointer.")
+  .superRefine((ownedValues, context) => addZodIssueDetails(context, pointerConflictIssues(ownedValues)));
 
-export const jsonValuesOwnershipSchema = Schema.TaggedStruct("jsonValues", {
-  filePreviouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the host file existed before this receipt entry first managed it.",
-  }),
-  createdContainers: Schema.Array(jsonPointerSchema).annotations({
-    description: "Exact JSON object pointers created to reach owned values and removable only when empty.",
-  }),
-  values: ownedJsonValuesSchema,
-}).pipe(
-  Schema.filter((ownership) =>
-    createdContainerIssues({
-      createdContainers: ownership.createdContainers,
-      pointers: ownership.values.map((value) => value.pointer),
-    }),
-  ),
-);
+export const jsonValuesOwnershipSchema = z
+  .strictObject({
+    _tag: z.literal("jsonValues"),
+    filePreviouslyPresent: z
+      .boolean()
+      .describe("Whether the host file existed before this receipt entry first managed it."),
+    createdContainers: z
+      .array(jsonPointerSchema)
+      .describe("Exact JSON object pointers created to reach owned values and removable only when empty."),
+    values: ownedJsonValuesSchema,
+  })
+  .superRefine((ownership, context) =>
+    addZodIssueDetails(
+      context,
+      createdContainerIssues({
+        createdContainers: ownership.createdContainers,
+        pointers: ownership.values.map((ownedValue) => ownedValue.pointer),
+      }),
+    ),
+  );
 
-export type JsonValuesOwnership = Schema.Schema.Type<typeof jsonValuesOwnershipSchema>;
+export type JsonValuesOwnership = z.infer<typeof jsonValuesOwnershipSchema>;
 
-// e.g. "/hooks/Stop" — one hook event array named as is, never a nested member such as "/hooks/Stop/0"
-const HOOK_EVENT_POINTER_PATTERN = /^\/hooks\/[^~/]+$/;
-
-const ownedHookEventSchema = Schema.Struct({
-  pointer: jsonPointerSchema.pipe(
-    Schema.pattern(HOOK_EVENT_POINTER_PATTERN, {
-      message: () => "Hook event pointers must name one /hooks/<event> array.",
-    }),
-  ),
-  previouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the event array existed before agent-setup first added an entry to it.",
-  }),
-  entries: Schema.Array(sha256Schema).pipe(
-    Schema.minItems(1, {
-      message: () => "Hook event ownership must record at least one entry.",
-    }),
-    Schema.annotations({
-      description: "Hash of each agent-setup hook entry in the event array; other entries belong to the user.",
-    }),
-  ),
+const ownedHookEventSchema = z.strictObject({
+  pointer: jsonPointerSchema.regex(/^\/hooks\/[^~/]+$/, "Hook event pointers must name one /hooks/<event> array."),
+  previouslyPresent: z
+    .boolean()
+    .describe("Whether the event array existed before agent-setup first added an entry to it."),
+  entries: z
+    .array(sha256Schema)
+    .min(1, "Hook event ownership must record at least one entry.")
+    .describe("Hash of each agent-setup hook entry in the event array; other entries belong to the user."),
 });
 
-export type OwnedHookEvent = Schema.Schema.Type<typeof ownedHookEventSchema>;
+export type OwnedHookEvent = z.infer<typeof ownedHookEventSchema>;
 
-export const hookEntriesOwnershipSchema = Schema.TaggedStruct("hookEntries", {
-  filePreviouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the host file existed before this receipt entry first managed it.",
-  }),
-  createdContainers: Schema.Array(jsonPointerSchema).annotations({
-    description: "Exact JSON object pointers created to reach owned events and removable only when empty.",
-  }),
-  events: Schema.Array(ownedHookEventSchema).pipe(
-    Schema.minItems(1, {
-      message: () => "Hook entry ownership must record at least one event.",
-    }),
-    Schema.filter(pointerConflictIssues),
-  ),
-}).pipe(
-  Schema.filter((ownership) =>
-    createdContainerIssues({
-      createdContainers: ownership.createdContainers,
-      pointers: ownership.events.map((event) => event.pointer),
-    }),
-  ),
+export const hookEntriesOwnershipSchema = z
+  .strictObject({
+    _tag: z.literal("hookEntries"),
+    filePreviouslyPresent: z
+      .boolean()
+      .describe("Whether the host file existed before this receipt entry first managed it."),
+    createdContainers: z
+      .array(jsonPointerSchema)
+      .describe("Exact JSON object pointers created to reach owned events and removable only when empty."),
+    events: z
+      .array(ownedHookEventSchema)
+      .min(1, "Hook entry ownership must record at least one event.")
+      .superRefine((ownedEvents, context) => addZodIssueDetails(context, pointerConflictIssues(ownedEvents))),
+  })
+  .superRefine((ownership, context) =>
+    addZodIssueDetails(
+      context,
+      createdContainerIssues({
+        createdContainers: ownership.createdContainers,
+        pointers: ownership.events.map((ownedEvent) => ownedEvent.pointer),
+      }),
+    ),
+  );
+
+export type HookEntriesOwnership = z.infer<typeof hookEntriesOwnershipSchema>;
+
+const yamlSequenceFieldsSchema = z.strictObject({
+  _tag: z.literal("yamlSequenceValue"),
+  filePreviouslyPresent: z
+    .boolean()
+    .describe("Whether the host file existed before this receipt entry first managed it."),
+  key: nonEmptyTrimmedTextSchema.describe("Exact YAML sequence key that owns the reference."),
+  keyPreviouslyPresent: z
+    .boolean()
+    .describe("Whether the YAML sequence key existed before this reference first became owned."),
+  insertedPrefix: z
+    .enum(["", "\n", "\r\n"])
+    .describe("Exact separator inserted before a handler-created YAML key so removal can restore the prior bytes."),
+  reference: nonEmptyTrimmedTextSchema.describe("Exact sequence value installed under the key."),
+  previouslyPresent: z
+    .boolean()
+    .describe("Whether the exact key/reference pair existed before that pair first became owned."),
+});
+
+type YamlSequenceFields = z.infer<typeof yamlSequenceFieldsSchema>;
+
+const yamlReferenceIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
+  const isReferenceAfterKey = ownership.keyPreviouslyPresent || !ownership.previouslyPresent;
+  if (isReferenceAfterKey) {
+    return null;
+  }
+
+  return { path: ["previouslyPresent"], message: "A YAML reference cannot predate a key that did not exist." };
+};
+
+const yamlKeyPrefixIssue = (ownership: YamlSequenceFields): ZodIssueDetail | null => {
+  const isPrefixAllowed = !ownership.keyPreviouslyPresent || ownership.insertedPrefix.length === 0;
+  if (isPrefixAllowed) {
+    return null;
+  }
+
+  return { path: ["insertedPrefix"], message: "A pre-existing YAML key cannot own an inserted key prefix." };
+};
+
+export const yamlSequenceValueOwnershipSchema = yamlSequenceFieldsSchema.superRefine((ownership, context) =>
+  addZodIssueDetails(context, [yamlReferenceIssue(ownership), yamlKeyPrefixIssue(ownership)]),
 );
 
-export type HookEntriesOwnership = Schema.Schema.Type<typeof hookEntriesOwnershipSchema>;
+export type YamlSequenceValueOwnership = z.infer<typeof yamlSequenceValueOwnershipSchema>;
 
-export const yamlSequenceValueOwnershipSchema = Schema.TaggedStruct("yamlSequenceValue", {
-  filePreviouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the host file existed before this receipt entry first managed it.",
-  }),
-  key: Schema.NonEmptyTrimmedString.annotations({
-    description: "Exact YAML sequence key that owns the reference.",
-  }),
-  keyPreviouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the YAML sequence key existed before this reference first became owned.",
-  }),
-  insertedPrefix: Schema.Literal("", "\n", "\r\n").annotations({
-    description: "Exact separator inserted before a handler-created YAML key so removal can restore the prior bytes.",
-  }),
-  reference: Schema.NonEmptyTrimmedString.annotations({
-    description: "Exact sequence value installed under the key.",
-  }),
-  previouslyPresent: Schema.Boolean.annotations({
-    description: "Whether the exact key/reference pair existed before that pair first became owned.",
-  }),
-}).pipe(
-  Schema.filter((ownership) => [
-    ownership.keyPreviouslyPresent || !ownership.previouslyPresent
-      ? undefined
-      : { path: ["previouslyPresent"], message: "A YAML reference cannot predate a key that did not exist." },
-    !ownership.keyPreviouslyPresent || ownership.insertedPrefix.length === 0
-      ? undefined
-      : { path: ["insertedPrefix"], message: "A pre-existing YAML key cannot own an inserted key prefix." },
-  ]),
-);
-
-export type YamlSequenceValueOwnership = Schema.Schema.Type<typeof yamlSequenceValueOwnershipSchema>;
-
-const ownershipSchema = Schema.Union(
+const ownershipSchema = z.union([
   wholeFileOwnershipSchema,
   managedBlockOwnershipSchema,
   jsonValuesOwnershipSchema,
   hookEntriesOwnershipSchema,
   yamlSequenceValueOwnershipSchema,
-);
+]);
 
-export type Ownership = Schema.Schema.Type<typeof ownershipSchema>;
+export type Ownership = z.infer<typeof ownershipSchema>;
 
 const ownerMatchesKind = (kind: FileKind, owner: FileOwner): boolean => {
   switch (kind._tag) {
@@ -415,39 +410,51 @@ const ownershipMatchesKind = (kind: FileKind, ownership: Ownership): boolean => 
   }
 };
 
-const jsonValueTextSchema = Schema.parseJson(jsonValueSchema);
-const decodeJsonValueSource = Schema.decodeUnknownEither(jsonValueTextSchema, {
-  onExcessProperty: "error",
-});
+const parseJsonSourceOrNull = (source: string): { readonly parsedValue: unknown } | null => {
+  try {
+    return { parsedValue: JSON.parse(source) };
+  } catch {
+    // Source that is not JSON simply cannot match the value, so the caller reports it as not restorable.
+    return null;
+  }
+};
 
-const jsonValuesEqual = (left: unknown, right: unknown): boolean =>
-  Schema.encodeSync(jsonValueTextSchema)(left) === Schema.encodeSync(jsonValueTextSchema)(right);
+const jsonValuesEqual = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
-const lexicalMatchesPrevious = (value: OwnedJsonValue): boolean => {
-  if (value.previous._tag === "missing" || value.previous.lexical === undefined) {
+const lexicalMatchesPrevious = (ownedValue: OwnedJsonValue): boolean => {
+  const isLexicalAbsent = ownedValue.previous._tag === "missing" || ownedValue.previous.lexical == null;
+  if (isLexicalAbsent) {
     return false;
   }
 
-  const decoded = decodeJsonValueSource(value.previous.lexical.source);
+  const lexicalSource = parseJsonSourceOrNull(ownedValue.previous.lexical.source);
 
-  return Either.isRight(decoded) && jsonValuesEqual(decoded.right, value.previous.value);
+  const isLexicalSourceUnparsed = lexicalSource === null;
+  if (isLexicalSourceUnparsed) {
+    return false;
+  }
+
+  const isLexicalJsonValid = jsonValueSchema.safeParse(lexicalSource.parsedValue).success;
+
+  return isLexicalJsonValid && jsonValuesEqual(lexicalSource.parsedValue, ownedValue.previous.value);
 };
 
-const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }) => {
+const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {
   if (entry.ownership._tag !== "jsonValues") {
     return [];
   }
 
-  return entry.ownership.values.flatMap((value, index) => {
+  return entry.ownership.values.flatMap((ownedValue, index) => {
     const path = ["ownership", "values", index, "previous", "lexical"];
-    const lexical = value.previous._tag === "value" ? value.previous.lexical : undefined;
+    const lexical = ownedValue.previous._tag === "value" ? ownedValue.previous.lexical : null;
     if (entry.kind._tag !== "settings") {
-      return lexical === undefined
+      return lexical == null
         ? []
         : [{ path, message: "Only settings ownership may carry lexical JSON restoration evidence." }];
     }
 
-    if (value.previous._tag === "missing" || lexicalMatchesPrevious(value)) {
+    const isLexicalEvidenceMatched = ownedValue.previous._tag === "missing" || lexicalMatchesPrevious(ownedValue);
+    if (isLexicalEvidenceMatched) {
       return [];
     }
 
@@ -455,26 +462,44 @@ const settingsLexicalIssues = (entry: { kind: FileKind; ownership: Ownership }) 
   });
 };
 
-export const ownedFileSchema = Schema.Struct({
-  owner: fileOwnerSchema,
-  path: relativePathSchema,
-  kind: fileKindSchema,
-  ownership: ownershipSchema,
-}).pipe(
-  Schema.filter((entry) => [
-    ownerMatchesKind(entry.kind, entry.owner)
-      ? undefined
-      : { path: ["owner"], message: `File kind ${entry.kind._tag} has incompatible owner ${entry.owner._tag}.` },
-    ownershipMatchesKind(entry.kind, entry.ownership)
-      ? undefined
-      : {
-          path: ["ownership"],
-          message: `File kind ${entry.kind._tag} has incompatible ownership ${entry.ownership._tag}.`,
-        },
-    ...settingsLexicalIssues(entry),
-  ]),
-);
+const ownerKindIssue = (entry: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
+  if (ownerMatchesKind(entry.kind, entry.owner)) {
+    return null;
+  }
 
-export type OwnedFile = Schema.Schema.Type<typeof ownedFileSchema>;
+  return {
+    path: ["owner"],
+    message: `File kind ${entry.kind._tag} has incompatible owner ${entry.owner._tag}.`,
+  };
+};
 
-export const ownedFilesEqual = Schema.equivalence(ownedFileSchema);
+const ownershipKindIssue = (entry: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
+  if (ownershipMatchesKind(entry.kind, entry.ownership)) {
+    return null;
+  }
+
+  return {
+    path: ["ownership"],
+    message: `File kind ${entry.kind._tag} has incompatible ownership ${entry.ownership._tag}.`,
+  };
+};
+
+export const ownedFileSchema = z
+  .strictObject({
+    owner: fileOwnerSchema,
+    path: relativePathSchema,
+    kind: fileKindSchema,
+    ownership: ownershipSchema,
+  })
+  .superRefine((entry, context) =>
+    addZodIssueDetails(context, [ownerKindIssue(entry), ownershipKindIssue(entry), ...settingsLexicalIssues(entry)]),
+  );
+
+export type OwnedFile = z.infer<typeof ownedFileSchema>;
+
+const stringifyOwnedFile = (file: OwnedFile): string =>
+  JSON.stringify(ownedFileSchema.parse(file), replaceBytesWithBase64);
+
+// Compares two owned files by their canonical JSON, so key order and byte copies never matter.
+export const ownedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
+  stringifyOwnedFile(left) === stringifyOwnedFile(right);

@@ -5,8 +5,8 @@ import { Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 import { agentDefinitionSchema, agentTargetSchema } from "../../catalog/agent-catalog.js";
 import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import {
+  agentOwnerSchema,
   fileKindSchema,
-  fileOwnerSchema,
   type JsonValuesOwnership,
   jsonValuesOwnershipSchema,
   relativePathSchema,
@@ -28,22 +28,27 @@ class InstructionLinkPlanError extends Schema.TaggedError<InstructionLinkPlanErr
 
 const linkIssue = (issue: string) => new InstructionLinkPlanError({ issue });
 
+const readErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 const toLinkError = (error: SchemaParseIssue.ParseError) =>
   linkIssue(SchemaParseIssue.TreeFormatter.formatErrorSync(error));
 
 type LinkOwnership = JsonValuesOwnership | YamlSequenceValueOwnership;
 
 const ownedInstructionLinkSchema = Schema.Struct({
-  owner: fileOwnerSchema.members[1].annotations({
+  owner: zodAsEffectSchema(agentOwnerSchema).annotations({
     description: "Single catalog agent that owns this native instruction link.",
   }),
-  path: relativePathSchema.annotations({
+  path: zodAsEffectSchema(relativePathSchema).annotations({
     description: "Exact native config path declared by the catalog target.",
   }),
-  kind: fileKindSchema.members[4].annotations({
+  kind: zodAsEffectSchema(fileKindSchema.options[4]).annotations({
     description: "File kind fixed to a native instruction link.",
   }),
-  ownership: Schema.Union(jsonValuesOwnershipSchema, yamlSequenceValueOwnershipSchema).annotations({
+  ownership: Schema.Union(
+    zodAsEffectSchema(jsonValuesOwnershipSchema),
+    zodAsEffectSchema(yamlSequenceValueOwnershipSchema),
+  ).annotations({
     description: "Exact JSON member or YAML sequence history retained for restoration.",
   }),
 });
@@ -179,11 +184,15 @@ const addReference = (
   });
 
   switch (target.referenceFormat) {
-    case "yamlReadArray":
-      return Either.mapBoth(
-        addYamlRead({ ...link, previousOwnership: ownership?._tag === "yamlSequenceValue" ? ownership : undefined }),
-        { onLeft: linkIssue, onRight: toWrite },
-      );
+    case "yamlReadArray": {
+      const previousYamlOwnership = ownership?._tag === "yamlSequenceValue" ? ownership : null;
+      const yamlReadReply = Either.try({
+        try: () => addYamlRead({ ...link, previousOwnership: previousYamlOwnership }),
+        catch: (error) => linkIssue(readErrorMessage(error)),
+      });
+
+      return Either.map(yamlReadReply, toWrite);
+    }
     case "jsonRulesArray":
       return Either.mapBoth(
         addJsonRule({ ...link, previousOwnership: ownership?._tag === "jsonValues" ? ownership : undefined }),
@@ -198,10 +207,17 @@ const unownedBytes = (request: InstructionLinkRequest, ownership: LinkOwnership)
   const bytes = currentBytes(request);
 
   switch (target.referenceFormat) {
-    case "yamlReadArray":
-      return bytes === undefined || ownership._tag !== "yamlSequenceValue"
-        ? Either.left("Receipted Aider configuration is missing or incompatible.")
-        : removeYamlRead({ currentBytes: bytes, configPath: target.configPath, ownership });
+    case "yamlReadArray": {
+      const isYamlReferenceUnusable = bytes === undefined || ownership._tag !== "yamlSequenceValue";
+      if (isYamlReferenceUnusable) {
+        return Either.left("Receipted Aider configuration is missing or incompatible.");
+      }
+
+      return Either.try({
+        try: () => removeYamlRead({ currentBytes: bytes, configPath: target.configPath, ownership }),
+        catch: readErrorMessage,
+      });
+    }
     case "jsonRulesArray":
       return bytes === undefined || ownership._tag !== "jsonValues"
         ? Either.left("Receipted Continue configuration is missing or incompatible.")

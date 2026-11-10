@@ -19,7 +19,7 @@ import { managedConfigPath, readConfigFile } from "../config/config-file.js";
 import { type Config, isConfig } from "../config/config-schema.js";
 import { hostOperatingSystems } from "../config/host-scan.js";
 import { installationDestinationSchema, receiptPath } from "../install/install-paths.js";
-import { preparedPackageSchema } from "../install/install-request.js";
+import { preparedPackageSchema, toInstallError } from "../install/install-request.js";
 import { relativePathSchema } from "../install/ownership.js";
 import { type Receipt, readReceipt, receiptSchema, scopeSchema, versionSchema } from "../install/receipt.js";
 import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
@@ -49,10 +49,10 @@ const configHealthSchema = Schema.Union(
 const installationHealthSchema = Schema.Union(
   Schema.TaggedStruct("missing", {}),
   Schema.TaggedStruct("present", {
-    version: receiptSchema.fields.version.annotations({
+    version: zodAsEffectSchema(receiptSchema.shape.version).annotations({
       description: "Installed package version recorded by the receipt.",
     }),
-    features: receiptSchema.fields.features.annotations({
+    features: zodAsEffectSchema(receiptSchema.shape.features).annotations({
       description: "Dependency-resolved installed features recorded by the receipt.",
     }),
   }),
@@ -63,12 +63,12 @@ const installationHealthSchema = Schema.Union(
 const preparedRuntimeStatusSchema = Schema.Union(
   Schema.TaggedStruct("notRequired", {}),
   Schema.TaggedStruct("present", {
-    path: relativePathSchema.annotations({
+    path: zodAsEffectSchema(relativePathSchema).annotations({
       description: "Verified prepared runtime entrypoint relative to the prepared package root.",
     }),
   }),
   Schema.TaggedStruct("missing", {
-    path: relativePathSchema.annotations({
+    path: zodAsEffectSchema(relativePathSchema).annotations({
       description: "Expected prepared runtime entrypoint missing from the prepared package.",
     }),
   }),
@@ -110,12 +110,12 @@ const agentHealthSchema = Schema.Struct({
 
 const discrepancySchema = Schema.Union(
   Schema.TaggedStruct("receiptScopeMismatch", {
-    requestedScope: scopeSchema,
-    receiptScope: scopeSchema,
+    requestedScope: zodAsEffectSchema(scopeSchema),
+    receiptScope: zodAsEffectSchema(scopeSchema),
   }),
   Schema.TaggedStruct("packageVersionMismatch", {
-    installedVersion: versionSchema,
-    preparedVersion: versionSchema,
+    installedVersion: zodAsEffectSchema(versionSchema),
+    preparedVersion: zodAsEffectSchema(versionSchema),
   }),
   Schema.TaggedStruct("missingManagedConfig", {}),
   Schema.TaggedStruct("unsupportedFeaturePlatform", {
@@ -124,7 +124,7 @@ const discrepancySchema = Schema.Union(
   }),
   Schema.TaggedStruct("missingPreparedRuntime", {
     featureId: zodAsEffectSchema(featureIdSchema),
-    path: relativePathSchema,
+    path: zodAsEffectSchema(relativePathSchema),
   }),
   Schema.TaggedStruct("detectedAgentNotManaged", {
     agentId: zodAsEffectSchema(agentIdSchema),
@@ -142,7 +142,7 @@ const discrepancySchema = Schema.Union(
 export type Discrepancy = Schema.Schema.Type<typeof discrepancySchema>;
 
 const healthReportSchema = Schema.Struct({
-  scope: scopeSchema.annotations({
+  scope: zodAsEffectSchema(scopeSchema).annotations({
     description: "Installation scope inspected by this report.",
   }),
   config: configHealthSchema,
@@ -268,7 +268,10 @@ export const checkHealth = (input: unknown) =>
       try: () => readConfigFile(path.join(request.destination.root, managedConfigPath)),
       catch: (error) => error,
     });
-    const receiptSnapshot = yield* readReceipt(path.join(request.destination.root, receiptPath));
+    const receiptSnapshot = yield* Effect.tryPromise({
+      try: () => readReceipt(path.join(request.destination.root, receiptPath)),
+      catch: toInstallError,
+    });
     const receipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     const featureDiagnostics = receipt === undefined ? [] : yield* checkFeatureHealth(request, receipt);
     const agentDiagnostics = checkAgentHealth(request.agentEvidence, receipt);

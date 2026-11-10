@@ -5,6 +5,7 @@ import { Effect, type Schema } from "effect";
 
 import { isNotFound } from "../install/file-bytes.js";
 import { type installationDestinationSchema, receiptPath } from "../install/install-paths.js";
+import { toInstallError } from "../install/install-request.js";
 import { preparePackage } from "../install/prepare-package.js";
 import { readReceipt, type Scope } from "../install/receipt.js";
 import { update } from "../install/update.js";
@@ -80,7 +81,10 @@ export const saveConfig = (request: { readonly target: ConfigTarget; readonly co
     const { target, configuration } = request;
     const path = yield* Path.Path;
     const fileSystem = yield* FileSystem.FileSystem;
-    const receiptSnapshot = yield* readReceipt(path.join(target.destination.root, receiptPath));
+    const receiptSnapshot = yield* Effect.tryPromise({
+      try: () => readReceipt(path.join(target.destination.root, receiptPath)),
+      catch: toInstallError,
+    });
     if (receiptSnapshot._tag === "present") {
       if (receiptSnapshot.receipt.scope !== target.scope) {
         return yield* Effect.fail(

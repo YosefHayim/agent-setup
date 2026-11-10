@@ -1,6 +1,9 @@
-import { FileSystem } from "@effect/platform";
-import { describe, expect, expectTypeOf, it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
+import type { z } from "zod";
 
 import {
   fileKindSchema,
@@ -17,19 +20,33 @@ import {
   sha256Schema,
   yamlSequenceValueOwnershipSchema,
 } from "./ownership.js";
-import {
-  decodeReceiptJson,
-  type Receipt,
-  ReceiptParseError,
-  readReceipt,
-  receiptJsonSchema,
-  receiptSchema,
-} from "./receipt.js";
+import { decodeReceiptJson, encodeReceiptJson, type Receipt, readReceipt, receiptSchema } from "./receipt.js";
 
 const installedHash = "a".repeat(64);
 const installedValueHash = "b".repeat(64);
-const receiptPath = "/workspace/.claude/agent-setup/receipt.json";
 const textEncoder = new TextEncoder();
+
+const temporaryRoots: Array<string> = [];
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const makeTemporaryRoot = (prefix: string): string => {
+  const root = mkdtempSync(path.join(tmpdir(), prefix));
+  temporaryRoots.push(root);
+
+  return root;
+};
+
+const writeReceiptFile = (bytes: Uint8Array): string => {
+  const receiptFilePath = path.join(makeTemporaryRoot("agent-setup-receipt-"), "receipt.json");
+  writeFileSync(receiptFilePath, bytes);
+
+  return receiptFilePath;
+};
 
 const missingPrevious = { _tag: "missing" };
 const applicationOwner = { _tag: "application" };
@@ -134,19 +151,20 @@ const completeReceiptInput = {
   ],
 };
 
-const strictDecoder = <Type, Encoded>(schema: Schema.Schema<Type, Encoded>) =>
-  Schema.decodeUnknownSync(schema, { onExcessProperty: "error" });
+const createStrictDecoder =
+  <Output>(zodSchema: z.ZodType<Output>) =>
+  (input: unknown): Output =>
+    zodSchema.parse(input);
 
-const decodeReceipt = strictDecoder(receiptSchema);
-const decodeEntry = strictDecoder(ownedFileSchema);
-const decodeOwner = strictDecoder(fileOwnerSchema);
-const decodeKind = strictDecoder(fileKindSchema);
-const decodePreviousFile = strictDecoder(previousFileValueSchema);
-const decodePreviousJson = strictDecoder(previousJsonValueSchema);
-const decodeJsonValues = strictDecoder(jsonValuesOwnershipSchema);
-const decodeYamlSequenceValue = strictDecoder(yamlSequenceValueOwnershipSchema);
-const decodeHookEntries = strictDecoder(hookEntriesOwnershipSchema);
-const encodeReceiptJson = Schema.encodeSync(receiptJsonSchema);
+const decodeReceipt = createStrictDecoder(receiptSchema);
+const decodeEntry = createStrictDecoder(ownedFileSchema);
+const decodeOwner = createStrictDecoder(fileOwnerSchema);
+const decodeKind = createStrictDecoder(fileKindSchema);
+const decodePreviousFile = createStrictDecoder(previousFileValueSchema);
+const decodePreviousJson = createStrictDecoder(previousJsonValueSchema);
+const decodeJsonValues = createStrictDecoder(jsonValuesOwnershipSchema);
+const decodeYamlSequenceValue = createStrictDecoder(yamlSequenceValueOwnershipSchema);
+const decodeHookEntries = createStrictDecoder(hookEntriesOwnershipSchema);
 
 const completeReceipt = decodeReceipt(completeReceiptInput);
 const completeReceiptJson = encodeReceiptJson(completeReceipt);
@@ -160,20 +178,6 @@ const receiptWithFiles = (files: ReadonlyArray<unknown>) => ({
 
 const roundTrip = (files: ReadonlyArray<unknown>) =>
   decodeReceiptJson(encodeReceiptJson(decodeReceipt(receiptWithFiles(files))));
-
-const readFixtureReceipt = (bytes: Uint8Array) =>
-  readReceipt(receiptPath).pipe(
-    Effect.provide(
-      FileSystem.layerNoop({
-        readFile: (path) =>
-          Effect.sync(() => {
-            expect(path).toBe(receiptPath);
-
-            return bytes;
-          }),
-      }),
-    ),
-  );
 
 describe("receiptSchema", () => {
   it("decodes every receiptable file kind and all ownership tags", () => {
@@ -227,75 +231,67 @@ describe("receiptSchema", () => {
     expect(() => decodeReceipt(receiptWithFiles([receiptEntry]))).toThrow(/itself|receipt/i);
   });
 
-  it.effect("round-trips every receipt field through the JSON codec", () =>
-    Effect.gen(function* () {
-      const encoded = JSON.parse(completeReceiptJson);
+  it("round-trips every receipt field through the JSON codec", () => {
+    const encoded = JSON.parse(completeReceiptJson);
 
-      expect(Object.keys(encoded)).toEqual(["version", "scope", "features", "ownedFiles"]);
-      expect(encoded.ownedFiles[0].ownership.previous.bytes).toBe("AQID");
-      expect(yield* decodeReceiptJson(completeReceiptJson)).toEqual(completeReceipt);
-    }),
-  );
+    expect(Object.keys(encoded)).toEqual(["version", "scope", "features", "ownedFiles"]);
+    expect(encoded.ownedFiles[0].ownership.previous.bytes).toBe("AQID");
+    expect(decodeReceiptJson(completeReceiptJson)).toEqual(completeReceipt);
+  });
 
-  it.effect("preserves host-file existence for member-level ownership through receipt JSON", () =>
-    Effect.gen(function* () {
-      const receipt = yield* roundTrip([
-        ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
-        ownedFile("instructionLink", {
-          owner: agentOwner,
-          path: ".continue/config.json",
-          ownership: {
-            ...jsonValuesOwnership,
-            filePreviouslyPresent: false,
-            values: jsonValuesOwnership.values.map((value) => ({ ...value, previous: missingPrevious })),
-          },
-        }),
-        ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),
-      ]);
-
-      expect(receipt.ownedFiles.map((file) => file.ownership)).toMatchObject([
-        { _tag: "managedBlock", filePreviouslyPresent: true },
-        { _tag: "jsonValues", filePreviouslyPresent: false },
-        { _tag: "yamlSequenceValue", filePreviouslyPresent: true },
-      ]);
-    }),
-  );
-
-  it.effect("round-trips members acquired after a receipt first created their host files", () =>
-    Effect.gen(function* () {
-      const receipt = yield* roundTrip([
-        ownedFile("instructionLink", {
-          owner: agentOwner,
-          path: ".continue/config.json",
-          ownership: { ...jsonValuesOwnership, filePreviouslyPresent: false },
-        }),
-        ownedFile("instructionLink", {
-          owner: agentOwner,
-          path: ".aider.conf.yml",
-          ownership: { ...yamlSequenceOwnership, filePreviouslyPresent: false, previouslyPresent: true },
-        }),
-      ]);
-
-      expect(receipt.ownedFiles.map((file) => file.ownership)).toMatchObject([
-        {
-          _tag: "jsonValues",
+  it("preserves host-file existence for member-level ownership through receipt JSON", () => {
+    const receipt = roundTrip([
+      ownedFile("instruction", { owner: sharedAgentOwner, path: "AGENTS.md", ownership: managedBlockOwnership }),
+      ownedFile("instructionLink", {
+        owner: agentOwner,
+        path: ".continue/config.json",
+        ownership: {
+          ...jsonValuesOwnership,
           filePreviouslyPresent: false,
-          values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "value", value: false } }],
+          values: jsonValuesOwnership.values.map((value) => ({ ...value, previous: missingPrevious })),
         },
-        { _tag: "yamlSequenceValue", filePreviouslyPresent: false, previouslyPresent: true },
-      ]);
-    }),
-  );
+      }),
+      ownedFile("instructionLink", { owner: agentOwner, path: ".aider.conf.yml", ownership: yamlSequenceOwnership }),
+    ]);
 
-  it.effect.each([
+    expect(receipt.ownedFiles.map((file) => file.ownership)).toMatchObject([
+      { _tag: "managedBlock", filePreviouslyPresent: true },
+      { _tag: "jsonValues", filePreviouslyPresent: false },
+      { _tag: "yamlSequenceValue", filePreviouslyPresent: true },
+    ]);
+  });
+
+  it("round-trips members acquired after a receipt first created their host files", () => {
+    const receipt = roundTrip([
+      ownedFile("instructionLink", {
+        owner: agentOwner,
+        path: ".continue/config.json",
+        ownership: { ...jsonValuesOwnership, filePreviouslyPresent: false },
+      }),
+      ownedFile("instructionLink", {
+        owner: agentOwner,
+        path: ".aider.conf.yml",
+        ownership: { ...yamlSequenceOwnership, filePreviouslyPresent: false, previouslyPresent: true },
+      }),
+    ]);
+
+    expect(receipt.ownedFiles.map((file) => file.ownership)).toMatchObject([
+      {
+        _tag: "jsonValues",
+        filePreviouslyPresent: false,
+        values: [{ previous: { _tag: "missing" } }, { previous: { _tag: "value", value: false } }],
+      },
+      { _tag: "yamlSequenceValue", filePreviouslyPresent: false, previouslyPresent: true },
+    ]);
+  });
+
+  it.each([
     { ...completeReceiptInput, unexpected: true },
     { ...completeReceiptInput, detectedAgents: ["codex"] },
-  ])("rejects receipt-level excess or detection evidence", (input) =>
-    Effect.gen(function* () {
-      expect(() => decodeReceipt(input)).toThrow();
-      expect((yield* Effect.either(decodeReceiptJson(JSON.stringify(input))))._tag).toBe("Left");
-    }),
-  );
+  ])("rejects receipt-level excess or detection evidence", (input) => {
+    expect(() => decodeReceipt(input)).toThrow();
+    expect(() => decodeReceiptJson(JSON.stringify(input))).toThrow();
+  });
 
   it.each([
     { name: "owner", decode: () => decodeOwner({ _tag: "application", extra: true }) },
@@ -322,15 +318,15 @@ describe("receiptSchema", () => {
     ".",
     "nested/./file",
   ])("rejects unsafe file path %j", (path) => {
-    expect(() => Schema.decodeUnknownSync(relativePathSchema)(path)).toThrow();
+    expect(() => relativePathSchema.parse(path)).toThrow();
   });
 
   it.each([".claude/settings.json", "AGENTS.md"])("accepts normalized relative path %j", (path) => {
-    expect(Schema.decodeUnknownSync(relativePathSchema)(path)).toBe(path);
+    expect(relativePathSchema.parse(path)).toBe(path);
   });
 
   it.each(["a".repeat(63), "A".repeat(64), `${"a".repeat(63)}g`, ""])("rejects invalid SHA-256 %j", (hash) => {
-    expect(() => Schema.decodeUnknownSync(sha256Schema)(hash)).toThrow();
+    expect(() => sha256Schema.parse(hash)).toThrow();
   });
 
   it("decodes canonical base64 prior file bytes", () => {
@@ -345,11 +341,11 @@ describe("receiptSchema", () => {
   });
 
   it.each(["", "rules", "#/rules", "/bad~2escape", "/bad~escape"])("rejects invalid JSON pointer %j", (pointer) => {
-    expect(() => Schema.decodeUnknownSync(jsonPointerSchema)(pointer)).toThrow();
+    expect(() => jsonPointerSchema.parse(pointer)).toThrow();
   });
 
   it.each(["/rules/0", "/a~1b/~0key"])("accepts escaped absolute JSON pointer %j", (pointer) => {
-    expect(Schema.decodeUnknownSync(jsonPointerSchema)(pointer)).toBe(pointer);
+    expect(jsonPointerSchema.parse(pointer)).toBe(pointer);
   });
 
   it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 1n, new Date("2026-01-01T00:00:00.000Z")])(
@@ -459,7 +455,7 @@ describe("receiptSchema", () => {
 
   it("rejects equal managed-block markers", () => {
     expect(() =>
-      strictDecoder(managedBlockOwnershipSchema)({
+      createStrictDecoder(managedBlockOwnershipSchema)({
         ...managedBlockOwnership,
         startMarker: "marker",
         endMarker: "marker",
@@ -525,37 +521,37 @@ describe("receiptSchema", () => {
 });
 
 describe("readReceipt", () => {
-  it.effect("returns tagged missing or present snapshots from the requested path", () =>
-    Effect.gen(function* () {
-      const bytes = textEncoder.encode(`\n${completeReceiptJson}\n`);
-      const missing = yield* readReceipt(receiptPath).pipe(Effect.provide(FileSystem.layerNoop({})));
-      const present = yield* readFixtureReceipt(bytes);
+  it("returns a missing snapshot when no receipt file exists at the requested path", async () => {
+    const receiptFilePath = path.join(makeTemporaryRoot("agent-setup-receipt-"), "receipt.json");
 
-      expect(missing).toEqual({ _tag: "missing" });
-      expect(present).toEqual({ _tag: "present", bytes, receipt: completeReceipt });
-      if (present._tag === "present") {
-        expect(present.bytes).toBe(bytes);
-      }
-    }),
-  );
+    const missing = await readReceipt(receiptFilePath);
 
-  it.effect("rejects malformed UTF-8 instead of accepting replacement characters", () =>
-    Effect.gen(function* () {
-      const markerIndex = completeReceiptJson.indexOf("scratch-folder-guard.js");
-      const bytes = new Uint8Array([
-        ...textEncoder.encode(completeReceiptJson.slice(0, markerIndex)),
-        0xff,
-        ...textEncoder.encode(completeReceiptJson.slice(markerIndex + 1)),
-      ]);
-      const error = yield* Effect.flip(readFixtureReceipt(bytes));
+    expect(missing).toEqual({ _tag: "missing" });
+  });
 
-      expect(error).toBeInstanceOf(ReceiptParseError);
-      expect(error.message).toContain(receiptPath);
-      expect(error.message).toContain("UTF-8");
-    }),
-  );
+  it("returns a present snapshot with the exact bytes and the decoded receipt", async () => {
+    const bytes = textEncoder.encode(`\n${completeReceiptJson}\n`);
+    const receiptFilePath = writeReceiptFile(bytes);
 
-  it.effect.each([
+    const present = await readReceipt(receiptFilePath);
+
+    expect(present).toEqual({ _tag: "present", bytes, receipt: completeReceipt });
+  });
+
+  it("rejects malformed UTF-8 instead of accepting replacement characters", async () => {
+    const markerIndex = completeReceiptJson.indexOf("scratch-folder-guard.js");
+    const bytes = new Uint8Array([
+      ...textEncoder.encode(completeReceiptJson.slice(0, markerIndex)),
+      0xff,
+      ...textEncoder.encode(completeReceiptJson.slice(markerIndex + 1)),
+    ]);
+    const receiptFilePath = writeReceiptFile(bytes);
+
+    await expect(readReceipt(receiptFilePath)).rejects.toThrow(receiptFilePath);
+    await expect(readReceipt(receiptFilePath)).rejects.toThrow("UTF-8");
+  });
+
+  it.each([
     {
       name: "a leading UTF-8 byte-order mark",
       bytes: new Uint8Array([0xef, 0xbb, 0xbf, ...textEncoder.encode(completeReceiptJson)]),
@@ -568,7 +564,7 @@ describe("readReceipt", () => {
       ),
       fragments: ["duplicate JSON property", "version"],
     },
-    { name: "malformed JSON", bytes: textEncoder.encode("{not-json"), fragments: [receiptPath] },
+    { name: "malformed JSON", bytes: textEncoder.encode("{not-json"), fragments: ["receipt.json"] },
     {
       name: "a receipt schema failure",
       bytes: textEncoder.encode(
@@ -576,14 +572,11 @@ describe("readReceipt", () => {
       ),
       fragments: ["unexpected"],
     },
-  ])("rejects $name with one tagged error", ({ bytes, fragments }) =>
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(readFixtureReceipt(bytes));
+  ])("rejects $name with one tagged error", async ({ bytes, fragments }) => {
+    const receiptFilePath = writeReceiptFile(bytes);
 
-      expect(error).toBeInstanceOf(ReceiptParseError);
-      for (const fragment of fragments) {
-        expect(error.message).toContain(fragment);
-      }
-    }),
-  );
+    for (const fragment of fragments) {
+      await expect(readReceipt(receiptFilePath)).rejects.toThrow(fragment);
+    }
+  });
 });

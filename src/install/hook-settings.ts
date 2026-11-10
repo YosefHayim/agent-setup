@@ -43,21 +43,24 @@ export const decodeSettings = (snapshot: FileSnapshot): Either.Either<DecodedSet
     return Either.right({ source: "{}\n", document: {} });
   }
 
-  return Either.flatMap(
-    Either.mapLeft(decodeStrictText(snapshot.bytes, "settings.json"), (issue) => new InstallError({ issue })),
-    (source) => {
-      const duplicateProperty = findDuplicateJsonKey(source);
-      if (duplicateProperty !== undefined) {
-        return Either.left(
-          new InstallError({
-            issue: `settings.json contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`,
-          }),
-        );
-      }
+  const textReply = decodeStrictText(snapshot.bytes, "settings.json");
+  const isTextInvalid = textReply._tag === "invalid";
+  if (isTextInvalid) {
+    return Either.left(new InstallError({ issue: textReply.message }));
+  }
 
-      return Either.map(parseSettings(source, "settings.json"), (document) => ({ source, document }));
-    },
-  );
+  const jsonText = textReply.fileContents;
+  const duplicateProperty = findDuplicateJsonKey(jsonText);
+  const isPropertyDuplicated = duplicateProperty !== undefined;
+  if (isPropertyDuplicated) {
+    return Either.left(
+      new InstallError({
+        issue: `settings.json contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`,
+      }),
+    );
+  }
+
+  return Either.map(parseSettings(jsonText, "settings.json"), (document) => ({ source: jsonText, document }));
 };
 
 const hookEventFromPointer = (pointer: string): string | undefined => {

@@ -1,6 +1,7 @@
-/** The recovery record a failed transaction leaves behind, and the path rules that keep recovery inside its root. */
+import { z } from "zod";
 
-import { Schema } from "effect";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
 const portablePath = (filePath: string): string => filePath.replaceAll("\\", "/");
 
@@ -63,149 +64,175 @@ const isDirectSnapshotPath = (transactionRoot: string, snapshotPath: string): bo
   return snapshotName !== "" && !snapshotName.includes("/");
 };
 
-const absolutePathSchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter(isCanonicalAbsolutePath, {
-    message: () => "Filesystem paths must be canonical absolute POSIX or drive-qualified paths.",
-  }),
-);
+const absolutePathSchema = nonEmptyTrimmedTextSchema.refine(isCanonicalAbsolutePath, {
+  message: "Filesystem paths must be canonical absolute POSIX or drive-qualified paths.",
+});
 
-export class UnfinishedChangeError extends Schema.TaggedError<UnfinishedChangeError>()("UnfinishedChangeError", {
-  recoveryPath: absolutePathSchema.annotations({
-    description: "Durable recovery record that must be resolved before another transaction starts.",
-  }),
-}) {
-  get message(): string {
-    return `Recovery is pending at ${this.recoveryPath}`;
+export const createUnfinishedChangeError = (recoveryPath: string): Error =>
+  new Error(`Recovery is pending at ${recoveryPath}`);
+
+const targetSnapshotSchema = z.strictObject({
+  targetPath: absolutePathSchema.describe("Absolute destination path captured before the transaction mutated it."),
+  original: z
+    .discriminatedUnion("_tag", [
+      z.strictObject({ _tag: z.literal("missing") }),
+      z.strictObject({
+        _tag: z.literal("file"),
+        snapshotPath: absolutePathSchema.describe("Absolute path of the durable byte-for-byte target snapshot."),
+      }),
+    ])
+    .describe("Whether the destination was absent or captured as a durable file snapshot."),
+});
+
+export type TargetSnapshot = z.infer<typeof targetSnapshotSchema>;
+
+const recoveryRecordFieldsSchema = z.strictObject({
+  _tag: z.literal("pending"),
+  version: z.literal(1).describe("Recovery record format version."),
+  root: absolutePathSchema.describe("Absolute installation root of the failed transaction."),
+  receiptPath: absolutePathSchema.describe("Absolute ownership receipt path protected by the pending transaction."),
+  transactionRoot: absolutePathSchema.describe("Retained transaction directory containing the durable snapshots."),
+  snapshots: z
+    .array(targetSnapshotSchema)
+    .min(1, "Pending recovery records require at least one captured target.")
+    .describe("Original state of every target captured before the transaction lock was published."),
+});
+
+type RecoveryRecordFields = z.infer<typeof recoveryRecordFieldsSchema>;
+
+const checkReceiptPath = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const isReceiptPathValid =
+    isInsideFolder(record.root, record.receiptPath) && portablePath(record.receiptPath).endsWith("/receipt.json");
+  if (isReceiptPathValid) {
+    return null;
   }
-}
 
-const targetSnapshotSchema = Schema.Struct({
-  targetPath: absolutePathSchema.annotations({
-    description: "Absolute destination path captured before the transaction mutated it.",
-  }),
-  original: Schema.Union(
-    Schema.TaggedStruct("missing", {}),
-    Schema.TaggedStruct("file", {
-      snapshotPath: absolutePathSchema.annotations({
-        description: "Absolute path of the durable byte-for-byte target snapshot.",
-      }),
-    }),
-  ).annotations({
-    description: "Whether the destination was absent or captured as a durable file snapshot.",
-  }),
+  return {
+    path: ["receiptPath"],
+    message: "Recovery receipt paths must stay under the decoded root and end in receipt.json.",
+  };
+};
+
+const checkTransactionRoot = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const transactionName = normalizedRecoveryPath(record.transactionRoot).slice(
+    childPathPrefix(normalizedRecoveryPath(record.root)).length,
+  );
+  const isTransactionRootValid =
+    isInsideFolder(record.root, record.transactionRoot) && transactionDirectoryNamePattern.test(transactionName);
+  if (isTransactionRootValid) {
+    return null;
+  }
+
+  return {
+    path: ["transactionRoot"],
+    message: "Recovery transaction roots must be direct reserved children of the decoded root.",
+  };
+};
+
+const checkTargetPaths = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const markerPath = recoveryMarkerPath(record.receiptPath);
+  const invalidIndex = record.snapshots.findIndex(
+    (snapshot) =>
+      !isInsideFolder(record.root, snapshot.targetPath) ||
+      normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.root) ||
+      recoveryPathsConflict(snapshot.targetPath, markerPath) ||
+      recoveryPathsConflict(record.transactionRoot, snapshot.targetPath),
+  );
+
+  const isThereNoInvalidIndex = invalidIndex < 0;
+  if (isThereNoInvalidIndex) {
+    return null;
+  }
+
+  return {
+    path: ["snapshots", invalidIndex, "targetPath"],
+    message: "Recovery targets must stay below the decoded root and outside transaction-owned paths.",
+  };
+};
+
+const checkSnapshotPaths = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const invalidIndex = record.snapshots.findIndex(
+    (snapshot) =>
+      snapshot.original._tag === "file" &&
+      !isDirectSnapshotPath(record.transactionRoot, snapshot.original.snapshotPath),
+  );
+
+  const isThereNoInvalidIndex = invalidIndex < 0;
+  if (isThereNoInvalidIndex) {
+    return null;
+  }
+
+  return {
+    path: ["snapshots", invalidIndex, "original", "snapshotPath"],
+    message: "Recovery snapshots must be direct children of the transaction snapshots directory.",
+  };
+};
+
+const checkUniqueTargets = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const targetPaths = record.snapshots.map((snapshot) => snapshot.targetPath);
+  const conflictingIndex = targetPaths.findIndex((candidate, index) =>
+    targetPaths.slice(0, index).some((prior) => recoveryPathsConflict(prior, candidate)),
+  );
+
+  const isThereNoConflictingIndex = conflictingIndex < 0;
+  if (isThereNoConflictingIndex) {
+    return null;
+  }
+
+  return {
+    path: ["snapshots", conflictingIndex, "targetPath"],
+    message: "Recovery target paths must be unique without case or ancestor conflicts.",
+  };
+};
+
+const checkUniqueSnapshotSources = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const snapshotKeys = record.snapshots.flatMap((snapshot) =>
+    snapshot.original._tag === "file" ? [recoveryPathKey(snapshot.original.snapshotPath)] : [],
+  );
+  const isEverySourceUnique = new Set(snapshotKeys).size === snapshotKeys.length;
+  if (isEverySourceUnique) {
+    return null;
+  }
+
+  return { path: ["snapshots"], message: "Recovery file snapshots must use unique source paths." };
+};
+
+const checkReceiptTargetCaptured = (record: RecoveryRecordFields): ZodIssueDetail | null => {
+  const isReceiptCaptured = record.snapshots.some(
+    (snapshot) => normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.receiptPath),
+  );
+  if (isReceiptCaptured) {
+    return null;
+  }
+
+  return { path: ["snapshots"], message: "Recovery snapshots must include the ownership receipt target." };
+};
+
+// The first broken rule wins, in the order the checks are listed.
+const findRecoveryRecordIssue = (record: RecoveryRecordFields): ZodIssueDetail | null =>
+  checkReceiptPath(record) ??
+  checkTransactionRoot(record) ??
+  checkTargetPaths(record) ??
+  checkSnapshotPaths(record) ??
+  checkUniqueTargets(record) ??
+  checkUniqueSnapshotSources(record) ??
+  checkReceiptTargetCaptured(record);
+
+export const recoveryRecordSchema = recoveryRecordFieldsSchema.superRefine((record, context) => {
+  addZodIssueDetails(context, [findRecoveryRecordIssue(record)]);
 });
 
-export type TargetSnapshot = Schema.Schema.Type<typeof targetSnapshotSchema>;
+export type RecoveryRecord = z.infer<typeof recoveryRecordSchema>;
 
-export const recoveryRecordSchema = Schema.TaggedStruct("pending", {
-  version: Schema.Literal(1).annotations({
-    description: "Recovery record format version.",
-  }),
-  root: absolutePathSchema.annotations({
-    description: "Absolute installation root of the failed transaction.",
-  }),
-  receiptPath: absolutePathSchema.annotations({
-    description: "Absolute ownership receipt path protected by the pending transaction.",
-  }),
-  transactionRoot: absolutePathSchema.annotations({
-    description: "Retained transaction directory containing the durable snapshots.",
-  }),
-  snapshots: Schema.Array(targetSnapshotSchema)
-    .pipe(
-      Schema.minItems(1, {
-        message: () => "Pending recovery records require at least one captured target.",
-      }),
-    )
-    .annotations({
-      description: "Original state of every target captured before the transaction lock was published.",
-    }),
-}).pipe(
-  Schema.filter((record) =>
-    isInsideFolder(record.root, record.receiptPath) && portablePath(record.receiptPath).endsWith("/receipt.json")
-      ? true
-      : {
-          path: ["receiptPath"],
-          message: "Recovery receipt paths must stay under the decoded root and end in receipt.json.",
-        },
-  ),
-  Schema.filter((record) => {
-    const transactionName = normalizedRecoveryPath(record.transactionRoot).slice(
-      childPathPrefix(normalizedRecoveryPath(record.root)).length,
-    );
+export const encodeRecoveryRecordJson = (record: RecoveryRecord): string =>
+  JSON.stringify(recoveryRecordSchema.parse(record));
 
-    return isInsideFolder(record.root, record.transactionRoot) && transactionDirectoryNamePattern.test(transactionName)
-      ? true
-      : {
-          path: ["transactionRoot"],
-          message: "Recovery transaction roots must be direct reserved children of the decoded root.",
-        };
-  }),
-  Schema.filter((record) => {
-    const markerPath = recoveryMarkerPath(record.receiptPath);
-    const invalidIndex = record.snapshots.findIndex(
-      (snapshot) =>
-        !isInsideFolder(record.root, snapshot.targetPath) ||
-        normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.root) ||
-        recoveryPathsConflict(snapshot.targetPath, markerPath) ||
-        recoveryPathsConflict(record.transactionRoot, snapshot.targetPath),
-    );
+export const decodeRecoveryRecordJson = (json: string): RecoveryRecord => {
+  const recordCheck = recoveryRecordSchema.safeParse(JSON.parse(json));
+  const isRecordInvalid = !recordCheck.success;
+  if (isRecordInvalid) {
+    throw new Error(joinZodIssueMessages(recordCheck.error), { cause: recordCheck.error });
+  }
 
-    return invalidIndex < 0
-      ? true
-      : {
-          path: ["snapshots", invalidIndex, "targetPath"],
-          message: "Recovery targets must stay below the decoded root and outside transaction-owned paths.",
-        };
-  }),
-  Schema.filter((record) => {
-    const invalidIndex = record.snapshots.findIndex(
-      (snapshot) =>
-        snapshot.original._tag === "file" &&
-        !isDirectSnapshotPath(record.transactionRoot, snapshot.original.snapshotPath),
-    );
-
-    return invalidIndex < 0
-      ? true
-      : {
-          path: ["snapshots", invalidIndex, "original", "snapshotPath"],
-          message: "Recovery snapshots must be direct children of the transaction snapshots directory.",
-        };
-  }),
-  Schema.filter((record) => {
-    const targetPaths = record.snapshots.map((snapshot) => snapshot.targetPath);
-    const conflictingIndex = targetPaths.findIndex((candidate, index) =>
-      targetPaths.slice(0, index).some((prior) => recoveryPathsConflict(prior, candidate)),
-    );
-
-    return conflictingIndex < 0
-      ? true
-      : {
-          path: ["snapshots", conflictingIndex, "targetPath"],
-          message: "Recovery target paths must be unique without case or ancestor conflicts.",
-        };
-  }),
-  Schema.filter((record) => {
-    const snapshotKeys = record.snapshots.flatMap((snapshot) =>
-      snapshot.original._tag === "file" ? [recoveryPathKey(snapshot.original.snapshotPath)] : [],
-    );
-
-    return new Set(snapshotKeys).size === snapshotKeys.length
-      ? true
-      : { path: ["snapshots"], message: "Recovery file snapshots must use unique source paths." };
-  }),
-  Schema.filter((record) =>
-    record.snapshots.some(
-      (snapshot) => normalizedRecoveryPath(snapshot.targetPath) === normalizedRecoveryPath(record.receiptPath),
-    )
-      ? true
-      : { path: ["snapshots"], message: "Recovery snapshots must include the ownership receipt target." },
-  ),
-);
-
-export type RecoveryRecord = Schema.Schema.Type<typeof recoveryRecordSchema>;
-
-export const recoveryRecordJsonSchema = Schema.parseJson(recoveryRecordSchema);
-
-export const decodeRecoveryRecordJson = Schema.decodeUnknown(recoveryRecordJsonSchema, {
-  onExcessProperty: "error",
-});
+  return recordCheck.data;
+};

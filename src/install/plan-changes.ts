@@ -1,11 +1,12 @@
 /** Plan an install or an uninstall: keep restoration history, restore stale files first, write only what changed, and publish the receipt last. */
 
+import { isDeepStrictEqual } from "node:util";
+
 import { Either, Schema } from "effect";
 
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import {
-  fileOwnerSchema,
   type HookEntriesOwnership,
-  installedJsonValueSchema,
   type JsonValuesOwnership,
   type OwnedFile,
   type Ownership,
@@ -24,10 +25,6 @@ import {
   reservedReceiptPaths,
 } from "./plan.js";
 import { receiptSchema } from "./receipt.js";
-
-const fileOwnersEqual = Schema.equivalence(fileOwnerSchema);
-
-const installedJsonValuesEqual = Schema.equivalence(installedJsonValueSchema);
 
 const reverseValues = <Value>(values: ReadonlyArray<Value>): ReadonlyArray<Value> =>
   values.map((_, index) => values[values.length - index - 1]);
@@ -78,11 +75,11 @@ const orderRestorations = (
 
 const previousReceiptSchema = Schema.Union(
   Schema.TaggedStruct("missing", {}),
-  Schema.TaggedStruct("receipt", { receipt: receiptSchema }),
+  Schema.TaggedStruct("receipt", { receipt: zodAsEffectSchema(receiptSchema) }),
 );
 
 const desiredStateSchema = Schema.Struct({
-  receipt: receiptSchema,
+  receipt: zodAsEffectSchema(receiptSchema),
   writes: Schema.Array(plannedWriteOperationSchema),
 }).pipe(
   Schema.filter((desired) => [
@@ -239,7 +236,7 @@ const installPlanInputSchema = Schema.Struct({
 
 const uninstallPlanInputSchema = Schema.Struct({
   root: absoluteRootSchema,
-  receipt: receiptSchema,
+  receipt: zodAsEffectSchema(receiptSchema),
   restorations: Schema.Array(plannedRestorationSchema).annotations({
     description: "Exact final-action set for every receipt entry; the planner owns operation order.",
   }),
@@ -354,7 +351,7 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
         return (
           candidate !== undefined &&
           value.pointer === candidate.pointer &&
-          installedJsonValuesEqual(value.installed, candidate.installed)
+          isDeepStrictEqual(value.installed, candidate.installed)
         );
       })
     );
@@ -385,7 +382,7 @@ const installedOwnershipEqual = (left: Ownership, right: Ownership): boolean => 
 const installedFilesEqual = (left: OwnedFile, right: OwnedFile): boolean =>
   left.path === right.path &&
   left.kind._tag === right.kind._tag &&
-  fileOwnersEqual(left.owner, right.owner) &&
+  isDeepStrictEqual(left.owner, right.owner) &&
   installedOwnershipEqual(left.ownership, right.ownership);
 
 export const planInstall = (input: unknown) =>

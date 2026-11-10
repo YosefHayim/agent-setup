@@ -9,6 +9,7 @@ import { defaultFeatureIds, featureCatalog } from "../catalog/feature-catalog.js
 import { destinationForScope, type HostScan, scanHost } from "../config/host-scan.js";
 import { install } from "../install/install.js";
 import { receiptPath } from "../install/install-paths.js";
+import { toInstallError } from "../install/install-request.js";
 import { preparePackage } from "../install/prepare-package.js";
 import { readReceipt } from "../install/receipt.js";
 import { uninstall } from "../install/uninstall.js";
@@ -92,7 +93,10 @@ const runUpdate = Effect.gen(function* () {
     initial: "preserve",
   });
   const path = yield* Path.Path;
-  const receiptSnapshot = yield* readReceipt(path.join(destination.root, receiptPath));
+  const receiptSnapshot = yield* Effect.tryPromise({
+    try: () => readReceipt(path.join(destination.root, receiptPath)),
+    catch: toInstallError,
+  });
   const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : defaultFeatureIds;
   const features = yield* mode === "preserve"
     ? Effect.succeed({ _tag: "preserve" as const })

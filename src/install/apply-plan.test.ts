@@ -120,8 +120,12 @@ const makeWorkspace = Effect.gen(function* () {
     transactionDirectories: Effect.map(fileSystem.readDirectory(root), (entries) =>
       entries.filter((entry) => entry.startsWith(".agent-setup-transaction-")),
     ),
-    publishedReceipt: Effect.flatMap(fileSystem.readFileString(at(receiptFile)), decodeReceiptJson),
-    recoveryRecord: Effect.flatMap(fileSystem.readFileString(at(recoveryFile)), decodeRecoveryRecordJson),
+    publishedReceipt: Effect.flatMap(fileSystem.readFileString(at(receiptFile)), (receiptJson) =>
+      Effect.try(() => decodeReceiptJson(receiptJson)),
+    ),
+    recoveryRecord: Effect.flatMap(fileSystem.readFileString(at(recoveryFile)), (recoveryJson) =>
+      Effect.try(() => decodeRecoveryRecordJson(recoveryJson)),
+    ),
   };
 });
 

@@ -2,6 +2,7 @@
 
 import { Schema } from "effect";
 
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { bytesEqual } from "./file-bytes.js";
 import {
   type Ownership,
@@ -29,7 +30,7 @@ export const absoluteRootSchema = Schema.NonEmptyTrimmedString.pipe(
   }),
 );
 
-const receiptPathSchema = relativePathSchema.pipe(
+const receiptPathSchema = zodAsEffectSchema(relativePathSchema).pipe(
   Schema.filter((path) => path === receiptFilename || path.endsWith(`/${receiptFilename}`), {
     message: () => `Ownership receipts must use the canonical ${receiptFilename} basename.`,
   }),
@@ -49,7 +50,7 @@ export const receiptTargetSchema = Schema.Struct({
 
 export type ReceiptTarget = Schema.Schema.Type<typeof receiptTargetSchema>;
 
-const plannedFileSchema = ownedFileSchema.pipe(
+const plannedFileSchema = zodAsEffectSchema(ownedFileSchema).pipe(
   Schema.filter((file) =>
     file.kind._tag === "receipt"
       ? { path: ["kind"], message: "Receipt entries belong only in the separate receipt operation." }
@@ -62,7 +63,7 @@ export const expectedCurrentSchema = Schema.Union(
     description: "Planning observed that the file target did not exist.",
   }),
   Schema.TaggedStruct("file", {
-    sha256: sha256Schema.annotations({
+    sha256: zodAsEffectSchema(sha256Schema).annotations({
       description: "Exact SHA-256 of the file bytes observed during planning.",
     }),
   }),
@@ -71,7 +72,7 @@ export const expectedCurrentSchema = Schema.Union(
 export type ExpectedCurrent = Schema.Schema.Type<typeof expectedCurrentSchema>;
 
 const preconditionSchema = Schema.Struct({
-  path: relativePathSchema.annotations({
+  path: zodAsEffectSchema(relativePathSchema).annotations({
     description: "Owned file path validated even when its desired bytes are unchanged.",
   }),
   expectedCurrent: expectedCurrentSchema.annotations({
@@ -166,7 +167,7 @@ const receiptRemoveOperationSchema = Schema.extend(
 const receiptPublishOperationSchema = Schema.extend(
   Schema.TaggedStruct("receiptPublish", {
     target: receiptTargetSchema,
-    receipt: receiptSchema.annotations({
+    receipt: zodAsEffectSchema(receiptSchema).annotations({
       description: "Complete next ownership receipt published after every file change succeeds.",
     }),
   }),
@@ -253,7 +254,7 @@ const receiptFileIssues = (receipt: Receipt, receiptTarget: ReceiptTarget) =>
   });
 
 const planFieldsSchema = Schema.Struct({
-  scope: scopeSchema.annotations({
+  scope: zodAsEffectSchema(scopeSchema).annotations({
     description: "Installation scope shared by the plan and published receipt.",
   }),
   root: absoluteRootSchema,

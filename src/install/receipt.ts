@@ -1,25 +1,25 @@
-/** The ownership receipt: the one file that records everything an installation owns, and its strict reader. */
+import { readFile } from "node:fs/promises";
 
-import { FileSystem } from "@effect/platform";
-import { Effect, Either, Option, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { z } from "zod";
 
 import { addDependencies, featureIdSchema, retiredFeatureIds } from "../catalog/feature-catalog.js";
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
-import { decodeStrictText, isNotFound } from "./file-bytes.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { decodeStrictText, isNotFound, replaceBytesWithBase64 } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { type OwnedFile, ownedFileSchema, pathsConflict } from "./ownership.js";
+import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
-export const scopeSchema = Schema.Literal("global", "project").annotations({
-  description: "Installation scope that owns the receipt.",
-});
+export const scopeSchema = z.enum(["global", "project"]).describe("Installation scope that owns the receipt.");
 
-export type Scope = Schema.Schema.Type<typeof scopeSchema>;
+export type Scope = z.infer<typeof scopeSchema>;
 
 // e.g. "0.12.1", "1.0.0-rc.1", "1.0.0+build.3"
-const SEMVER_PATTERN =
-  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+export const versionSchema = nonEmptyTrimmedTextSchema.regex(
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  "Receipt versions must use semantic version syntax.",
+);
 
-const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>) => [
+const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>): Array<ZodIssueDetail> => [
   ...files.flatMap((file, index) =>
     files.slice(index + 1).flatMap((candidate, offset) =>
       pathsConflict(file.path, candidate.path)
@@ -39,17 +39,16 @@ const ownedFileListIssues = (files: ReadonlyArray<OwnedFile>) => [
   ),
 ];
 
-const ownedFileListSchema = Schema.Array(ownedFileSchema).pipe(Schema.filter(ownedFileListIssues));
-
 // The receipt's own features in catalog order. A dependency the receipt does not list stays out of it.
 const listRecordedFeatures = (features: ReadonlyArray<string>, featureIdsWithDependencies: ReadonlyArray<string>) =>
   featureIdsWithDependencies.filter((featureId) => features.includes(featureId));
 
-const receiptFeatureIssues = (features: ReadonlyArray<string>) => {
+const receiptFeatureIssues = (features: ReadonlyArray<string>): Array<ZodIssueDetail> => {
   const dependencyCheck = addDependencies(features);
   const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
     const featureId = dependencyCheck.featureId;
+
     return [{ path: [features.indexOf(featureId)], message: `Receipt feature ${featureId} is unknown.` }];
   }
 
@@ -69,102 +68,116 @@ const receiptFeatureIssues = (features: ReadonlyArray<string>) => {
 };
 
 // A receipt from before a feature merge reads as the feature that replaced the retired ID.
-const withCurrentFeatureIds = (features: ReadonlyArray<string>) => {
-  if (!features.some((feature) => retiredFeatureIds.has(feature))) return features;
-  const renamed = features.map((feature) => retiredFeatureIds.get(feature) || feature);
-  const dependencyCheck = addDependencies(renamed);
-  const isFeatureUnknown = dependencyCheck.status === "unknown";
-  if (isFeatureUnknown) return renamed;
+const withCurrentFeatureIds = (features: string[]): string[] => {
+  const hasRetiredFeatureId = features.some((feature) => retiredFeatureIds.has(feature));
 
-  return listRecordedFeatures(renamed, dependencyCheck.featureIds);
+  const isFeatureListCurrent = !hasRetiredFeatureId;
+  if (isFeatureListCurrent) {
+    return features;
+  }
+
+  const renamedFeatures = features.map((feature) => retiredFeatureIds.get(feature) || feature);
+  const dependencyCheck = addDependencies(renamedFeatures);
+  const isFeatureUnknown = dependencyCheck.status === "unknown";
+  if (isFeatureUnknown) {
+    return renamedFeatures;
+  }
+
+  return listRecordedFeatures(renamedFeatures, dependencyCheck.featureIds);
 };
 
-const featureListSchema = Schema.transform(
-  Schema.Array(Schema.String),
-  Schema.Array(zodAsEffectSchema(featureIdSchema)).pipe(Schema.filter(receiptFeatureIssues)),
-  { strict: true, decode: withCurrentFeatureIds, encode: (features) => features },
-);
+const featureListSchema = z
+  .array(z.string())
+  .transform(withCurrentFeatureIds)
+  .pipe(
+    z
+      .array(featureIdSchema)
+      .superRefine((features, context) => addZodIssueDetails(context, receiptFeatureIssues(features))),
+  );
 
-export const versionSchema = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(SEMVER_PATTERN, {
-    message: () => "Receipt versions must use semantic version syntax.",
-  }),
-);
+export const receiptSchema = z
+  .strictObject({
+    version: versionSchema,
+    scope: scopeSchema,
+    features: featureListSchema,
+    ownedFiles: z
+      .array(ownedFileSchema)
+      .superRefine((files, context) => addZodIssueDetails(context, ownedFileListIssues(files))),
+  })
+  .describe("Ownership receipt: everything one installation scope owns.");
 
-export const receiptSchema = Schema.Struct({
-  version: versionSchema,
-  scope: scopeSchema,
-  features: featureListSchema,
-  ownedFiles: ownedFileListSchema,
-});
+export type Receipt = z.infer<typeof receiptSchema>;
 
-export type Receipt = Schema.Schema.Type<typeof receiptSchema>;
+export const encodeReceiptJson = (receipt: Receipt): string => {
+  const checkedReceipt = receiptSchema.parse(receipt);
 
-export const receiptJsonSchema = Schema.parseJson(receiptSchema);
+  return JSON.stringify(checkedReceipt, replaceBytesWithBase64);
+};
 
-export const decodeReceiptJson = Schema.decodeUnknown(receiptJsonSchema, {
-  onExcessProperty: "error",
-});
+export const decodeReceiptJson = (json: string): Receipt => {
+  const parsedJson: unknown = JSON.parse(json);
+  const receiptReply = receiptSchema.safeParse(parsedJson);
 
-const decodeReceiptBytes = (bytes: Uint8Array): Either.Either<Receipt, string> =>
-  Either.flatMap(decodeStrictText(bytes, "receipt.json"), (json) => {
-    const duplicateProperty = findDuplicateJsonKey(json);
-    if (duplicateProperty !== undefined) {
-      return Either.left(`duplicate JSON property ${JSON.stringify(duplicateProperty)}`);
-    }
-
-    return Either.mapLeft(
-      Schema.decodeUnknownEither(receiptJsonSchema, { onExcessProperty: "error" })(json),
-      SchemaParseIssue.TreeFormatter.formatErrorSync,
-    );
-  });
-
-const receiptSnapshotSchema = Schema.Union(
-  Schema.TaggedStruct("missing", {}),
-  Schema.TaggedStruct("present", {
-    bytes: Schema.Uint8ArrayFromSelf.annotations({
-      description: "Exact receipt file bytes read from disk.",
-    }),
-    receipt: Schema.typeSchema(receiptSchema).annotations({
-      description: "Strict receipt decoded from the same file bytes.",
-    }),
-  }),
-).annotations({
-  description: "Missing or strictly decoded receipt with its exact source bytes.",
-});
-
-export type ReceiptSnapshot = Schema.Schema.Type<typeof receiptSnapshotSchema>;
-
-export class ReceiptParseError extends Schema.TaggedError<ReceiptParseError>()("ReceiptParseError", {
-  receiptPath: Schema.NonEmptyString.annotations({
-    description: "Receipt file whose contents could not be decoded.",
-  }),
-  issue: Schema.NonEmptyString.annotations({
-    description: "Actionable receipt encoding, JSON, or schema issue.",
-  }),
-}) {
-  get message(): string {
-    return `Receipt at ${this.receiptPath} is invalid: ${this.issue}. Fix or remove it, then retry.`;
+  const isReceiptInvalid = !receiptReply.success;
+  if (isReceiptInvalid) {
+    throw new Error(joinZodIssueMessages(receiptReply.error));
   }
-}
+
+  return receiptReply.data;
+};
+
+const decodeReceiptBytes = (bytes: Uint8Array): Receipt => {
+  const textReply = decodeStrictText(bytes, "receipt.json");
+  const isTextInvalid = textReply._tag === "invalid";
+  if (isTextInvalid) {
+    throw new Error(textReply.message);
+  }
+
+  const duplicateProperty = findDuplicateJsonKey(textReply.fileContents);
+  const isPropertyDuplicated = duplicateProperty !== undefined;
+  if (isPropertyDuplicated) {
+    throw new Error(`duplicate JSON property ${JSON.stringify(duplicateProperty)}`);
+  }
+
+  return decodeReceiptJson(textReply.fileContents);
+};
+
+export type ReceiptSnapshot = { _tag: "missing" } | { _tag: "present"; bytes: Uint8Array; receipt: Receipt };
 
 const missingReceiptSnapshot: ReceiptSnapshot = { _tag: "missing" };
 
-export const readReceipt = (receiptPath: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const contents = yield* fileSystem.readFile(receiptPath).pipe(
-      Effect.map(Option.some),
-      Effect.catchIf(isNotFound, () => Effect.succeed(Option.none())),
-    );
-    if (Option.isNone(contents)) {
-      return missingReceiptSnapshot;
+const readReceiptBytesOrNull = async (receiptPath: string): Promise<Uint8Array | null> => {
+  try {
+    return await readFile(receiptPath);
+  } catch (error) {
+    const isReceiptMissing = isNotFound(error);
+    if (isReceiptMissing) {
+      return null;
     }
 
-    const receipt = decodeReceiptBytes(contents.value);
-    if (Either.isLeft(receipt)) {
-      return yield* new ReceiptParseError({ receiptPath, issue: receipt.left });
-    }
+    throw error;
+  }
+};
 
-    return { _tag: "present", bytes: contents.value, receipt: receipt.right } satisfies ReceiptSnapshot;
-  });
+const readReceiptFromBytes = (receiptPath: string, bytes: Uint8Array): ReceiptSnapshot => {
+  try {
+    const receipt = decodeReceiptBytes(bytes);
+
+    return { _tag: "present", bytes, receipt };
+  } catch (error) {
+    const isErrorObject = error instanceof Error;
+    const issue = isErrorObject ? error.message : String(error);
+
+    throw new Error(`Receipt at ${receiptPath} is invalid: ${issue}. Fix or remove it, then retry.`, { cause: error });
+  }
+};
+
+export const readReceipt = async (receiptPath: string): Promise<ReceiptSnapshot> => {
+  const receiptBytes = await readReceiptBytesOrNull(receiptPath);
+  const isReceiptMissing = receiptBytes === null;
+  if (isReceiptMissing) {
+    return missingReceiptSnapshot;
+  }
+
+  return readReceiptFromBytes(receiptPath, receiptBytes);
+};

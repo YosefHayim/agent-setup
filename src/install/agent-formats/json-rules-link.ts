@@ -118,21 +118,28 @@ const replaceRules = (source: string, rules: ReadonlyArray<string>): string =>
     }),
   );
 
-const decodeJsonConfiguration = (bytes: Uint8Array, filename: string): Either.Either<JsonConfiguration, string> =>
-  Either.flatMap(decodeStrictText(bytes, filename), (source) => {
-    const duplicateProperty = findDuplicateJsonKey(source);
-    if (duplicateProperty !== undefined) {
-      return Either.left(`${filename} contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`);
-    }
+const decodeJsonConfiguration = (bytes: Uint8Array, filename: string): Either.Either<JsonConfiguration, string> => {
+  const textReply = decodeStrictText(bytes, filename);
+  const isTextInvalid = textReply._tag === "invalid";
+  if (isTextInvalid) {
+    return Either.left(textReply.message);
+  }
 
-    return Either.mapBoth(
-      Schema.decodeUnknownEither(Schema.parseJson(jsonConfigurationSchema), { onExcessProperty: "preserve" })(source),
-      {
-        onLeft: (error) => `${filename} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`,
-        onRight: (configuration) => ({ source, rules: configuration.rules }),
-      },
-    );
-  });
+  const jsonText = textReply.fileContents;
+  const duplicateProperty = findDuplicateJsonKey(jsonText);
+  const isPropertyDuplicated = duplicateProperty !== undefined;
+  if (isPropertyDuplicated) {
+    return Either.left(`${filename} contains duplicate JSON property ${JSON.stringify(duplicateProperty)}.`);
+  }
+
+  return Either.mapBoth(
+    Schema.decodeUnknownEither(Schema.parseJson(jsonConfigurationSchema), { onExcessProperty: "preserve" })(jsonText),
+    {
+      onLeft: (error) => `${filename} is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`,
+      onRight: (configuration) => ({ source: jsonText, rules: configuration.rules }),
+    },
+  );
+};
 
 const createJsonOwnership = (input: {
   link: JsonRulesLink;
