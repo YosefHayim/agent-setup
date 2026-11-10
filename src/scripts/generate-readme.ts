@@ -85,9 +85,9 @@ const readCommunitySection = (descriptions: ReadonlyMap<string, string>): string
     ...[...COMMUNITY_SKILLS].flatMap(([id, credit]) => {
       const description = descriptions.get(id);
       const upstreamNames = credit.upstreamNames.map((name) => `\`${name}\``).join(", ");
-      const isSkillDescribed = description != null;
+      const isSkillUndescribed = description == null;
 
-      if (!isSkillDescribed) return [];
+      if (isSkillUndescribed) return [];
 
       return [`| **${id}** | ${description} | [${credit.author}](${credit.url}) (upstream: ${upstreamNames}) |`];
     }),
@@ -158,12 +158,15 @@ if (isWriteRequested) {
 
 const isCheckRequested = !isWriteRequested;
 const isReadmeStale = renderedReadme !== currentReadme;
-
 const isStaleCheckFailed = isCheckRequested && isReadmeStale;
+
 if (isStaleCheckFailed) {
-  throw new Error("README.md is stale. Run `pnpm readme:generate`.");
+  console.error("README.md is stale. Run `pnpm readme:generate`.");
+  process.exitCode = 1;
 }
 
-if (isCheckRequested) {
+const isCheckPassed = isCheckRequested && !isReadmeStale;
+
+if (isCheckPassed) {
   console.log("README.md matches its sources");
 }

@@ -56,8 +56,9 @@ const flowSkills = originSkillDirectories.flatMap((originDirectory) => {
   const skillMd = path.join(skillRoot, originDirectory, "SKILL.md");
 
   const { frontmatter } = parseFrontmatter(skillMd);
-  const isFlowSkillWithName = frontmatter?.type === "flow" && frontmatter.name != null;
-  if (!isFlowSkillWithName) return [];
+  const isNotNamedFlowSkill = frontmatter?.type !== "flow" || frontmatter.name == null;
+
+  if (isNotNamedFlowSkill) return [];
 
   return [{ skillId: frontmatter.name, sourceDirectory: originDirectory }];
 });

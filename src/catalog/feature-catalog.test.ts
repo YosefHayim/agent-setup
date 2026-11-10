@@ -259,9 +259,9 @@ describe("featureCatalog", () => {
   it("stores authored TypeScript hook entrypoints and no generated JavaScript paths", () => {
     const runtimeFeatures = featureCatalog.flatMap((feature) => {
       const runtime = feature.runtime;
-      const isHookRuntime = runtime._tag === "hook";
+      const isNotHookRuntime = runtime._tag !== "hook";
 
-      if (!isHookRuntime) return [];
+      if (isNotHookRuntime) return [];
 
       return [
         {
