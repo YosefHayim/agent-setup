@@ -33,8 +33,8 @@ const readStorageDatabaseFile = (homeRoot: string): string | undefined => {
     .filter((database) => database.version >= 0)
     .sort((left, right) => right.version - left.version)[0];
 
-  const hasNewest = newest;
-  return hasNewest ? path.join(home, newest.name) : undefined;
+  const isDatabaseFound = newest != null;
+  return isDatabaseFound ? path.join(home, newest.name) : undefined;
 };
 
 // node:sqlite is unflagged from Node 22.13; on an older Node the Codex half of the feature stays off.

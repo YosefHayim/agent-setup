@@ -116,8 +116,8 @@ const readLiveCheck = async (request: { readonly homeRoot: string; readonly opti
     ? findClaudeSession({ homeRoot, sessionId: settings.sessionId })
     : undefined;
 
-  const hasClaudeSession = claudeSession;
-  if (hasClaudeSession) {
+  const isClaudeSessionFound = claudeSession != null;
+  if (isClaudeSessionFound) {
     return () => {
       const session = readCurrentClaudeSession({ homeRoot, session: claudeSession });
       return session != null && isClaudeSessionLive({ homeRoot, session, quietSeconds: ENDED_SESSION_QUIET_SECONDS });

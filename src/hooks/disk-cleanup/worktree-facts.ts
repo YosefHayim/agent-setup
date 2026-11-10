@@ -82,9 +82,8 @@ const isCreatedRecently = (folder: string): boolean => {
 
 export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; readonly inUse: boolean }) => {
   const { worktree } = request;
-  const detached = worktree.branch === "";
+  const isDetached = worktree.branch === "";
 
-  const isDetached = detached;
   const unpushedRange = isDetached ? DETACHED_UNPUSHED_RANGE : BRANCH_UNPUSHED_RANGE;
   const changeLines = readGitAnswerLines({ folder: worktree.folder, query: CHANGE_QUERY });
   const ignoredSecrets = readGitAnswerLines({ folder: worktree.folder, query: IGNORED_SECRET_QUERY });
@@ -112,7 +111,7 @@ export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; 
     createdRecently: isCreatedRecently(worktree.folder),
     locked: worktree.locked,
     readable: gitAnswers.every((answer) => answer != null),
-    detached,
+    detached: isDetached,
     onDefaultBranch: isDefaultBranch({ branch: worktree.branch, remoteDefault }),
     knowsDefaultBranch: remoteDefault !== "",
     hasChanges: (changeLines || []).length > 0,

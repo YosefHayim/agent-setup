@@ -36,8 +36,8 @@ const readOriginRepoName = (repoRoot: string): string => {
     const gitSettings = readFileSync(path.join(repoRoot, ".git", "config"), "utf8");
     const originUrl = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/u.exec(gitSettings)?.[1];
 
-    const hasOriginUrl = originUrl;
-    return hasOriginUrl ? path.basename(originUrl).replace(/\.git$/u, "") : "";
+    const isOriginUrlFound = originUrl != null;
+    return isOriginUrlFound ? path.basename(originUrl).replace(/\.git$/u, "") : "";
   } catch {
     return "";
   }

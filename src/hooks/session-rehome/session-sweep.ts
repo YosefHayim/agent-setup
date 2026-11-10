@@ -106,8 +106,8 @@ const placeSession = (request: {
 
   const homeRepo = readRepoContaining({ repos, folder: request.homeFolder });
 
-  const hasHomeRepo = homeRepo;
-  const folderRepo = hasHomeRepo ? undefined : readRepoNamedByFolder({ repos, folder: request.homeFolder });
+  const isHomeRepoMissing = homeRepo == null;
+  const folderRepo = isHomeRepoMissing ? readRepoNamedByFolder({ repos, folder: request.homeFolder }) : undefined;
   const scores = scoreSession({ evidence: request.evidence, folderRepoName: folderRepo?.name });
   const decision = decideRehome({ scores, homeRepoName: homeRepo?.name });
   const isDecisionMoveOrStay = decision._tag === "move" || decision._tag === "stay";
@@ -312,8 +312,8 @@ const listClaudeSessionsToSweep = (sweep: SweepScope): ReadonlyArray<ClaudeSessi
 
   const session = findClaudeSession({ homeRoot: sweep.homeRoot, sessionId: sweep.sessionId });
 
-  const hasSession = session;
-  return hasSession ? [session] : [];
+  const isSessionFound = session != null;
+  return isSessionFound ? [session] : [];
 };
 
 const listSweepClaude = (sweep: SweepScope): ReadonlyArray<SessionPlan> =>
