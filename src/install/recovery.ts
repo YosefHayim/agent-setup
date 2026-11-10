@@ -227,7 +227,7 @@ const findRecoveryIssue = (stored: RecoveryObjectFields): ZodIssueDetail | null 
   checkUniqueSnapshotOrigins(stored) ??
   checkReceiptTargetCaptured(stored);
 
-export const recoveryObjectSchema = recoveryObjectFieldsSchema.superRefine((stored, scope) => {
+const recoveryObjectSchema = recoveryObjectFieldsSchema.superRefine((stored, scope) => {
   addZodIssueDetails(scope, [findRecoveryIssue(stored)]);
 });
 

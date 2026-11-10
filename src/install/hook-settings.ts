@@ -17,7 +17,7 @@ import {
   removeDocumentArrayElement,
   removeDocumentField,
 } from "./json-edit.js";
-import type { HookLinesOwnership, OwnedDocumentField, OwnedFile, OwnedHookEvent } from "./ownership.js";
+import type { HookEntriesOwnership, OwnedDocumentField, OwnedFile, OwnedHookEvent } from "./ownership.js";
 import { readInstalledHookFile, readRegistrationEntrypoint } from "./package-files.js";
 import type { FileChange } from "./plan.js";
 
@@ -125,7 +125,7 @@ const decodeHookGroups = (field: unknown, event: string): ReadonlyArray<unknown>
   throw createInstallError(`${SETTINGS_FILE_NAME} hook event ${event} must contain an array.`);
 };
 
-const createChangedLinesError = ({ filePath, pointer }: { filePath: string; pointer: string }): Error =>
+const createChangedHookEntriesError = ({ filePath, pointer }: { filePath: string; pointer: string }): Error =>
   createInstallError(`Receipted hook entries in ${filePath} ${pointer} changed after installation.`);
 
 const hashGroups = (groups: ReadonlyArray<unknown>): string[] => groups.map((group) => hashDocumentField(group));
@@ -148,7 +148,7 @@ const migrateLegacyEvent = ({
 
   const isCurrentMissing = !isEventNamed || current == null;
   if (isCurrentMissing) {
-    throw createChangedLinesError({ filePath, pointer });
+    throw createChangedHookEntriesError({ filePath, pointer });
   }
 
   const isUserFieldPresent = previous._tag === "value";
@@ -165,7 +165,7 @@ const migrateLegacyEvent = ({
 
   const isInstalledPrefixMissing = installedLength == null;
   if (isInstalledPrefixMissing) {
-    throw createChangedLinesError({ filePath, pointer });
+    throw createChangedHookEntriesError({ filePath, pointer });
   }
 
   const ownedGroups = current.slice(userGroups.length, installedLength);
@@ -174,13 +174,13 @@ const migrateLegacyEvent = ({
 };
 
 // Reads the entries the receipt says agent-setup owns in one settings file, migrating the older whole-array layout.
-const readPreviousHookLines = ({
+const readPreviousHookEntries = ({
   file,
   document,
 }: {
   file: OwnedFile;
   document: SettingsDocument;
-}): HookLinesOwnership => {
+}): HookEntriesOwnership => {
   const { ownership } = file;
   switch (ownership._tag) {
     case "hookEntries":
@@ -216,20 +216,20 @@ const isOwnedEventPresent = ({ event, document }: { event: OwnedHookEvent; docum
   return event.entries.every((hash) => countOf(currentHashes, hash) >= countOf(event.entries, hash));
 };
 
-const validateOwnedLines = ({
+const validateOwnedHookEntries = ({
   filePath,
   ownership,
   document,
 }: {
   filePath: string;
-  ownership: HookLinesOwnership | null;
+  ownership: HookEntriesOwnership | null;
   document: SettingsDocument;
 }): void => {
   const changedEvent = ownership?.events.find((event) => !isOwnedEventPresent({ event, document }));
 
   const isEventChanged = changedEvent != null;
   if (isEventChanged) {
-    throw createChangedLinesError({ filePath, pointer: changedEvent.pointer });
+    throw createChangedHookEntriesError({ filePath, pointer: changedEvent.pointer });
   }
 };
 
@@ -451,12 +451,12 @@ const editHookSettings = ({
 }: {
   filePath: string;
   decoded: DecodedSettings;
-  previous: HookLinesOwnership | null;
+  previous: HookEntriesOwnership | null;
   desiredGroups: ReadonlyMap<string, ReadonlyArray<ManagedHookGroup>>;
   installedHooksFolder: string;
 }): HookSettingsEdit => {
   const { document } = decoded;
-  validateOwnedLines({ filePath, ownership: previous, document });
+  validateOwnedHookEntries({ filePath, ownership: previous, document });
 
   // Events agent-setup no longer wants are edited first, newest first, then every desired event.
   const receiptEvents = previous?.events ?? [];
@@ -623,7 +623,7 @@ export const planSettings = ({
 
   const isReceiptPresent = previousFile != null;
   const previousOwnership = isReceiptPresent
-    ? readPreviousHookLines({ file: previousFile, document: decoded.document })
+    ? readPreviousHookEntries({ file: previousFile, document: decoded.document })
     : null;
   const edited = editHookSettings({
     filePath,
@@ -657,7 +657,7 @@ export const planSettings = ({
 
   const wasFilePresent = snapshot._tag === "file";
   const hasNoPreviousOwnership = previousOwnership == null;
-  const ownership: HookLinesOwnership = {
+  const ownership: HookEntriesOwnership = {
     _tag: "hookEntries",
     filePreviouslyPresent: hasNoPreviousOwnership ? wasFilePresent : previousOwnership.filePreviouslyPresent,
     createdContainers: [...createdContainers],
@@ -692,7 +692,7 @@ export const restoreSettings = ({
   }
 
   const decoded = decodeSettings(snapshot);
-  const previous = readPreviousHookLines({ file, document: decoded.document });
+  const previous = readPreviousHookEntries({ file, document: decoded.document });
   const edited = editHookSettings({
     filePath: file.path,
     decoded,

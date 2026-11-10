@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { install } from "./install.js";
 import { update } from "./update.js";
 
@@ -91,7 +91,7 @@ const request = (requestFields: { root: string; preparedRoot: string; features: 
   configuration: { _tag: "automatic" },
 });
 
-const selectedDefaults = { _tag: "selected", config: defaultConfig };
+const selectedDefaults = { _tag: "selected", config: defaultSettings };
 
 describe("update", () => {
   it("restores removed feature files while retaining user bytes outside owned regions", async () => {
@@ -220,7 +220,7 @@ describe("update", () => {
     await install(
       {
         ...baseRequest,
-        configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["fixtures"] } },
+        configuration: { _tag: "selected", config: { ...defaultSettings, sessionRehomeRoots: ["fixtures"] } },
       },
       notAbortedSignal,
     );
@@ -237,7 +237,7 @@ describe("update", () => {
     );
 
     const settingsBytes = await readFile(join(root, settingsPath));
-    expect(JSON.parse(new TextDecoder().decode(settingsBytes))).toEqual(defaultConfig);
+    expect(JSON.parse(new TextDecoder().decode(settingsBytes))).toEqual(defaultSettings);
     const receipt = JSON.parse(await readText(".claude/agent-setup/receipt.json"));
     const managedSettingsFile = receipt.ownedFiles.find((file: { path: string }) => file.path === settingsPath);
     expect(managedSettingsFile.ownership.installedHash).toBe(createHash("sha256").update(settingsBytes).digest("hex"));

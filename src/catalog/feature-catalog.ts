@@ -911,7 +911,7 @@ export const addDependencies = (requestedIds: ReadonlyArray<string>): AddCollabo
   return { status: "ready", featureIds };
 };
 
-export const skillsForFeatures = (featureIds: ReadonlyArray<FeatureId>) =>
+export const listSkillsForFeatures = (featureIds: ReadonlyArray<FeatureId>) =>
   featureCatalog.flatMap((feature) => {
     const isFeatureRequested = featureIds.includes(feature.id);
     const installedSkill = feature.installedSkill;

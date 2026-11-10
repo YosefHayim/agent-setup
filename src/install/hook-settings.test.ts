@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { install } from "./install.js";
 import { uninstall } from "./uninstall.js";
 import { update } from "./update.js";
@@ -41,7 +41,7 @@ interface ReceiptHookEvent {
   previouslyPresent: boolean;
 }
 
-interface ReceiptHookLinesOwnership {
+interface ReceiptHookEntriesOwnership {
   filePreviouslyPresent: boolean;
   createdContainers: ReadonlyArray<string>;
   events: ReadonlyArray<ReceiptHookEvent>;
@@ -119,7 +119,7 @@ const installRequest = (requestFields: { root: string; preparedRoot: string; age
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: requestFields.agentIds },
   interaction: { _tag: "scripted" },
-  configuration: { _tag: "selected", config: defaultConfig },
+  configuration: { _tag: "selected", config: defaultSettings },
 });
 
 const createUninstallRequest = (root: string) => ({
@@ -143,7 +143,7 @@ const createLegacyHookEventOwnership = (event: ReceiptHookEvent, hooks: Readonly
 };
 
 const createLegacySettingsOwnership = (
-  ownership: ReceiptHookLinesOwnership,
+  ownership: ReceiptHookEntriesOwnership,
   hooks: Readonly<Record<string, unknown>>,
 ) => ({
   _tag: "jsonValues",
@@ -244,19 +244,25 @@ describe("hook settings", () => {
     await runInstall(request);
     const receipt = await readDocumentFile(root, receiptPath);
     const hooks = (await readDocumentFile(root, claudeSettingsPath)).hooks;
-    const legacyOwnedFiles = receipt.ownedFiles.map((file: { path: string; ownership: ReceiptHookLinesOwnership }) => {
-      const isClaudeSettingsFile = file.path === claudeSettingsPath;
-      return isClaudeSettingsFile ? { ...file, ownership: createLegacySettingsOwnership(file.ownership, hooks) } : file;
-    });
+    const legacyOwnedFiles = receipt.ownedFiles.map(
+      (file: { path: string; ownership: ReceiptHookEntriesOwnership }) => {
+        const isClaudeSettingsFile = file.path === claudeSettingsPath;
+        return isClaudeSettingsFile
+          ? { ...file, ownership: createLegacySettingsOwnership(file.ownership, hooks) }
+          : file;
+      },
+    );
     await writeFiles(root, { [receiptPath]: createDocumentMessages({ ...receipt, ownedFiles: legacyOwnedFiles }) });
     await appendForeignStop(root, claudeSettingsPath);
 
     await runInstall(request);
 
     const migratedReceipt = await readDocumentFile(root, receiptPath);
-    const settingsLine = migratedReceipt.ownedFiles.find((file: { path: string }) => file.path === claudeSettingsPath);
-    expect(settingsLine.ownership._tag).toBe("hookEntries");
-    expect(settingsLine.ownership.events).toContainEqual(
+    const settingsOwnedFile = migratedReceipt.ownedFiles.find(
+      (file: { path: string }) => file.path === claudeSettingsPath,
+    );
+    expect(settingsOwnedFile.ownership._tag).toBe("hookEntries");
+    expect(settingsOwnedFile.ownership.events).toContainEqual(
       expect.objectContaining({ pointer: "/hooks/Stop", previouslyPresent: true }),
     );
 

@@ -39,9 +39,9 @@ export const receiptTargetSchema = z.strictObject({
 export type ReceiptTarget = z.infer<typeof receiptTargetSchema>;
 
 const plannedFileSchema = ownedFileSchema.superRefine((file, scope) => {
-  const isReceiptLine = file.kind._tag === "receipt";
+  const isReceiptFile = file.kind._tag === "receipt";
 
-  if (isReceiptLine) {
+  if (isReceiptFile) {
     scope.addIssue({
       code: "custom",
       path: ["kind"],
@@ -268,14 +268,14 @@ const listOperationPathIssues = (
 const listReceiptFileIssues = (receipt: Receipt, receiptTarget: ReceiptTarget): ReadonlyArray<ZodIssueDetail> =>
   receipt.ownedFiles.flatMap((file, index) => {
     const path = ["receipt", "receipt", "ownedFiles", index];
-    const isReceiptLine = file.kind._tag === "receipt";
+    const isReceiptFile = file.kind._tag === "receipt";
     const reservedPath = listReservedReceiptPaths(receiptTarget).find((reserved) =>
       isPathsConflict(file.path, reserved),
     );
 
     const isReservedPathMissing = reservedPath == null;
     return [
-      ...(isReceiptLine
+      ...(isReceiptFile
         ? [{ path: [...path, "kind"], message: "Published receipt entries cannot contain the receipt itself." }]
         : []),
       ...(isReservedPathMissing
@@ -352,8 +352,8 @@ const listOperationReceiptIssues = (
       ];
     }
 
-    const isExactReceiptLine = receiptFile != null && isOwnedFilesEqual(operation.file, receiptFile);
-    if (isExactReceiptLine) {
+    const isExactReceiptFile = receiptFile != null && isOwnedFilesEqual(operation.file, receiptFile);
+    if (isExactReceiptFile) {
       return [];
     }
 
@@ -365,7 +365,7 @@ const listOperationReceiptIssues = (
     ];
   });
 
-const listReceiptLineCoverageIssues = (
+const listReceiptFileCoverageIssues = (
   plan: PlanFields,
   publish: ReceiptPublishOperation,
 ): ReadonlyArray<ZodIssueDetail> =>
@@ -409,7 +409,7 @@ const publishIssues = (plan: PlanFields, publish: ReceiptPublishOperation): Read
   ...publishScopeIssues(plan, publish),
   ...listReceiptFileIssues(publish.receipt, publish.target),
   ...listOperationReceiptIssues(plan, publish),
-  ...listReceiptLineCoverageIssues(plan, publish),
+  ...listReceiptFileCoverageIssues(plan, publish),
   ...listPreconditionReceiptIssues(plan, publish),
 ];
 

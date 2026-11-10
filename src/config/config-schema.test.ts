@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  defaultConfig,
+  defaultSettings,
   encodeSettingsDocument,
   readDefaultSettingField,
   readSettingFieldFromString,
@@ -12,7 +12,7 @@ import {
 
 const DEFAULT_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
 
-const decodeSettings = (details: unknown) => settingsSchema.parse(details);
+const decodeSettings = (uncheckedSettings: unknown) => settingsSchema.parse(uncheckedSettings);
 
 const readSettingNamed = (name: string) => {
   const setting = settingList.find((candidate) => candidate.name === name);
@@ -32,7 +32,7 @@ describe("configSchema", () => {
       diskCleanupRoots: DEFAULT_ROOT_FOLDERS,
       debugLogs: false,
     });
-    expect(defaultConfig).toEqual(decodeSettings({}));
+    expect(defaultSettings).toEqual(decodeSettings({}));
   });
 
   it("keeps a label and a description on every setting", () => {
@@ -51,7 +51,7 @@ describe("configSchema", () => {
 
   it("fills omitted properties but rejects excess properties", () => {
     expect(decodeSettings({ debugLogs: true })).toEqual({
-      ...defaultConfig,
+      ...defaultSettings,
       debugLogs: true,
     });
     expect(() => decodeSettings({ unknownProperty: true })).toThrow();
@@ -75,7 +75,7 @@ describe("configSchema", () => {
 describe("setting values from CLI text", () => {
   const applyTypedAnswer = (settingName: string, typedAnswer: string) =>
     setSettingField({
-      config: defaultConfig,
+      config: defaultSettings,
       key: readSettingNamed(settingName).key,
       value: readSettingFieldFromString({ setting: readSettingNamed(settingName), text: typedAnswer }),
     });
@@ -100,8 +100,8 @@ describe("setting values from CLI text", () => {
 
 describe("encodeConfigJson", () => {
   it("encodes every owned property into JSON", () => {
-    const document = encodeSettingsDocument(defaultConfig);
-    expect(JSON.parse(document)).toEqual(defaultConfig);
+    const document = encodeSettingsDocument(defaultSettings);
+    expect(JSON.parse(document)).toEqual(defaultSettings);
     expect(Object.keys(JSON.parse(document))).toHaveLength(3);
   });
 });

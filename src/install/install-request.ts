@@ -2,7 +2,7 @@ import { ZodError, z } from "zod";
 
 import { agentEvidenceSchema, agentIdSchema } from "#src/catalog/agent-catalog.js";
 import { featureIdSchema, featurePlatformSchema } from "#src/catalog/feature-catalog.js";
-import { type Config, isConfig } from "#src/config/config-schema.js";
+import { type Config, isSettings } from "#src/config/config-schema.js";
 import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { installationLocationSchema } from "./install-paths.js";
 import { absoluteRootSchema } from "./plan.js";
@@ -54,7 +54,7 @@ export const configurationChoiceSchema = z
     z.strictObject({
       _tag: z.literal("selected"),
       config: z
-        .custom<Config>(isConfig)
+        .custom<Config>(isSettings)
         .describe("Complete validated configuration explicitly selected by the caller."),
     }),
     z

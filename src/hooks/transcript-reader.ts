@@ -6,7 +6,7 @@ const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 const TRANSCRIPT_HEAD_BYTES = 64 * 1024;
 const LINE_FEED = 0x0a;
 
-export type TokenUsage = {
+type TokenUsage = {
   readonly inputTokens: number;
   readonly cacheCreationInputTokens: number;
   readonly cacheReadInputTokens: number;

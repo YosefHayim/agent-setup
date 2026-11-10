@@ -6,8 +6,8 @@ import { type InstallationDestination, receiptPath } from "#src/install/install-
 import { preparePackage } from "#src/install/prepare-package.js";
 import { readReceipt, type Scope } from "#src/install/receipt.js";
 import { update } from "#src/install/update.js";
-import { managedConfigPath, planManagedConfig, readConfigFile } from "./config-file.js";
-import { type Config, defaultConfig } from "./config-schema.js";
+import { managedSettingsPath, planManagedSettings, readSettingsFile } from "./config-file.js";
+import { type Config, defaultSettings } from "./config-schema.js";
 import { type HostScan, readDestinationForScope, scanHost } from "./host-scan.js";
 
 type SettingsTarget = {
@@ -30,7 +30,7 @@ export const readLocateSettingsTarget = async (scope: Scope): Promise<SettingsTa
     scope,
     host,
     destination,
-    configPath: path.join(destination.root, managedConfigPath),
+    configPath: path.join(destination.root, managedSettingsPath),
   };
 };
 
@@ -39,7 +39,7 @@ export const readSettingsAt = async (request: {
   readonly root: string;
   readonly homeRoot: string;
 }): Promise<Config> => {
-  const ownSettings = await readConfigFile(path.join(request.root, managedConfigPath));
+  const ownSettings = await readSettingsFile(path.join(request.root, managedSettingsPath));
 
   const isOwnSettingsPresent = ownSettings._tag === "present";
   if (isOwnSettingsPresent) {
@@ -48,17 +48,17 @@ export const readSettingsAt = async (request: {
 
   const isRootHomeRoot = path.resolve(request.root) === path.resolve(request.homeRoot);
   if (isRootHomeRoot) {
-    return defaultConfig;
+    return defaultSettings;
   }
 
-  const globalSettings = await readConfigFile(path.join(request.homeRoot, managedConfigPath));
+  const globalSettings = await readSettingsFile(path.join(request.homeRoot, managedSettingsPath));
 
   const isGlobalSettingsPresent = globalSettings._tag === "present";
   if (isGlobalSettingsPresent) {
     return globalSettings.config;
   }
 
-  return defaultConfig;
+  return defaultSettings;
 };
 
 export const readSettings = async (scope: Scope): Promise<SettingsTarget & { readonly config: Config }> => {
@@ -119,8 +119,8 @@ export const saveSettings = async (
   // The plan keeps the old bytes only as its restoration value and never decodes them, so a broken file is replaceable.
   const previousSettingsFile = await readPreviousSettingsFile(target.configPath);
   const isResetWrite = configuration._tag === "reset";
-  const settingsToWrite = isResetWrite ? defaultConfig : configuration.config;
-  const managedSettingsPlan = planManagedConfig({
+  const settingsToWrite = isResetWrite ? defaultSettings : configuration.config;
+  const managedSettingsPlan = planManagedSettings({
     scope: target.scope,
     selection: { _tag: "selected", config: settingsToWrite },
     previousConfigFile: previousSettingsFile,

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { checkHealth } from "./doctor.js";
 
 const noEvidence = { homePaths: [], absolutePaths: [], commands: [] };
@@ -57,7 +57,7 @@ const makeWorkspace = async (files: { readonly config?: boolean; readonly receip
   }
 
   if (isSettingsRequested) {
-    await writeFile(settingsPath, `${JSON.stringify(defaultConfig)}\n`);
+    await writeFile(settingsPath, `${JSON.stringify(defaultSettings)}\n`);
   }
 
   if (isReceiptRequested) {
@@ -131,7 +131,7 @@ describe("checkHealth", () => {
       version: "0.9.0",
       features: ["scratch-folder-guard", "make-code-readable", "make-promo-video"],
     });
-    expect(report.config).toEqual({ _tag: "present", config: defaultConfig });
+    expect(report.config).toEqual({ _tag: "present", config: defaultSettings });
     expect(report.features).toEqual([
       {
         id: "scratch-folder-guard",

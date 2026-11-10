@@ -17,13 +17,13 @@ export type Config = z.infer<typeof settingsObjectSchema>;
 type SettingKey = keyof Config;
 
 // A key set to undefined is rejected here, before defaults fill it in; JSON files can never carry one.
-const rejectUndefinedProperties = (details: unknown, refinement: z.RefinementCtx) => {
-  const isNotPlainObject = typeof details !== "object" || details === null;
+const rejectUndefinedProperties = (uncheckedSettings: unknown, refinement: z.RefinementCtx) => {
+  const isNotPlainObject = typeof uncheckedSettings !== "object" || uncheckedSettings === null;
   if (isNotPlainObject) {
     return;
   }
 
-  for (const [key, field] of Object.entries(details)) {
+  for (const [key, field] of Object.entries(uncheckedSettings)) {
     const isUndefinedField = typeof field === "undefined";
     if (isUndefinedField) {
       refinement.addIssue({ code: "custom", message: "Properties must not be undefined.", path: [key] });
@@ -34,11 +34,11 @@ const rejectUndefinedProperties = (details: unknown, refinement: z.RefinementCtx
 export const settingsSchema = z.unknown().superRefine(rejectUndefinedProperties).pipe(settingsObjectSchema);
 
 // Temporary bridge for the Effect schemas that still validate configs; removed with those schemas.
-export const isConfig = (details: unknown): details is Config => settingsSchema.safeParse(details).success;
+export const isSettings = (candidate: unknown): candidate is Config => settingsSchema.safeParse(candidate).success;
 
 export const encodeSettingsDocument = (settings: Config): string => JSON.stringify(settings);
 
-export const defaultConfig: Config = settingsObjectSchema.parse({});
+export const defaultSettings: Config = settingsObjectSchema.parse({});
 
 type SettingKind = "number" | "boolean" | "list" | "text";
 
@@ -140,7 +140,7 @@ export const readSettingFieldFromString = (request: { readonly setting: Setting;
   }
 };
 
-export const readDefaultSettingField = (key: SettingKey): unknown => defaultConfig[key];
+export const readDefaultSettingField = (key: SettingKey): unknown => defaultSettings[key];
 
 // Returns a new complete config with one setting replaced; a null value removes an optional setting's key.
 // An invalid value throws a ZodError.

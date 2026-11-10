@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { install } from "./install.js";
 import { installRequestSchema } from "./install-request.js";
 import { planRestorations } from "./restore.js";
@@ -96,7 +96,7 @@ const installRequest = (roots: { root: string; preparedRoot: string }) => ({
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code"] },
   interaction: { _tag: "scripted" },
-  configuration: { _tag: "selected", config: defaultConfig },
+  configuration: { _tag: "selected", config: defaultSettings },
 });
 
 describe("install", () => {
@@ -118,7 +118,7 @@ describe("install", () => {
     });
     expect(installation.platformRequirements).toEqual([{ featureId: "scratch-folder-guard", platform: "any" }]);
     expect(await readFileMessages(root, SCRATCH_GUARD_HOOK_PATH)).toBe("export {};\n");
-    expect(JSON.parse(await readFileMessages(root, SETTINGS_PATH))).toEqual(defaultConfig);
+    expect(JSON.parse(await readFileMessages(root, SETTINGS_PATH))).toEqual(defaultSettings);
 
     const settings = await readFileMessages(root, CLAUDE_SETTINGS_PATH);
     expect(settings).toContain('"theme": "dark"');
@@ -247,11 +247,11 @@ describe("install", () => {
     expect(await readFileMessages(root, MAKE_CODE_READABLE_SKILL_PATH)).toBe(synced);
 
     // The refreshed receipt must describe the adopted bytes, so the next install stays clean.
-    const adoptedSkillLine = (await readReceipt(root)).ownedFiles.find(
+    const adoptedSkillOwnedFile = (await readReceipt(root)).ownedFiles.find(
       (file: { path: string }) => file.path === MAKE_CODE_READABLE_SKILL_PATH,
     );
     const adoptedSkillBytes = await readFile(join(root, MAKE_CODE_READABLE_SKILL_PATH));
-    expect(adoptedSkillLine.ownership.installedHash).toBe(createSha256Hex(adoptedSkillBytes));
+    expect(adoptedSkillOwnedFile.ownership.installedHash).toBe(createSha256Hex(adoptedSkillBytes));
 
     // The next install must still succeed on the adopted bytes.
     await install(request, notAbortedSignal);
@@ -325,7 +325,7 @@ describe("install", () => {
   it("copies a validated global config once into a first project installation", async () => {
     const { root: homeRoot, preparedRoot } = await createWorkspace();
     const projectRoot = await makeTemporaryDirectory("agent-setup-install-project-");
-    const globalSettings = { ...defaultConfig, sessionRehomeRoots: ["vendor"] };
+    const globalSettings = { ...defaultSettings, sessionRehomeRoots: ["vendor"] };
     const writeGlobalSettings = (globalSettings: object) =>
       writeFiles(homeRoot, { [SETTINGS_PATH]: `${JSON.stringify(globalSettings, null, 2)}\n` });
     const request = {
@@ -364,7 +364,7 @@ describe("install", () => {
     const driftedPath = SCRATCH_GUARD_HOOK_PATH;
     const exactPath = ".claude/agent-setup/hooks/scratch-folder-guard/lib/hook-config.js";
     await writeFiles(root, { [driftedPath]: "drifted after install\n", [exactPath]: "exact\n" });
-    const createWholeFileLine = (filePath: string, hash: string) => ({
+    const createWholeFileOwnedFile = (filePath: string, hash: string) => ({
       owner: { _tag: "application" as const },
       path: filePath,
       kind: { _tag: "runtime" as const },
@@ -374,12 +374,12 @@ describe("install", () => {
     const restorations = await planRestorations({
       root,
       files: [
-        createWholeFileLine(driftedPath, createSha256Hex("old\n")),
-        createWholeFileLine(
+        createWholeFileOwnedFile(driftedPath, createSha256Hex("old\n")),
+        createWholeFileOwnedFile(
           ".claude/agent-setup/hooks/scratch-folder-guard/lib/scratchState.js",
           createSha256Hex("old\n"),
         ),
-        createWholeFileLine(exactPath, createSha256Hex("exact\n")),
+        createWholeFileOwnedFile(exactPath, createSha256Hex("exact\n")),
       ],
     });
 

@@ -6,7 +6,7 @@ import {
   featureCatalog,
   featureCatalogSchema,
   findFeature,
-  skillsForFeatures,
+  listSkillsForFeatures,
 } from "./feature-catalog.js";
 
 const expectedFeatureIds = [
@@ -171,7 +171,7 @@ const validFixture = [
   },
 ];
 
-const decodeFixture = (details: unknown) => featureCatalogSchema.safeParse(details);
+const decodeFixture = (uncheckedCatalog: unknown) => featureCatalogSchema.safeParse(uncheckedCatalog);
 
 describe("featureCatalog", () => {
   it("decodes all approved features in display order", () => {
@@ -184,9 +184,9 @@ describe("featureCatalog", () => {
 
   it("derives defaults, installed skills, and exact shipped allowlists", () => {
     expect(defaultFeatureIds).toEqual(["scratch-folder-guard", "process-kill-guard", "git-hook-guard"]);
-    expect(skillsForFeatures(["scratch-folder-guard", "git-hook-guard"])).toEqual([]);
+    expect(listSkillsForFeatures(["scratch-folder-guard", "git-hook-guard"])).toEqual([]);
     expect(
-      skillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => [skill.id, skill.shippedPaths]),
+      listSkillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => [skill.id, skill.shippedPaths]),
     ).toEqual([
       [
         "image-to-code",
@@ -510,8 +510,8 @@ describe("featureCatalogSchema", () => {
       ],
       message: "must end in .ts",
     },
-  ])("rejects $name", ({ input: details, message }) => {
-    const featureCatalogCheck = decodeFixture(details);
+  ])("rejects $name", ({ input: invalidCatalog, message }) => {
+    const featureCatalogCheck = decodeFixture(invalidCatalog);
 
     expect(featureCatalogCheck.success).toBe(false);
     expect(String(featureCatalogCheck.error)).toContain(message);

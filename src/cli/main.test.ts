@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { installRequestSchema } from "#src/install/install-request.js";
 import { isBareArgv } from "./main.js";
 
@@ -134,7 +134,7 @@ describe("config reset", () => {
 
         expect(refusedSet.exitCode).not.toBe(0);
         expect(execution.exitCode).toBe(0);
-        expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(defaultConfig);
+        expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(defaultSettings);
       }),
     CLI_TEST_TIMEOUT,
   );
@@ -149,7 +149,7 @@ describe("install request schema decoding smoke", () => {
       features: { _tag: "defaults" },
       agents: { _tag: "selected", ids: ["claude-code"] },
       interaction: { _tag: "scripted" },
-      configuration: { _tag: "selected", config: defaultConfig },
+      configuration: { _tag: "selected", config: defaultSettings },
     };
 
     const decodedRequest = installRequestSchema.parse(request);

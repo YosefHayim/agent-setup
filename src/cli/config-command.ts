@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 
 import {
   type Config,
-  defaultConfig,
+  defaultSettings,
   readDefaultSettingField,
   readSettingFieldFromString,
   setSettingField,
@@ -193,7 +193,7 @@ const resetEverySetting = async (request: {
 
   const isDocumentFormat = settings.format === "json";
   if (isDocumentFormat) {
-    await TerminalUI.showDocument({ _tag: "reset", scope: settings.scope, config: defaultConfig, owner });
+    await TerminalUI.showDocument({ _tag: "reset", scope: settings.scope, config: defaultSettings, owner });
     return;
   }
 
