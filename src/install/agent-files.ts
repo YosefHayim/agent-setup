@@ -40,8 +40,8 @@ interface PlannedFile {
   readonly _tag: string;
 }
 
-// Planners and checks throw plain errors; each one becomes an InstallError, as it did inside an Either.
-const tryAsInstallError = <Result>(action: () => Result): Result => {
+// Planners and checks throw plain errors; each one becomes an InstallError.
+const tryAsInstallError = <Planned>(action: () => Planned): Planned => {
   try {
     return action();
   } catch (error) {
