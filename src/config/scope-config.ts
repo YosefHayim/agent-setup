@@ -97,7 +97,7 @@ export const saveConfig = (request: { readonly target: ConfigTarget; readonly co
       yield* update({
         destination: target.destination,
         host: { homeRoot: target.host.homeRoot },
-        preparedPackage: yield* preparePackage,
+        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
         features: { _tag: "preserve" },
         agents: { _tag: "detected", evidence: target.host.agentEvidence },
         interaction: { _tag: "scripted" },

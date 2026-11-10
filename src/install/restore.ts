@@ -30,20 +30,28 @@ const restoreWholeFile = ({ file, snapshot }: RestoreTarget): Either.Either<File
   // We created this path from nothing, so uninstall must not stick on drift, upgrades, or prior deletion;
   // expectedCurrent still binds the transaction to the bytes observed at plan time.
   if (ownership.previous._tag === "missing") {
-    return checkFileChange({
-      _tag: "remove",
-      file,
-      unownedBytes: new Uint8Array(),
-      expectedCurrent: expectedCurrent(snapshot),
+    return Either.try({
+      try: () =>
+        checkFileChange({
+          _tag: "remove",
+          file,
+          unownedBytes: new Uint8Array(),
+          expectedCurrent: expectedCurrent(snapshot),
+        }),
+      catch: wrapAsInstallError,
     });
   }
 
   if (snapshot._tag === "missing" || hashBytes(snapshot.bytes) === ownership.installedHash) {
-    return checkFileChange({
-      _tag: "restore",
-      file,
-      bytes: ownership.previous.bytes,
-      expectedCurrent: expectedCurrent(snapshot),
+    return Either.try({
+      try: () =>
+        checkFileChange({
+          _tag: "restore",
+          file,
+          bytes: ownership.previous.bytes,
+          expectedCurrent: expectedCurrent(snapshot),
+        }),
+      catch: wrapAsInstallError,
     });
   }
 
@@ -57,7 +65,10 @@ const checkFormatRestoration = (
   Either.flatMap(Either.mapLeft(plan, wrapAsInstallError), (operation) =>
     operation._tag === "none"
       ? Either.left(createInstallError(`${format} restoration for ${file.path} returned no operation.`))
-      : checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) }),
+      : Either.try({
+          try: () => checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) }),
+          catch: wrapAsInstallError,
+        }),
   );
 
 const restoreInstructionFile = (target: RestoreTarget) =>
@@ -119,7 +130,13 @@ export const planRestorations = (input: unknown) =>
 
     return yield* Effect.forEach(request.files, (file) =>
       Effect.gen(function* () {
-        const target = { file, snapshot: yield* readFileSnapshot(path.join(request.root, file.path)) };
+        const target = {
+          file,
+          snapshot: yield* Effect.tryPromise({
+            try: () => readFileSnapshot(path.join(request.root, file.path)),
+            catch: (error) => error,
+          }),
+        };
         switch (file.kind._tag) {
           case "instruction":
             return yield* restoreInstructionFile(target);

@@ -1,7 +1,7 @@
 /** Files the prepared package ships: hook code and skill trees read from the prepared folder and planned as whole-file writes. */
 
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, Either, ParseResult, Schema } from "effect";
 import type { z } from "zod";
 
 import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
@@ -15,7 +15,7 @@ import {
   readFileSnapshot,
 } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
-import { createInstallError, type InstallRequest } from "./install-request.js";
+import { createInstallError, type InstallRequest, wrapAsInstallError } from "./install-request.js";
 import type { Receipt } from "./receipt.js";
 
 const preparedFileSchema = Schema.Struct({
@@ -118,24 +118,35 @@ const createHookFileWrite = (input: {
 }) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
-    const snapshot = yield* readFileSnapshot(path.join(input.request.destination.root, input.filePath));
-    const previous = yield* previousWholeFile({
-      receipt: input.previousReceipt,
-      filePath: input.filePath,
-      snapshot,
-      desiredBytes: input.bytes,
+    const snapshot = yield* Effect.tryPromise({
+      try: () => readFileSnapshot(path.join(input.request.destination.root, input.filePath)),
+      catch: (error) => error,
+    });
+    const previous = yield* Either.try({
+      try: () =>
+        previousWholeFile({
+          receipt: input.previousReceipt,
+          filePath: input.filePath,
+          snapshot,
+          desiredBytes: input.bytes,
+        }),
+      catch: wrapAsInstallError,
     });
 
-    return yield* checkFileChange({
-      _tag: "write",
-      file: {
-        owner: applicationOwner,
-        path: input.filePath,
-        kind: { _tag: "runtime" },
-        ownership: { _tag: "wholeFile", installedHash: hashBytes(input.bytes), previous },
-      },
-      bytes: input.bytes,
-      expectedCurrent: expectedCurrent(snapshot),
+    return yield* Either.try({
+      try: () =>
+        checkFileChange({
+          _tag: "write",
+          file: {
+            owner: applicationOwner,
+            path: input.filePath,
+            kind: { _tag: "runtime" },
+            ownership: { _tag: "wholeFile", installedHash: hashBytes(input.bytes), previous },
+          },
+          bytes: input.bytes,
+          expectedCurrent: expectedCurrent(snapshot),
+        }),
+      catch: wrapAsInstallError,
     });
   });
 

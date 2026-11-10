@@ -1,9 +1,8 @@
 /** Host files as install sees them: snapshot, expected-current guard, prior value, and checked file change. */
 
-import { FileSystem } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { readFile } from "node:fs/promises";
 
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
+import { joinZodIssueMessages } from "../zod-issue-messages.js";
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { createInstallError } from "./install-request.js";
 import type { FileOwner, OwnedFile, PreviousFileValue } from "./ownership.js";
@@ -12,41 +11,53 @@ import type { Receipt } from "./receipt.js";
 
 export const applicationOwner = { _tag: "application" } as const satisfies FileOwner;
 
-const fileSnapshotSchema = Schema.Union(
-  Schema.TaggedStruct("missing", {}),
-  Schema.TaggedStruct("file", {
-    bytes: Schema.Uint8ArrayFromSelf.annotations({
-      description: "Exact bytes observed at one planned file path.",
-    }),
-  }),
-);
+interface MissingFileSnapshot {
+  readonly _tag: "missing";
+}
 
-export type FileSnapshot = Schema.Schema.Type<typeof fileSnapshotSchema>;
+interface ExistingFileSnapshot {
+  readonly _tag: "file";
+  readonly bytes: Uint8Array;
+}
 
-export const readFileSnapshot = (filePath: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
+export type FileSnapshot = MissingFileSnapshot | ExistingFileSnapshot;
 
-    return yield* fileSystem.readFile(filePath).pipe(
-      Effect.map((bytes): FileSnapshot => ({ _tag: "file", bytes })),
-      Effect.catchIf(isNotFound, (): Effect.Effect<FileSnapshot> => Effect.succeed({ _tag: "missing" })),
-    );
-  });
+export const readFileSnapshot = async (filePath: string): Promise<FileSnapshot> => {
+  try {
+    const fileBytes = await readFile(filePath);
 
-export const expectedCurrent = (snapshot: FileSnapshot): ExpectedCurrent =>
-  snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "file", sha256: hashBytes(snapshot.bytes) };
+    return { _tag: "file", bytes: fileBytes };
+  } catch (readError) {
+    const isReadFailure = !isNotFound(readError);
+    if (isReadFailure) {
+      throw readError;
+    }
 
-export const previousFileValue = (snapshot: FileSnapshot): PreviousFileValue =>
-  snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "priorFile", bytes: snapshot.bytes };
+    return { _tag: "missing" };
+  }
+};
 
-export const checkFileChange = (input: unknown): Either.Either<FileChange, Error> =>
-  Either.mapLeft(
-    Schema.validateEither(zodAsEffectSchema(fileChangeSchema), {
-      onExcessProperty: "error",
-    })(input),
-    (error) =>
-      createInstallError(`Generated file change is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`),
-  );
+export const expectedCurrent = (snapshot: FileSnapshot): ExpectedCurrent => {
+  const isMissing = snapshot._tag === "missing";
+
+  return isMissing ? { _tag: "missing" } : { _tag: "file", sha256: hashBytes(snapshot.bytes) };
+};
+
+export const previousFileValue = (snapshot: FileSnapshot): PreviousFileValue => {
+  const isMissing = snapshot._tag === "missing";
+
+  return isMissing ? { _tag: "missing" } : { _tag: "priorFile", bytes: snapshot.bytes };
+};
+
+export const checkFileChange = (input: unknown): FileChange => {
+  const changeCheck = fileChangeSchema.safeParse(input);
+  const isChangeInvalid = !changeCheck.success;
+  if (isChangeInvalid) {
+    throw createInstallError(`Generated file change is invalid: ${joinZodIssueMessages(changeCheck.error)}`);
+  }
+
+  return changeCheck.data;
+};
 
 export const previousReceiptFile = (receipt: Receipt | undefined, filePath: string): OwnedFile | undefined =>
   receipt?.ownedFiles.find((file) => file.path === filePath);
@@ -58,23 +69,27 @@ export const previousWholeFile = (input: {
   filePath: string;
   snapshot: FileSnapshot;
   desiredBytes?: Uint8Array;
-}): Either.Either<PreviousFileValue, Error> => {
+}): PreviousFileValue => {
   const file = previousReceiptFile(input.receipt, input.filePath);
-  if (file === undefined) {
-    return Either.right(previousFileValue(input.snapshot));
+  const isNewFile = file == null;
+  if (isNewFile) {
+    return previousFileValue(input.snapshot);
   }
 
-  if (file.ownership._tag !== "wholeFile") {
-    return Either.left(createInstallError(`Receipted whole-file file ${input.filePath} has incompatible ownership.`));
+  const ownership = file.ownership;
+  const isOwnershipIncompatible = ownership._tag !== "wholeFile";
+  if (isOwnershipIncompatible) {
+    throw createInstallError(`Receipted whole-file file ${input.filePath} has incompatible ownership.`);
   }
 
   const snapshot = input.snapshot;
-  const installedContent = snapshot._tag === "file" && hashBytes(snapshot.bytes) === file.ownership.installedHash;
+  const installedContent = snapshot._tag === "file" && hashBytes(snapshot.bytes) === ownership.installedHash;
   const desiredContent =
-    snapshot._tag === "file" && input.desiredBytes !== undefined && bytesEqual(snapshot.bytes, input.desiredBytes);
-  if (!installedContent && !desiredContent) {
-    return Either.left(createInstallError(`Receipted whole-file file ${input.filePath} changed after installation.`));
+    snapshot._tag === "file" && input.desiredBytes != null && bytesEqual(snapshot.bytes, input.desiredBytes);
+  const isChangedAfterInstall = !installedContent && !desiredContent;
+  if (isChangedAfterInstall) {
+    throw createInstallError(`Receipted whole-file file ${input.filePath} changed after installation.`);
   }
 
-  return Either.right(file.ownership.previous);
+  return ownership.previous;
 };

@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NodeContext } from "@effect/platform-node";
-import { describe, expect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { featureCatalog } from "../catalog/feature-catalog.js";
 import { preparePackage } from "./prepare-package.js";
@@ -42,43 +40,42 @@ describe("preparePackage", () => {
     expect(new Set(featureCatalog.map((feature) => feature.sourceDirectory)).size).toBe(featureCatalog.length);
   });
 
-  it.effect.skipIf(!packageIsBuilt)(
+  it.skipIf(!packageIsBuilt)(
     "prepares runtime entrypoints and commands whose imports resolve inside the prepared tree",
-    () =>
-      Effect.gen(function* () {
-        const prepared = yield* preparePackage;
-        expect(prepared.root.endsWith("/dist/prepared") || prepared.root.endsWith("\\dist\\prepared")).toBe(true);
-        expect(prepared.version).toMatch(/^\d+\.\d+\.\d+/);
+    async () => {
+      const prepared = await preparePackage();
+      expect(prepared.root.endsWith("/dist/prepared") || prepared.root.endsWith("\\dist\\prepared")).toBe(true);
+      expect(prepared.version).toMatch(/^\d+\.\d+\.\d+/);
 
-        const preparedRuntimeRoot = path.join(prepared.root, "hooks");
-        expect(unresolvedRuntimeImports(preparedRuntimeRoot)).toEqual([]);
+      const preparedRuntimeRoot = path.join(prepared.root, "hooks");
+      expect(unresolvedRuntimeImports(preparedRuntimeRoot)).toEqual([]);
 
-        const scratchFolderGuardRoot = path.join(preparedRuntimeRoot, "scratch-folder-guard");
-        const scratchFolderGuard = path.join(scratchFolderGuardRoot, "hooks/scratch-folder-guard.js");
-        expect(readFileSync(scratchFolderGuard, "utf8")).toContain("../lib/hook-config.js");
-        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hook-config.js"))).toBe(true);
-        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hook-output.js"))).toBe(true);
-        expect(existsSync(path.join(scratchFolderGuardRoot, "watchers/scratch-watcher.js"))).toBe(true);
-        expect(existsSync(path.join(scratchFolderGuardRoot, "command/clear-scratch.js"))).toBe(true);
+      const scratchFolderGuardRoot = path.join(preparedRuntimeRoot, "scratch-folder-guard");
+      const scratchFolderGuard = path.join(scratchFolderGuardRoot, "hooks/scratch-folder-guard.js");
+      expect(readFileSync(scratchFolderGuard, "utf8")).toContain("../lib/hook-config.js");
+      expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hook-config.js"))).toBe(true);
+      expect(existsSync(path.join(scratchFolderGuardRoot, "lib/hook-output.js"))).toBe(true);
+      expect(existsSync(path.join(scratchFolderGuardRoot, "watchers/scratch-watcher.js"))).toBe(true);
+      expect(existsSync(path.join(scratchFolderGuardRoot, "command/clear-scratch.js"))).toBe(true);
 
-        // scratch-folder-guard reads transcripts through the shared hook lib, so preparing copies it beside the hook.
-        expect(existsSync(path.join(scratchFolderGuardRoot, "lib/transcript-reader.js"))).toBe(true);
+      // scratch-folder-guard reads transcripts through the shared hook lib, so preparing copies it beside the hook.
+      expect(existsSync(path.join(scratchFolderGuardRoot, "lib/transcript-reader.js"))).toBe(true);
 
-        // The hook reads its transcript under HOME, so give it a throwaway one.
-        const hookHome = mkdtempSync(path.join(tmpdir(), "agent-setup-prepared-home-"));
-        try {
-          const execution = spawnSync(process.execPath, [scratchFolderGuard], {
-            input:
-              '{"hook_event_name":"PreToolUse","session_id":"prepared-package-test","tool_name":"Bash","tool_input":{"command":"echo ok"}}',
-            encoding: "utf8",
-            env: { ...process.env, HOME: hookHome },
-          });
-          expect(execution.stderr).toBe("");
-          expect(execution.status).toBe(0);
-        } finally {
-          rmSync(hookHome, { recursive: true, force: true });
-        }
-      }).pipe(Effect.provide(NodeContext.layer)),
+      // The hook reads its transcript under HOME, so give it a throwaway one.
+      const hookHome = mkdtempSync(path.join(tmpdir(), "agent-setup-prepared-home-"));
+      try {
+        const execution = spawnSync(process.execPath, [scratchFolderGuard], {
+          input:
+            '{"hook_event_name":"PreToolUse","session_id":"prepared-package-test","tool_name":"Bash","tool_input":{"command":"echo ok"}}',
+          encoding: "utf8",
+          env: { ...process.env, HOME: hookHome },
+        });
+        expect(execution.stderr).toBe("");
+        expect(execution.status).toBe(0);
+      } finally {
+        rmSync(hookHome, { recursive: true, force: true });
+      }
+    },
     { timeout: 30_000 },
   );
 });
