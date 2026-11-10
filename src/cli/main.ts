@@ -1,78 +1,83 @@
 #!/usr/bin/env node
-/** agent-setup CLI entry point: the only file that starts the Effect runtime. */
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CliConfig, Command, ValidationError } from "@effect/cli";
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect, ParseResult } from "effect";
+import { type Command, CommanderError } from "commander";
 
 import { readPackageVersion } from "../install/package-root.js";
-import { catalogCommand } from "./catalog-command.js";
-import { isCliUsageError } from "./cli-options.js";
-import { configCommand } from "./config-command.js";
-import { doctorCommand } from "./doctor-command.js";
-import { installCommand } from "./install-command.js";
-import { menuCommand } from "./menu-command.js";
+import { createCatalogCommand } from "./catalog-command.js";
+import { createCommand, isCliUsageError } from "./cli-options.js";
+import { createConfigCommand } from "./config-command.js";
+import { createDoctorCommand, type HealthStatus } from "./doctor-command.js";
+import { createInstallCommand } from "./install-command.js";
+import { createMenuCommand } from "./menu-command.js";
 import * as TerminalUI from "./terminal-ui.js";
-import { uninstallCommand } from "./uninstall-command.js";
-import { updateCommand } from "./update-command.js";
-import { workflowCommand } from "./workflow-command.js";
+import { createUninstallCommand } from "./uninstall-command.js";
+import { createUpdateCommand } from "./update-command.js";
+import { createWorkflowCommand } from "./workflow-command.js";
 
-const agentSetup = Command.make("agent-setup").pipe(
-  Command.withDescription("Install a personal set of AI coding-agent skills, hooks, and copyable workflows."),
-  Command.withSubcommands([
-    installCommand,
-    updateCommand,
-    uninstallCommand,
-    menuCommand,
-    catalogCommand,
-    configCommand,
-    doctorCommand,
-    workflowCommand,
-  ]),
-);
+const FAILED_EXIT_CODE = 1;
+const USAGE_EXIT_CODE = 2;
+const INTERRUPTED_EXIT_CODE = 130;
 
-const showCliFailure = (error: unknown) => {
-  const exitCode =
-    ValidationError.isValidationError(error) || ParseResult.isParseError(error) || isCliUsageError(error) ? 2 : 1;
-  const presentation = ValidationError.isValidationError(error)
-    ? Effect.void
-    : Effect.tryPromise({ try: () => TerminalUI.showError(error), catch: (error) => error });
-  return presentation.pipe(
-    Effect.zipRight(
-      Effect.sync(() => {
-        process.exitCode = exitCode;
-      }),
-    ),
-  );
+const applyHealthStatusExitCode = (healthStatus: HealthStatus): void => {
+  const isUnhealthy = healthStatus === "unhealthy";
+  if (isUnhealthy) {
+    process.exitCode = FAILED_EXIT_CODE;
+  }
 };
+
+const createAgentSetupCommand = (packageVersion: string, abortSignal: AbortSignal): Command =>
+  createCommand("agent-setup")
+    .description("Install a personal set of AI coding-agent skills, hooks, and copyable workflows.")
+    .version(packageVersion, "-V, --version", "Print the agent-setup version")
+    .addCommand(createInstallCommand(abortSignal))
+    .addCommand(createUpdateCommand(abortSignal))
+    .addCommand(createUninstallCommand(abortSignal))
+    .addCommand(createMenuCommand(abortSignal))
+    .addCommand(createCatalogCommand())
+    .addCommand(createConfigCommand(abortSignal))
+    .addCommand(createDoctorCommand(applyHealthStatusExitCode))
+    .addCommand(createWorkflowCommand());
 
 export const isBareArgv = (argv: ReadonlyArray<string>): boolean => argv.length <= 2;
 
-const program = Effect.gen(function* () {
-  const packageVersion = yield* Effect.tryPromise({ try: readPackageVersion, catch: (error) => error });
-  const cli = Command.run(agentSetup, { name: "agent-setup", version: packageVersion });
-
-  if (isBareArgv(process.argv)) {
-    yield* cli(["node", "agent-setup", "--help"]);
+const reportFailure = async (request: { readonly error: unknown; readonly isInterrupted: boolean }): Promise<void> => {
+  const { error, isInterrupted } = request;
+  const isCommanderExit = error instanceof CommanderError;
+  if (isCommanderExit) {
+    // Help and version exit 0; a usage error from commander has already printed its message.
+    process.exitCode = error.exitCode === 0 ? 0 : USAGE_EXIT_CODE;
     return;
   }
 
-  const invocationArguments = process.argv[2] === "-V" ? ["node", "agent-setup", "--version"] : process.argv;
-  yield* cli(invocationArguments);
-}).pipe(
-  Effect.catchAll(showCliFailure),
-  Effect.onInterrupt(() =>
-    Effect.sync(() => {
-      process.exitCode = 130;
-    }),
-  ),
-  Effect.provide(NodeContext.layer),
-  Effect.provide(CliConfig.layer({ showBuiltIns: false })),
-);
+  if (isInterrupted) {
+    return;
+  }
+
+  await TerminalUI.showError(error);
+  process.exitCode = isCliUsageError(error) ? USAGE_EXIT_CODE : FAILED_EXIT_CODE;
+};
+
+const main = async (argv: ReadonlyArray<string>): Promise<void> => {
+  const abortController = new AbortController();
+  process.once("SIGINT", () => {
+    process.exitCode = INTERRUPTED_EXIT_CODE;
+    abortController.abort();
+  });
+
+  try {
+    const packageVersion = await readPackageVersion();
+    const agentSetup = createAgentSetupCommand(packageVersion, abortController.signal);
+    const isBare = isBareArgv(argv);
+    const parsedArgv = isBare ? ["node", "agent-setup", "--help"] : argv;
+    await agentSetup.parseAsync(parsedArgv);
+  } catch (error) {
+    await reportFailure({ error, isInterrupted: abortController.signal.aborted });
+  }
+};
 
 const thisFile = fileURLToPath(import.meta.url);
 const invoked = process.argv[1] === undefined ? undefined : resolve(process.argv[1]);
@@ -87,7 +92,7 @@ if (!isDirectRun && invoked !== undefined) {
   }
 }
 
-// Tests import this module for isBareArgv, so the runtime starts only when it is the entry point.
+// Tests import this module for isBareArgv, so the CLI runs only when this file is the entry point.
 if (isDirectRun) {
-  NodeRuntime.runMain(program);
+  await main(process.argv);
 }

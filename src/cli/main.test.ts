@@ -4,13 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NodeContext } from "@effect/platform-node";
-import { describe, expect, it } from "@effect/vitest";
-import { Effect, Either, Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { defaultConfig } from "../config/config-schema.js";
 import { installRequestSchema } from "../install/install-request.js";
-import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { isBareArgv } from "./main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -54,13 +51,13 @@ describe("CLI help", () => {
   it.each([
     {
       args: ["--help"],
-      shows: ["agent-setup", "install", "catalog", "workflow scaffold"],
+      shows: ["agent-setup", "install", "catalog", "workflow"],
       hides: ["voice", "openrouter", "--wizard", "--log-level", "--completions"],
     },
     { args: ["config", "--help"], shows: ["Set one managed setting"], hides: ["pick-refine"] },
     {
       args: ["install", "--help"],
-      shows: ["<feature-id>...", "--scope global | project", "global home installation root (default)"],
+      shows: ["[feature-id...]", "--scope <scope>", "global home installation root (default)"],
       hides: ["--features", "--global", "--project"],
     },
   ])(
@@ -140,25 +137,20 @@ describe("config reset", () => {
 });
 
 describe("install request schema decoding smoke", () => {
-  it.effect("decodes a complete scripted install request", () =>
-    Effect.gen(function* () {
-      const request = {
-        destination: { _tag: "project", root: REPO_ROOT },
-        host: { homeRoot: REPO_ROOT },
-        preparedPackage: { root: path.join(REPO_ROOT, "dist", "prepared"), version: "0.11.0" },
-        features: { _tag: "defaults" },
-        agents: { _tag: "selected", ids: ["claude-code"] },
-        interaction: { _tag: "scripted" },
-        configuration: { _tag: "selected", config: defaultConfig },
-      };
+  it("decodes a complete scripted install request", () => {
+    const request = {
+      destination: { _tag: "project", root: REPO_ROOT },
+      host: { homeRoot: REPO_ROOT },
+      preparedPackage: { root: path.join(REPO_ROOT, "dist", "prepared"), version: "0.11.0" },
+      features: { _tag: "defaults" },
+      agents: { _tag: "selected", ids: ["claude-code"] },
+      interaction: { _tag: "scripted" },
+      configuration: { _tag: "selected", config: defaultConfig },
+    };
 
-      const decoded = yield* Schema.decodeUnknown(zodAsEffectSchema(installRequestSchema))(request).pipe(Effect.either);
+    const decodedRequest = installRequestSchema.parse(request);
 
-      expect(Either.isRight(decoded)).toBe(true);
-      if (Either.isRight(decoded)) {
-        expect(decoded.right.destination._tag).toBe("project");
-        expect(decoded.right.features._tag).toBe("defaults");
-      }
-    }).pipe(Effect.provide(NodeContext.layer)),
-  );
+    expect(decodedRequest.destination._tag).toBe("project");
+    expect(decodedRequest.features._tag).toBe("defaults");
+  });
 });

@@ -1,50 +1,42 @@
-/** `agent-setup catalog` — list the public feature IDs accepted by install and update. */
-
-import { Command } from "@effect/cli";
-import { Effect } from "effect";
+import type { Command } from "commander";
 
 import { featureCatalog } from "../catalog/feature-catalog.js";
-import { formatOption } from "./cli-options.js";
+import { createCommand, type FormatOptions, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const showFeatureList = Effect.tryPromise({
-  try: () =>
-    TerminalUI.note(
-      featureCatalog
-        .map(
-          (feature) =>
-            `${feature.id.padEnd(24)} ${feature.title}${feature.selectedByDefault ? " · default" : ""}\n${"".padEnd(26)}${feature.summary}`,
-        )
-        .join("\n"),
-      "Features",
-    ),
-  catch: (error) => error,
-});
+const featureIdColumnWidth = 24;
+const summaryIndentWidth = 26;
 
-export const catalogCommand = Command.make("catalog", { format: formatOption }, (args) =>
-  Effect.gen(function* () {
-    if (args.format === "json") {
-      yield* Effect.tryPromise({
-        try: () =>
-          TerminalUI.showDocument({
-            features: featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
-              id,
-              title,
-              summary,
-              selectedByDefault,
-              platform,
-            })),
-          }),
-        catch: (error) => error,
-      });
-      return;
-    }
+export const showFeatureList = (): Promise<void> =>
+  TerminalUI.note(
+    featureCatalog
+      .map(
+        (feature) =>
+          `${feature.id.padEnd(featureIdColumnWidth)} ${feature.title}${feature.selectedByDefault ? " · default" : ""}\n${"".padEnd(summaryIndentWidth)}${feature.summary}`,
+      )
+      .join("\n"),
+    "Features",
+  );
 
-    yield* Effect.tryPromise({ try: () => TerminalUI.intro("catalog"), catch: (error) => error });
-    yield* showFeatureList;
-    yield* Effect.tryPromise({
-      try: () => TerminalUI.outro("Install with `agent-setup install <feature-id>...`."),
-      catch: (error) => error,
+export const createCatalogCommand = (): Command =>
+  createCommand("catalog")
+    .description("List installable feature IDs and catalog defaults")
+    .addOption(formatOption)
+    .action(async (options: FormatOptions) => {
+      const isJsonFormat = options.format === "json";
+      if (isJsonFormat) {
+        const featureRows = featureCatalog.map(({ id, title, summary, selectedByDefault, platform }) => ({
+          id,
+          title,
+          summary,
+          selectedByDefault,
+          platform,
+        }));
+        await TerminalUI.showDocument({ features: featureRows });
+        return;
+      }
+
+      await TerminalUI.intro("catalog");
+      await showFeatureList();
+      await TerminalUI.outro("Install with `agent-setup install <feature-id>...`.");
     });
-  }),
-).pipe(Command.withDescription("List installable feature IDs and catalog defaults"));

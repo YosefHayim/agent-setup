@@ -1,73 +1,67 @@
-/** `agent-setup install [feature-id...]` — add features to the installed selection. */
-
-import { Command } from "@effect/cli";
-import { Effect } from "effect";
+import type { Command } from "commander";
 
 import { destinationForScope, scanHost } from "../config/host-scan.js";
 import { install } from "../install/install.js";
 import { preparePackage } from "../install/prepare-package.js";
-import { featureIdsArgument, formatOption, scopeOption } from "./cli-options.js";
+import { createCommand, featureIdsArgument, formatOption, type ScopeOptions, scopeOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const showInstallation = (installation: {
+interface InstallationSummary {
   readonly _tag: "installed" | "unchanged";
   readonly scope: string;
   readonly features: ReadonlyArray<string>;
   readonly agents: ReadonlyArray<string>;
-}) =>
-  Effect.gen(function* () {
-    const features = `${installation.features.join(", ")} (${installation.scope})`;
-    yield* Effect.tryPromise({
-      try: () =>
-        TerminalUI.success(
-          installation._tag === "installed" ? `Installed ${features}` : `Already current: ${features}`,
-        ),
-      catch: (error) => error,
-    });
+}
 
-    const hasAgents = installation.agents.length > 0;
-    if (hasAgents) {
-      yield* Effect.tryPromise({
-        try: () => TerminalUI.detail(`Agents: ${installation.agents.join(", ")}`),
-        catch: (error) => error,
-      });
-    }
-  });
+export const showInstallation = async (installation: InstallationSummary): Promise<void> => {
+  const features = `${installation.features.join(", ")} (${installation.scope})`;
+  const isInstalledNow = installation._tag === "installed";
+  await TerminalUI.success(isInstalledNow ? `Installed ${features}` : `Already current: ${features}`);
 
-export const installCommand = Command.make(
-  "install",
-  {
-    featureIds: featureIdsArgument("Feature IDs from `agent-setup catalog` to add; omitted adds catalog defaults"),
-    scope: scopeOption,
-    format: formatOption,
-  },
-  (args) =>
-    Effect.gen(function* () {
-      const isTextFormat = args.format === "text";
+  const hasAgents = installation.agents.length > 0;
+  if (hasAgents) {
+    await TerminalUI.detail(`Agents: ${installation.agents.join(", ")}`);
+  }
+};
+
+export const createInstallCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("install")
+    .description("Add catalog defaults or the named features; installed features are kept")
+    .addArgument(featureIdsArgument("Feature IDs from `agent-setup catalog` to add; omitted adds catalog defaults"))
+    .addOption(scopeOption)
+    .addOption(formatOption)
+    .action(async (featureIds: ReadonlyArray<string>, options: ScopeOptions) => {
+      const isTextFormat = options.format === "text";
+      const isJsonFormat = options.format === "json";
+
       if (isTextFormat) {
-        yield* Effect.tryPromise({ try: () => TerminalUI.intro("install"), catch: (error) => error });
+        await TerminalUI.intro("install");
       }
-      const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+
+      const host = await scanHost();
+      const preparedPackage = await preparePackage();
+      const isNoFeatureGiven = featureIds.length === 0;
+      const featureChoice = isNoFeatureGiven ? { _tag: "defaults" } : { _tag: "selected", ids: featureIds };
       const installRequest = {
-        destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
+        destination: destinationForScope({
+          scope: options.scope,
+          homeRoot: host.homeRoot,
+          projectRoot: host.projectRoot,
+        }),
         host: { homeRoot: host.homeRoot },
         preparedPackage,
-        features: args.featureIds.length === 0 ? { _tag: "defaults" } : { _tag: "selected", ids: args.featureIds },
+        features: featureChoice,
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "scripted" },
         configuration: { _tag: "automatic" },
       };
-      const installation = yield* Effect.tryPromise({
-        try: (signal) => install(installRequest, signal),
-        catch: (error) => error,
-      });
-      if (args.format === "json") {
-        yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(installation), catch: (error) => error });
+      const installation = await install(installRequest, abortSignal);
+
+      if (isJsonFormat) {
+        await TerminalUI.showDocument(installation);
         return;
       }
 
-      yield* showInstallation(installation);
-      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
-    }),
-).pipe(Command.withDescription("Add catalog defaults or the named features; installed features are kept"));
+      await showInstallation(installation);
+      await TerminalUI.outro("Done.");
+    });

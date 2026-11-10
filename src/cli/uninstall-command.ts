@@ -1,66 +1,79 @@
-/** `agent-setup uninstall` — remove only files authorized by the receipt. */
-
-import { Command } from "@effect/cli";
-import { Effect } from "effect";
+import type { Command } from "commander";
 
 import { destinationForScope, scanHost } from "../config/host-scan.js";
 import { uninstall } from "../install/uninstall.js";
-import { confirmDestructive, formatOption, scopeOption, yesOption } from "./cli-options.js";
+import {
+  confirmDestructive,
+  createCommand,
+  formatOption,
+  type ScopeYesOptions,
+  scopeOption,
+  yesOption,
+} from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const showUninstallation = (uninstallation: {
+interface UninstallSummary {
   readonly _tag: "uninstalled" | "absent";
   readonly scope: string;
-}) =>
-  Effect.tryPromise({
-    try: () =>
-      TerminalUI.success(
-        uninstallation._tag === "uninstalled"
-          ? `Uninstalled ${uninstallation.scope} installation.`
-          : `No ${uninstallation.scope} installation present.`,
-      ),
-    catch: (error) => error,
-  });
+}
 
-export const uninstallCommand = Command.make(
-  "uninstall",
-  { scope: scopeOption, yes: yesOption, format: formatOption },
-  (args) =>
-    Effect.gen(function* () {
-      const isTextFormat = args.format === "text";
+export const showUninstallation = async (uninstallation: UninstallSummary): Promise<void> => {
+  const isUninstalledNow = uninstallation._tag === "uninstalled";
+  await TerminalUI.success(
+    isUninstalledNow
+      ? `Uninstalled ${uninstallation.scope} installation.`
+      : `No ${uninstallation.scope} installation present.`,
+  );
+};
+
+export const createUninstallCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("uninstall")
+    .description("Remove the receipt-owned installation from one scope")
+    .addOption(scopeOption)
+    .addOption(yesOption)
+    .addOption(formatOption)
+    .action(async (options: ScopeYesOptions) => {
+      const isTextFormat = options.format === "text";
+      const isJsonFormat = options.format === "json";
+
       if (isTextFormat) {
-        yield* Effect.tryPromise({ try: () => TerminalUI.intro("uninstall"), catch: (error) => error });
+        await TerminalUI.intro("uninstall");
       }
-      const confirmed = yield* Effect.tryPromise({
-        try: () =>
-          confirmDestructive({
-            yes: args.yes,
-            question: `Uninstall agent-setup from ${args.scope} scope?`,
-            missingYesIssue: "Non-interactive uninstall requires --yes.",
+
+      const isConfirmed = await confirmDestructive({
+        yes: options.yes,
+        question: `Uninstall agent-setup from ${options.scope} scope?`,
+        missingYesIssue: "Non-interactive uninstall requires --yes.",
+      });
+
+      const isDeclined = !isConfirmed;
+
+      if (isDeclined) {
+        await TerminalUI.showCancelled(options);
+        return;
+      }
+
+      const host = await scanHost();
+      const isYesGiven = options.yes;
+      const interaction = isYesGiven ? { _tag: "scripted" } : { _tag: "interactive" };
+      const uninstallation = await uninstall(
+        {
+          destination: destinationForScope({
+            scope: options.scope,
+            homeRoot: host.homeRoot,
+            projectRoot: host.projectRoot,
           }),
-        catch: (error) => error,
-      });
-      if (!confirmed) {
-        yield* Effect.tryPromise({ try: () => TerminalUI.showCancelled(args), catch: (error) => error });
+          host: { homeRoot: host.homeRoot },
+          interaction,
+        },
+        abortSignal,
+      );
+
+      if (isJsonFormat) {
+        await TerminalUI.showDocument(uninstallation);
         return;
       }
 
-      const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-      const uninstallRequest = {
-        destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
-        host: { homeRoot: host.homeRoot },
-        interaction: args.yes ? { _tag: "scripted" } : { _tag: "interactive" },
-      };
-      const uninstallation = yield* Effect.tryPromise({
-        try: (signal) => uninstall(uninstallRequest, signal),
-        catch: (error) => error,
-      });
-      if (args.format === "json") {
-        yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(uninstallation), catch: (error) => error });
-        return;
-      }
-
-      yield* showUninstallation(uninstallation);
-      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
-    }),
-).pipe(Command.withDescription("Remove the receipt-owned installation from one scope"));
+      await showUninstallation(uninstallation);
+      await TerminalUI.outro("Done.");
+    });

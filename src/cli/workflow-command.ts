@@ -1,85 +1,96 @@
-/** `agent-setup workflow scaffold` — copy CI and publish workflow templates. */
+import type { Stats } from "node:fs";
+import { stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
-import { Command, Options } from "@effect/cli";
-import { Path } from "@effect/platform";
-import { Effect, Option } from "effect";
+import { Argument, type Command, Option } from "commander";
 
+import { isNotFound } from "../install/file-bytes.js";
 import { findPackageRoot } from "../install/package-root.js";
 import { copyWorkflows } from "../workflows/copy-workflows.js";
-import { formatOption, workspaceArgument } from "./cli-options.js";
+import { createCliUsageError, createCommand, type FormatOptions, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const workflowTemplateDirectory = Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const packageRoot = yield* Effect.tryPromise({ try: findPackageRoot, catch: (error) => error });
+interface ScaffoldOptions extends FormatOptions {
+  readonly overwrite: boolean;
+}
 
-  return path.join(packageRoot, "src", "templates", "workflows");
-});
+const overwriteOption = new Option(
+  "--overwrite",
+  "Overwrite existing workflow files (resync from agent-setup)",
+).default(false);
 
-export const showCopiedWorkflows = (copiedWorkflows: {
+export const findWorkflowTemplateDirectory = async (): Promise<string> => {
+  const packageRoot = await findPackageRoot();
+  return join(packageRoot, "src", "templates", "workflows");
+};
+
+export const showCopiedWorkflows = async (copiedWorkflows: {
   readonly written: ReadonlyArray<string>;
   readonly skipped: ReadonlyArray<string>;
-}) =>
-  Effect.tryPromise({
-    try: () =>
-      TerminalUI.note(
-        [
-          ...copiedWorkflows.written.map((name) => `✓ .github/workflows/${name}`),
-          ...copiedWorkflows.skipped.map(
-            (name) => `• .github/workflows/${name} exists — kept (use --overwrite to replace)`,
-          ),
-        ].join("\n"),
-        copiedWorkflows.written.length > 0 ? "Scaffolded" : "Nothing written (all present)",
-      ),
-    catch: (error) => error,
-  });
+}): Promise<void> => {
+  const lines = [
+    ...copiedWorkflows.written.map((name) => `✓ .github/workflows/${name}`),
+    ...copiedWorkflows.skipped.map((name) => `• .github/workflows/${name} exists — kept (use --overwrite to replace)`),
+  ];
+  const isAnyWorkflowWritten = copiedWorkflows.written.length > 0;
+  await TerminalUI.note(lines.join("\n"), isAnyWorkflowWritten ? "Scaffolded" : "Nothing written (all present)");
+};
 
-const overwriteOption = Options.boolean("overwrite").pipe(
-  Options.withDefault(false),
-  Options.withDescription("Overwrite existing workflow files (resync from agent-setup)"),
-);
+const findWorkspaceStats = async (workspacePath: string): Promise<Stats | null> => {
+  try {
+    return await stat(workspacePath);
+  } catch (error) {
+    const isMissingWorkspace = isNotFound(error);
+    if (isMissingWorkspace) {
+      return null;
+    }
 
-const scaffoldCommand = Command.make(
-  "scaffold",
-  {
-    workspace: workspaceArgument("Target repository root (default: current working directory)"),
-    overwrite: overwriteOption,
-    format: formatOption,
-  },
-  (args) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const targetRoot = path.resolve(Option.getOrElse(args.workspace, () => process.cwd()));
-      if (args.format === "text") {
-        yield* Effect.tryPromise({ try: () => TerminalUI.intro("workflow scaffold"), catch: (error) => error });
-        yield* Effect.tryPromise({ try: () => TerminalUI.step(`workspace: ${targetRoot}`), catch: (error) => error });
+    throw error;
+  }
+};
+
+// A workspace that is missing or not a directory is bad usage (exit 2), as the old argument check was.
+const readWorkspaceRoot = async (workspace: string | undefined): Promise<string> => {
+  const requestedWorkspace = workspace ?? process.cwd();
+  const targetRoot = resolve(requestedWorkspace);
+  const workspaceStats = await findWorkspaceStats(targetRoot);
+
+  const isWorkspaceDirectory = workspaceStats?.isDirectory();
+  if (isWorkspaceDirectory) {
+    return targetRoot;
+  }
+
+  throw createCliUsageError(`Workspace must be an existing directory: ${requestedWorkspace}`);
+};
+
+const createScaffoldCommand = (): Command =>
+  createCommand("scaffold")
+    .description("Copy the single-gate CI + publish workflow set into a repo")
+    .addArgument(new Argument("[workspace]", "Target repository root (default: current working directory)"))
+    .addOption(overwriteOption)
+    .addOption(formatOption)
+    .action(async (workspace: string | undefined, options: ScaffoldOptions) => {
+      const targetRoot = await readWorkspaceRoot(workspace);
+      const isJsonFormat = options.format === "json";
+      const isTextFormat = options.format === "text";
+
+      if (isTextFormat) {
+        await TerminalUI.intro("workflow scaffold");
+        await TerminalUI.step(`workspace: ${targetRoot}`);
       }
 
-      const templateDirectory = yield* workflowTemplateDirectory;
-      const copiedWorkflows = yield* Effect.tryPromise({
-        try: () => copyWorkflows({ targetRoot, templateDirectory, force: args.overwrite }),
-        catch: (error) => error,
-      });
-      if (args.format === "json") {
-        yield* Effect.tryPromise({
-          try: () => TerminalUI.showDocument({ workspace: targetRoot, ...copiedWorkflows }),
-          catch: (error) => error,
-        });
+      const templateDirectory = await findWorkflowTemplateDirectory();
+      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: options.overwrite });
+      if (isJsonFormat) {
+        await TerminalUI.showDocument({ workspace: targetRoot, ...copiedWorkflows });
         return;
       }
 
-      yield* showCopiedWorkflows(copiedWorkflows);
-      yield* Effect.tryPromise({
-        try: () =>
-          TerminalUI.outro(
-            "Next: register the npm trusted publisher (repo + publish.yml) — see the publish.yml header.",
-          ),
-        catch: (error) => error,
-      });
-    }),
-).pipe(Command.withDescription("Copy the single-gate CI + publish workflow set into a repo"));
+      await showCopiedWorkflows(copiedWorkflows);
+      await TerminalUI.outro(
+        "Next: register the npm trusted publisher (repo + publish.yml) — see the publish.yml header.",
+      );
+    });
 
-export const workflowCommand = Command.make("workflow").pipe(
-  Command.withDescription("Manage reusable repository workflows"),
-  Command.withSubcommands([scaffoldCommand]),
-);
+export const createWorkflowCommand = (): Command =>
+  createCommand("workflow").description("Manage reusable repository workflows").addCommand(createScaffoldCommand());

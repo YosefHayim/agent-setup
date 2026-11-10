@@ -1,8 +1,6 @@
-/** `agent-setup menu` — pick an action, gather the options its CLI command takes, approve a plan, then run the same work. */
+import { join, resolve } from "node:path";
 
-import { Command } from "@effect/cli";
-import { Path } from "@effect/platform";
-import { Effect } from "effect";
+import type { Command } from "commander";
 
 import { detectAgents } from "../catalog/agent-catalog.js";
 import { defaultFeatureIds, featureCatalog } from "../catalog/feature-catalog.js";
@@ -16,51 +14,79 @@ import { uninstall } from "../install/uninstall.js";
 import { update } from "../install/update.js";
 import { copyWorkflows } from "../workflows/copy-workflows.js";
 import { showFeatureList } from "./catalog-command.js";
+import { createCommand } from "./cli-options.js";
 import { checkBothScopes, showScopeHealth } from "./doctor-command.js";
 import { showInstallation } from "./install-command.js";
 import { applyIfApproved, pickScope, runConfig } from "./menu-settings.js";
 import * as TerminalUI from "./terminal-ui.js";
 import { showUninstallation } from "./uninstall-command.js";
 import { showUpdate } from "./update-command.js";
-import { showCopiedWorkflows, workflowTemplateDirectory } from "./workflow-command.js";
+import { findWorkflowTemplateDirectory, showCopiedWorkflows } from "./workflow-command.js";
+
+type MenuScreen = "install" | "update" | "uninstall" | "config" | "doctor" | "catalog" | "workflow";
+
+type UpdateMode = "preserve" | "selected";
+
+type UpdateFeatures =
+  | { readonly _tag: "preserve" }
+  | { readonly _tag: "selected"; readonly ids: ReadonlyArray<string> };
 
 const agentSummary = (host: HostScan): string => {
   const detected = detectAgents(host.agentEvidence)
     .filter((agent) => agent.installed)
     .map((agent) => agent.displayName);
-  return detected.length > 0 ? detected.join(", ") : "none detected";
+  const isThereDetectedAgent = detected.length > 0;
+  return isThereDetectedAgent ? detected.join(", ") : "none detected";
 };
 
-const featureList = (ids: ReadonlyArray<string>) => (ids.length > 0 ? ids.join(", ") : "(none)");
+const featureList = (ids: ReadonlyArray<string>): string => {
+  const isThereFeature = ids.length > 0;
+  return isThereFeature ? ids.join(", ") : "(none)";
+};
 
-const pickFeatures = (initial: ReadonlyArray<string>) =>
-  Effect.tryPromise({
-    try: () =>
-      TerminalUI.multiSelect({
-        message: "Select features (space toggles, enter confirms)",
-        choices: featureCatalog.map((feature) => ({
-          title: feature.title,
-          value: feature.id,
-          description: `${feature.id} · ${feature.summary}`,
-          selected: initial.includes(feature.id),
-        })),
-        initial,
-      }),
-    catch: (error) => error,
+const pickFeatures = (initial: ReadonlyArray<string>): Promise<string[]> =>
+  TerminalUI.multiSelect({
+    message: "Select features (space toggles, enter confirms)",
+    choices: featureCatalog.map((feature) => ({
+      label: feature.title,
+      value: feature.id,
+      hint: `${feature.id} · ${feature.summary}`,
+    })),
+    initial,
   });
 
-const pickDestination = (verb: string) =>
-  Effect.gen(function* () {
-    const scope = yield* pickScope(verb);
-    const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-    const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
-    return { scope, host, destination };
-  });
+const pickDestination = async (verb: string) => {
+  const scope = await pickScope(verb);
+  const host = await scanHost();
+  const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
+  return { scope, host, destination };
+};
 
-const runInstall = Effect.gen(function* () {
-  const { scope, host, destination } = yield* pickDestination("Install");
-  const features = yield* pickFeatures(defaultFeatureIds);
-  yield* applyIfApproved({
+const readReceiptSnapshot = async (destinationRoot: string) => {
+  try {
+    return await readReceipt(join(destinationRoot, receiptPath));
+  } catch (error) {
+    throw wrapAsInstallError(error);
+  }
+};
+
+const readUpdateFeatures = async (request: {
+  readonly mode: UpdateMode;
+  readonly installedIds: ReadonlyArray<string>;
+}): Promise<UpdateFeatures> => {
+  const isPreserveMode = request.mode === "preserve";
+  if (isPreserveMode) {
+    return { _tag: "preserve" };
+  }
+
+  const selectedIds = await pickFeatures(request.installedIds);
+  return { _tag: "selected", ids: selectedIds };
+};
+
+const runInstallScreen = async (abortSignal: AbortSignal): Promise<void> => {
+  const { scope, host, destination } = await pickDestination("Install");
+  const features = await pickFeatures(defaultFeatureIds);
+  await applyIfApproved({
     title: "Install plan",
     steps: [
       { label: "Action", detail: "add features + hooks; installed features are kept" },
@@ -71,8 +97,8 @@ const runInstall = Effect.gen(function* () {
       { label: "Config", detail: "automatic (reuse / inherit / defaults)" },
     ],
     confirmMessage: "Apply this install plan?",
-    apply: Effect.gen(function* () {
-      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+    apply: async () => {
+      const preparedPackage = await preparePackage();
       const installRequest = {
         destination,
         host: { homeRoot: host.homeRoot },
@@ -82,78 +108,61 @@ const runInstall = Effect.gen(function* () {
         interaction: { _tag: "interactive" },
         configuration: { _tag: "automatic" },
       };
-      const installation = yield* Effect.tryPromise({
-        try: (signal) => install(installRequest, signal),
-        catch: (error) => error,
-      });
-      yield* showInstallation(installation);
-    }),
+      const installation = await install(installRequest, abortSignal);
+      await showInstallation(installation);
+    },
   });
-});
+};
 
-const runUpdate = Effect.gen(function* () {
-  const { scope, host, destination } = yield* pickDestination("Update");
-  const mode = yield* Effect.tryPromise({
-    try: () =>
-      TerminalUI.selectOne<"preserve" | "selected">({
-        message: "Feature selection",
-        choices: [
-          { title: "Preserve installed set", value: "preserve", description: "refresh payload only" },
-          { title: "Choose features", value: "selected", description: "unticked installed features are removed" },
-        ],
-        initial: "preserve",
-      }),
-    catch: (error) => error,
+const runUpdateScreen = async (abortSignal: AbortSignal): Promise<void> => {
+  const { scope, host, destination } = await pickDestination("Update");
+  const mode = await TerminalUI.selectOne<UpdateMode>({
+    message: "Feature selection",
+    choices: [
+      { label: "Preserve installed set", value: "preserve", hint: "refresh payload only" },
+      { label: "Choose features", value: "selected", hint: "unticked installed features are removed" },
+    ],
+    initial: "preserve",
   });
-  const path = yield* Path.Path;
-  const receiptSnapshot = yield* Effect.tryPromise({
-    try: () => readReceipt(path.join(destination.root, receiptPath)),
-    catch: wrapAsInstallError,
-  });
+  const receiptSnapshot = await readReceiptSnapshot(destination.root);
   const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : defaultFeatureIds;
-  const features = yield* mode === "preserve"
-    ? Effect.succeed({ _tag: "preserve" as const })
-    : pickFeatures(installedIds).pipe(Effect.map((ids) => ({ _tag: "selected" as const, ids })));
-  yield* applyIfApproved({
+  const features = await readUpdateFeatures({ mode, installedIds });
+  const isPreserveFeatures = features._tag === "preserve";
+  const featureDetail = isPreserveFeatures ? "preserve receipt selection" : featureList(features.ids);
+
+  await applyIfApproved({
     title: "Update plan",
     steps: [
       { label: "Action", detail: "update / refresh installation" },
       { label: "Scope", detail: scope },
       { label: "Destination", detail: destination.root },
-      {
-        label: "Features",
-        detail: features._tag === "preserve" ? "preserve receipt selection" : featureList(features.ids),
-      },
+      { label: "Features", detail: featureDetail },
       { label: "Agents", detail: `${agentSummary(host)} (auto-detected)` },
       { label: "Config", detail: "automatic" },
     ],
     confirmMessage: "Apply this update plan?",
-    apply: Effect.gen(function* () {
-      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
-      const updateSummary = yield* Effect.tryPromise({
-        try: (signal) =>
-          update(
-            {
-              destination,
-              host: { homeRoot: host.homeRoot },
-              preparedPackage,
-              features,
-              agents: { _tag: "detected", evidence: host.agentEvidence },
-              interaction: { _tag: "interactive" },
-              configuration: { _tag: "automatic" },
-            },
-            signal,
-          ),
-        catch: (error) => error,
-      });
-      yield* showUpdate(updateSummary);
-    }),
+    apply: async () => {
+      const preparedPackage = await preparePackage();
+      const updateSummary = await update(
+        {
+          destination,
+          host: { homeRoot: host.homeRoot },
+          preparedPackage,
+          features,
+          agents: { _tag: "detected", evidence: host.agentEvidence },
+          interaction: { _tag: "interactive" },
+          configuration: { _tag: "automatic" },
+        },
+        abortSignal,
+      );
+      await showUpdate(updateSummary);
+    },
   });
-});
+};
 
-const runUninstall = Effect.gen(function* () {
-  const { scope, host, destination } = yield* pickDestination("Uninstall");
-  yield* applyIfApproved({
+const runUninstallScreen = async (abortSignal: AbortSignal): Promise<void> => {
+  const { scope, host, destination } = await pickDestination("Uninstall");
+  await applyIfApproved({
     title: "Uninstall plan",
     steps: [
       { label: "Action", detail: "remove receipt-owned installation" },
@@ -162,87 +171,106 @@ const runUninstall = Effect.gen(function* () {
       { label: "Safety", detail: "only receipt-authorized files are removed" },
     ],
     confirmMessage: `Uninstall agent-setup from ${scope}?`,
-    apply: Effect.tryPromise({
-      try: (signal) =>
-        uninstall({ destination, host: { homeRoot: host.homeRoot }, interaction: { _tag: "interactive" } }, signal),
-      catch: (error) => error,
-    }).pipe(Effect.flatMap(showUninstallation)),
+    apply: async () => {
+      const uninstallation = await uninstall(
+        { destination, host: { homeRoot: host.homeRoot }, interaction: { _tag: "interactive" } },
+        abortSignal,
+      );
+      await showUninstallation(uninstallation);
+    },
   });
-});
+};
 
-const runWorkflow = Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const workspace = yield* Effect.tryPromise({
-    try: () =>
-      TerminalUI.optionalText({
-        message: "Target workspace (repository root)",
-        fallback: path.resolve(process.cwd()),
-      }),
-    catch: (error) => error,
+const runWorkflowScreen = async (): Promise<void> => {
+  const workspace = await TerminalUI.optionalText({
+    message: "Target workspace (repository root)",
+    fallback: resolve(process.cwd()),
   });
-  const targetRoot = path.resolve(workspace);
-  const overwrite = yield* Effect.tryPromise({
-    try: () => TerminalUI.confirm({ message: "Overwrite existing workflow files?", initialValue: false }),
-    catch: (error) => error,
-  });
-  const templateDirectory = yield* workflowTemplateDirectory;
-  yield* applyIfApproved({
+  const targetRoot = resolve(workspace);
+  const overwrite = await TerminalUI.confirm({ message: "Overwrite existing workflow files?", initialValue: false });
+  const templateDirectory = await findWorkflowTemplateDirectory();
+  const overwriteDetail = overwrite ? "yes" : "no (skip existing)";
+
+  await applyIfApproved({
     title: "Workflow scaffold plan",
     steps: [
       { label: "Action", detail: "copy CI + publish workflow templates" },
       { label: "Workspace", detail: targetRoot },
-      { label: "Overwrite", detail: overwrite ? "yes" : "no (skip existing)" },
+      { label: "Overwrite", detail: overwriteDetail },
       { label: "Templates", detail: templateDirectory },
     ],
     confirmMessage: "Apply this workflow scaffold plan?",
-    apply: Effect.tryPromise({
-      try: () => copyWorkflows({ targetRoot, templateDirectory, force: overwrite }),
-      catch: (error) => error,
-    }).pipe(Effect.flatMap(showCopiedWorkflows)),
+    apply: async () => {
+      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: overwrite });
+      await showCopiedWorkflows(copiedWorkflows);
+    },
   });
-});
-
-const screens = {
-  install: runInstall,
-  update: runUpdate,
-  uninstall: runUninstall,
-  config: runConfig,
-  doctor: checkBothScopes.pipe(Effect.flatMap((scopes) => Effect.forEach(scopes, showScopeHealth))),
-  catalog: Effect.tryPromise({ try: () => TerminalUI.intro("catalog"), catch: (error) => error }).pipe(
-    Effect.zipRight(showFeatureList),
-  ),
-  workflow: runWorkflow,
 };
 
-export const menuCommand = Command.make("menu", {}, () =>
-  Effect.gen(function* () {
-    yield* Effect.tryPromise({ try: () => TerminalUI.intro("menu"), catch: (error) => error });
-    const action = yield* Effect.tryPromise({
-      try: () =>
-        TerminalUI.selectOne<keyof typeof screens | "exit">({
-          message: "What would you like to do?",
-          choices: [
-            { title: "Install", value: "install", description: "features + hooks (plan → approve)" },
-            { title: "Update", value: "update", description: "refresh installation" },
-            { title: "Uninstall", value: "uninstall", description: "remove receipt-owned install" },
-            { title: "Configure", value: "config", description: "show / set / reset" },
-            { title: "Doctor", value: "doctor", description: "read-only health check" },
-            { title: "Catalog", value: "catalog", description: "list feature IDs" },
-            { title: "Workflow scaffold", value: "workflow", description: "CI + publish templates" },
-            { title: "Exit", value: "exit", description: "close the menu" },
-          ],
-          initial: "install",
-        }),
-      catch: (error) => error,
-    });
-    if (action === "exit") {
-      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Closed."), catch: (error) => error });
-      return;
-    }
+const runDoctorScreen = async (): Promise<void> => {
+  const scopes = await checkBothScopes();
+  for (const scopeHealth of scopes) {
+    await showScopeHealth(scopeHealth);
+  }
+};
 
-    yield* screens[action];
-    yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
-  }),
-).pipe(
-  Command.withDescription("Interactive TUI: same options as CLI args, ordered plan preview, approve before apply"),
-);
+const runCatalogScreen = async (): Promise<void> => {
+  await TerminalUI.intro("catalog");
+  await showFeatureList();
+};
+
+const runMenuScreen = async (screen: MenuScreen, abortSignal: AbortSignal): Promise<void> => {
+  switch (screen) {
+    case "install":
+      await runInstallScreen(abortSignal);
+      return;
+    case "update":
+      await runUpdateScreen(abortSignal);
+      return;
+    case "uninstall":
+      await runUninstallScreen(abortSignal);
+      return;
+    case "config":
+      await runConfig(abortSignal);
+      return;
+    case "doctor":
+      await runDoctorScreen();
+      return;
+    case "catalog":
+      await runCatalogScreen();
+      return;
+    case "workflow":
+      await runWorkflowScreen();
+      return;
+  }
+};
+
+export const createMenuCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("menu")
+    .description("Interactive TUI: same options as CLI args, ordered plan preview, approve before apply")
+    .action(async () => {
+      await TerminalUI.intro("menu");
+      const action = await TerminalUI.selectOne<MenuScreen | "exit">({
+        message: "What would you like to do?",
+        choices: [
+          { label: "Install", value: "install", hint: "features + hooks (plan → approve)" },
+          { label: "Update", value: "update", hint: "refresh installation" },
+          { label: "Uninstall", value: "uninstall", hint: "remove receipt-owned install" },
+          { label: "Configure", value: "config", hint: "show / set / reset" },
+          { label: "Doctor", value: "doctor", hint: "read-only health check" },
+          { label: "Catalog", value: "catalog", hint: "list feature IDs" },
+          { label: "Workflow scaffold", value: "workflow", hint: "CI + publish templates" },
+          { label: "Exit", value: "exit", hint: "close the menu" },
+        ],
+        initial: "install",
+      });
+
+      const isExit = action === "exit";
+      if (isExit) {
+        await TerminalUI.outro("Closed.");
+        return;
+      }
+
+      await runMenuScreen(action, abortSignal);
+      await TerminalUI.outro("Done.");
+    });

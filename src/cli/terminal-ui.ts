@@ -1,8 +1,5 @@
-/** The CLI's only presentation layer: every line printed and every prompt asked goes through here. */
-
-import { Prompt } from "@effect/cli";
-import { NodeContext } from "@effect/platform-node";
-import { Cause, Effect, Exit } from "effect";
+import type { Option } from "@clack/prompts";
+import * as ClackPrompts from "@clack/prompts";
 
 import type { OutputFormat } from "./cli-options.js";
 
@@ -11,15 +8,14 @@ interface PlanStep {
   readonly detail: string;
 }
 
-// Prompts are @effect/cli widgets until the CLI moves off Effect. A failed prompt (Ctrl-C) rethrows its own error, so main still sees it.
-const runPrompt = async <Answer>(prompt: Prompt.Prompt<Answer>): Promise<Answer> => {
-  const promptExit = await Effect.runPromiseExit(Prompt.run(prompt).pipe(Effect.provide(NodeContext.layer)));
-  const didPromptAnswer = Exit.isSuccess(promptExit);
-  if (didPromptAnswer) {
-    return promptExit.value;
+// A cancelled prompt (Ctrl-C) becomes a plain error, so main prints it and exits 1.
+const readPromptAnswer = <Answer>(answer: Answer | typeof ClackPrompts.CANCEL_SYMBOL): Answer => {
+  const isCancelled = ClackPrompts.isCancel(answer);
+  if (isCancelled) {
+    throw new Error("Prompt cancelled.");
   }
 
-  throw Cause.squash(promptExit.cause);
+  return answer;
 };
 
 const writeLine = async (message: string): Promise<void> => {
@@ -91,7 +87,8 @@ export const confirm = async ({
     return initialValue;
   }
 
-  return runPrompt(Prompt.confirm({ message, initial: initialValue }));
+  const confirmAnswer = await ClackPrompts.confirm({ message, initialValue });
+  return readPromptAnswer(confirmAnswer);
 };
 
 export const selectOne = async <Value>({
@@ -100,12 +97,13 @@ export const selectOne = async <Value>({
   initial,
 }: {
   message: string;
-  choices: ReadonlyArray<{ title: string; value: Value; description?: string }>;
+  choices: ReadonlyArray<Option<Value>>;
   initial?: Value;
 }): Promise<Value> => {
   const isInteractive = isInteractiveTerminal();
   if (isInteractive) {
-    return runPrompt(Prompt.select({ message, choices }));
+    const selectAnswer = await ClackPrompts.select({ message, options: [...choices], initialValue: initial });
+    return readPromptAnswer(selectAnswer);
   }
 
   const hasInitial = initial != null;
@@ -124,7 +122,7 @@ export const multiSelect = async <Value>({
   initial,
 }: {
   message: string;
-  choices: ReadonlyArray<{ title: string; value: Value; description?: string; selected?: boolean }>;
+  choices: ReadonlyArray<Option<Value>>;
   initial: ReadonlyArray<Value>;
 }): Promise<Value[]> => {
   const isNonInteractive = !isInteractiveTerminal();
@@ -132,7 +130,13 @@ export const multiSelect = async <Value>({
     return [...initial];
   }
 
-  const selected = await runPrompt(Prompt.multiSelect({ message, choices }));
+  const multiSelectAnswer = await ClackPrompts.multiselect({
+    message,
+    options: [...choices],
+    initialValues: [...initial],
+    required: false,
+  });
+  const selected = readPromptAnswer(multiSelectAnswer);
   const isThereSelection = selected.length > 0;
   return isThereSelection ? selected : [...initial];
 };
@@ -143,8 +147,8 @@ export const optionalText = async ({ message, fallback }: { message: string; fal
     return fallback;
   }
 
-  const typedAnswer = await runPrompt(Prompt.text({ message, default: fallback }));
-  const trimmedAnswer = typedAnswer.trim();
+  const textAnswer = await ClackPrompts.text({ message, initialValue: fallback });
+  const trimmedAnswer = readPromptAnswer(textAnswer).trim();
   const isThereNoAnswer = trimmedAnswer === "";
   return isThereNoAnswer ? fallback : trimmedAnswer;
 };
@@ -157,7 +161,7 @@ const showPlan = async ({ title, steps }: { readonly title: string; readonly ste
   await note(planLines.join("\n"), title);
 };
 
-/** Show the numbered plan and ask before applying it; a non-TTY run answers `initialValue` (default no). */
+// Shows the numbered plan and asks before applying it; a non-TTY run answers `initialValue` (default no).
 export const confirmPlan = async ({
   title,
   steps,

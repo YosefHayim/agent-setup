@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { Option } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { agentCatalog } from "../../catalog/agent-catalog.js";
@@ -12,14 +11,24 @@ const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const makeCodeReadable = findFeature("make-code-readable")!;
-const simplifyCode = findFeature("simplify-code")!;
-const makeCodeReadableSkill = Option.getOrThrow(
-  Option.liftPredicate(makeCodeReadable.installedSkill, (skill) => skill._tag === "skill"),
-);
-const simplifyCodeSkill = Option.getOrThrow(
-  Option.liftPredicate(simplifyCode.installedSkill, (skill) => skill._tag === "skill"),
-);
+
+const installedSkillOf = (featureId: string) => {
+  const feature = findFeature(featureId);
+  const isFeatureMissing = feature == null;
+  if (isFeatureMissing) {
+    throw new Error(`Unknown feature: ${featureId}`);
+  }
+
+  const isSkillMissing = feature.installedSkill._tag !== "skill";
+  if (isSkillMissing) {
+    throw new Error(`Feature has no installed skill: ${featureId}`);
+  }
+
+  return feature.installedSkill;
+};
+
+const makeCodeReadableSkill = installedSkillOf("make-code-readable");
+const simplifyCodeSkill = installedSkillOf("simplify-code");
 
 const encode = (value: string): Uint8Array => textEncoder.encode(value);
 
