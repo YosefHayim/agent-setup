@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { managedConfigPath } from "./config-file.js";
 import { defaultConfig } from "./config-schema.js";
-import { readConfigAt } from "./scope-config.js";
+import { readSettingsAt } from "./scope-config.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -29,29 +29,29 @@ const makeRoots = async (): Promise<{ homeRoot: string; projectRoot: string }> =
   return { homeRoot, projectRoot };
 };
 
-const writeConfig = async (request: { readonly root: string; readonly config: object }): Promise<void> => {
-  const configPath = join(request.root, managedConfigPath);
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(request.config)}\n`);
+const writeSettings = async (request: { readonly root: string; readonly config: object }): Promise<void> => {
+  const settingsPath = join(request.root, managedConfigPath);
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(request.config)}\n`);
 };
 
 describe("readConfigAt", () => {
   it("reads the root's own config.json before the global one", async () => {
     const { homeRoot, projectRoot } = await makeRoots();
-    await writeConfig({ root: homeRoot, config: { debugLogs: true } });
-    await writeConfig({ root: projectRoot, config: { sessionRehomeRoots: ["vendor"] } });
+    await writeSettings({ root: homeRoot, config: { debugLogs: true } });
+    await writeSettings({ root: projectRoot, config: { sessionRehomeRoots: ["vendor"] } });
 
-    const configAtProjectRoot = await readConfigAt({ root: projectRoot, homeRoot });
+    const settingsAtProjectRoot = await readSettingsAt({ root: projectRoot, homeRoot });
 
-    expect(configAtProjectRoot).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
+    expect(settingsAtProjectRoot).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
   });
 
   it("falls back to the global config.json, then to defaults", async () => {
     const { homeRoot, projectRoot } = await makeRoots();
 
-    expect(await readConfigAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
+    expect(await readSettingsAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
 
-    await writeConfig({ root: homeRoot, config: { debugLogs: true } });
-    expect((await readConfigAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);
+    await writeSettings({ root: homeRoot, config: { debugLogs: true } });
+    expect((await readSettingsAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);
   });
 });

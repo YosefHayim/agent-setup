@@ -1,6 +1,3 @@
-// Copies the owned CI + publish workflow templates (`src/templates/workflows/`) into a repository.
-// Only publish.yml is filled with OWNER/REPO/PACKAGE; every other .yml copies verbatim.
-
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -14,7 +11,7 @@ import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const execFileAsync = promisify(execFile);
 
-interface WorkflowInputs {
+interface WorkflowDetailsList {
   readonly owner: string;
   readonly repo: string;
   readonly packageName: string;
@@ -37,26 +34,28 @@ const copyWorkflowsRequestSchema = z.strictObject({
   force: z.boolean(),
 });
 
-const packageJsonNameSchema = z.object({
+const packageDocumentNameSchema = z.object({
   name: z.string().refine((name) => name.trim() !== ""),
 });
 
-export const fillPublishTemplate = (fillRequest: { template: string; inputs: WorkflowInputs }): string =>
+export const fillPublishTemplate = (fillRequest: { template: string; inputs: WorkflowDetailsList }): string =>
   fillRequest.template
     .replaceAll("{{OWNER}}", fillRequest.inputs.owner)
     .replaceAll("{{REPO}}", fillRequest.inputs.repo)
     .replaceAll("{{PACKAGE}}", fillRequest.inputs.packageName);
 
-export const planWorkflowFiles = (planRequest: { files: ReadonlyArray<TemplateFile>; inputs: WorkflowInputs }) =>
+export const planWorkflowFiles = (planRequest: { files: ReadonlyArray<TemplateFile>; inputs: WorkflowDetailsList }) =>
   planRequest.files
     .filter((file) => file.name.endsWith(".yml"))
-    .map((file) => ({
-      name: file.name,
-      content:
-        file.name === "publish.yml"
-          ? fillPublishTemplate({ template: file.text, inputs: planRequest.inputs })
-          : file.text,
-    }));
+    .map((file) => {
+      const isPublishWorkflow = file.name === "publish.yml";
+
+      if (isPublishWorkflow) {
+        return { name: file.name, content: fillPublishTemplate({ template: file.text, inputs: planRequest.inputs }) };
+      }
+
+      return { name: file.name, content: file.text };
+    });
 
 const readTemplates = async (templateDirectory: string): Promise<Array<TemplateFile>> => {
   const isTemplateDirectoryMissing = !existsSync(templateDirectory);
@@ -67,6 +66,7 @@ const readTemplates = async (templateDirectory: string): Promise<Array<TemplateF
   }
 
   const names = (await readdir(templateDirectory)).filter((name) => name.endsWith(".yml")).sort();
+
   const isThereNoTemplate = names.length === 0;
   if (isThereNoTemplate) {
     throw new Error(
@@ -81,9 +81,13 @@ const readTemplates = async (templateDirectory: string): Promise<Array<TemplateF
 
 // e.g. "git@github.com:Acme/app.git" or "https://github.com/Acme/app" → owner=Acme, repo=app
 const parseGitHubRemote = (url: string): { owner: string; repo: string } | null => {
-  const match = url.trim().match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
-  // Guard proves capture groups exist when match is non-null.
-  return match === null ? null : { owner: match[1]!, repo: match[2]! };
+  const remoteParts = url.trim().match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
+
+  const isRemoteUnrecognized = remoteParts == null;
+  if (isRemoteUnrecognized) return null;
+
+  // Guard proves capture groups exist when the match is non-null.
+  return { owner: remoteParts[1]!, repo: remoteParts[2]! };
 };
 
 const detectGitRemote = async (root: string): Promise<{ owner: string; repo: string } | null> => {
@@ -96,9 +100,9 @@ const detectGitRemote = async (root: string): Promise<{ owner: string; repo: str
   }
 };
 
-const parseJsonText = (text: string): unknown => {
+const parseDocumentString = (decodedDocument: string): unknown => {
   try {
-    const parsed: unknown = JSON.parse(text);
+    const parsed: unknown = JSON.parse(decodedDocument);
     return parsed;
   } catch {
     // A package.json that is not JSON gets the placeholder package name.
@@ -106,18 +110,22 @@ const parseJsonText = (text: string): unknown => {
   }
 };
 
-const readPackageName = async (packageJsonPath: string): Promise<string | null> => {
-  const isPackageJsonMissing = !existsSync(packageJsonPath);
-  if (isPackageJsonMissing) {
+const readPackageName = async (packageDocumentPath: string): Promise<string | null> => {
+  const isPackageDocumentMissing = !existsSync(packageDocumentPath);
+  if (isPackageDocumentMissing) {
     return null;
   }
 
-  const packageJsonText = await readFile(packageJsonPath, "utf8");
-  const packageJsonCheck = packageJsonNameSchema.safeParse(parseJsonText(packageJsonText));
-  return packageJsonCheck.success ? packageJsonCheck.data.name : null;
+  const packageDocumentString = await readFile(packageDocumentPath, "utf8");
+  const packageDocumentCheck = packageDocumentNameSchema.safeParse(parseDocumentString(packageDocumentString));
+
+  const isPackageDocumentInvalid = !packageDocumentCheck.success;
+  if (isPackageDocumentInvalid) return null;
+
+  return packageDocumentCheck.data.name;
 };
 
-const detectInputs = async (root: string): Promise<WorkflowInputs> => {
+const detectDetailsList = async (root: string): Promise<WorkflowDetailsList> => {
   const remote = await detectGitRemote(root);
   const packageName = await readPackageName(path.join(root, "package.json"));
   return {
@@ -127,7 +135,7 @@ const detectInputs = async (root: string): Promise<WorkflowInputs> => {
   };
 };
 
-const pathExists = async (filePath: string): Promise<boolean> => {
+const isPathExists = async (filePath: string): Promise<boolean> => {
   try {
     await access(filePath);
     return true;
@@ -139,6 +147,7 @@ const pathExists = async (filePath: string): Promise<boolean> => {
 
 export const copyWorkflows = async (copyRequest: unknown): Promise<CopiedWorkflows> => {
   const requestCheck = copyWorkflowsRequestSchema.safeParse(copyRequest);
+
   const isRequestInvalid = !requestCheck.success;
   if (isRequestInvalid) {
     throw new Error(
@@ -151,15 +160,16 @@ export const copyWorkflows = async (copyRequest: unknown): Promise<CopiedWorkflo
 
   const request = requestCheck.data;
   const templates = await readTemplates(request.templateDirectory);
-  const inputs = await detectInputs(request.targetRoot);
+  const detailsList = await detectDetailsList(request.targetRoot);
   const workflowsDir = path.join(request.targetRoot, ".github", "workflows");
   await mkdir(workflowsDir, { recursive: true });
 
   const written: Array<string> = [];
   const skipped: Array<string> = [];
-  for (const file of planWorkflowFiles({ files: templates, inputs })) {
+  for (const file of planWorkflowFiles({ files: templates, inputs: detailsList })) {
     const destination = path.join(workflowsDir, file.name);
-    const isExistingFileKept = !request.force && (await pathExists(destination));
+
+    const isExistingFileKept = !request.force && (await isPathExists(destination));
     if (isExistingFileKept) {
       skipped.push(file.name);
       continue;

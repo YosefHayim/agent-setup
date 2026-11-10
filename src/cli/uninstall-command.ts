@@ -1,12 +1,12 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { readDestinationForScope, scanHost } from "#src/config/host-scan.js";
 import { uninstall } from "#src/install/uninstall.js";
 import {
   confirmDestructive,
   createCommand,
   formatOption,
-  type ScopeYesOptions,
+  type ScopeYesSettings,
   scopeOption,
   yesOption,
 } from "./cli-options.js";
@@ -19,7 +19,7 @@ interface UninstallSummary {
 
 export const showUninstallation = async (uninstallation: UninstallSummary): Promise<void> => {
   const isUninstalledNow = uninstallation._tag === "uninstalled";
-  await TerminalUI.success(
+  await TerminalUI.runSuccess(
     isUninstalledNow
       ? `Uninstalled ${uninstallation.scope} installation.`
       : `No ${uninstallation.scope} installation present.`,
@@ -32,34 +32,34 @@ export const createUninstallCommand = (abortSignal: AbortSignal): Command =>
     .addOption(scopeOption)
     .addOption(yesOption)
     .addOption(formatOption)
-    .action(async (options: ScopeYesOptions) => {
-      const isTextFormat = options.format === "text";
-      const isJsonFormat = options.format === "json";
+    .action(async (settings: ScopeYesSettings) => {
+      const isPlainFormat = settings.format === "text";
+      const isDocumentFormat = settings.format === "json";
 
-      if (isTextFormat) {
-        await TerminalUI.intro("uninstall");
+      if (isPlainFormat) {
+        await TerminalUI.runIntro("uninstall");
       }
 
       const isConfirmed = await confirmDestructive({
-        yes: options.yes,
-        question: `Uninstall agent-setup from ${options.scope} scope?`,
+        yes: settings.yes,
+        question: `Uninstall agent-setup from ${settings.scope} scope?`,
         missingYesIssue: "Non-interactive uninstall requires --yes.",
       });
 
       const isDeclined = !isConfirmed;
 
       if (isDeclined) {
-        await TerminalUI.showCancelled(options);
+        await TerminalUI.showCancelled(settings);
         return;
       }
 
       const host = await scanHost();
-      const isYesGiven = options.yes;
+      const isYesGiven = settings.yes;
       const interaction = isYesGiven ? { _tag: "scripted" } : { _tag: "interactive" };
       const uninstallation = await uninstall(
         {
-          destination: destinationForScope({
-            scope: options.scope,
+          destination: readDestinationForScope({
+            scope: settings.scope,
             homeRoot: host.homeRoot,
             projectRoot: host.projectRoot,
           }),
@@ -69,11 +69,11 @@ export const createUninstallCommand = (abortSignal: AbortSignal): Command =>
         abortSignal,
       );
 
-      if (isJsonFormat) {
+      if (isDocumentFormat) {
         await TerminalUI.showDocument(uninstallation);
         return;
       }
 
       await showUninstallation(uninstallation);
-      await TerminalUI.outro("Done.");
+      await TerminalUI.runOutro("Done.");
     });

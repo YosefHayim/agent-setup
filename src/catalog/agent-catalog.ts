@@ -33,29 +33,29 @@ const commandSchema = nonEmptyTrimmedTextSchema
   .regex(COMMAND_NAME_PATTERN, "Detection commands must be executable names without paths or whitespace.")
   .describe("Executable name whose availability detects an agent.");
 
-const uniqueList = <Item extends z.ZodType>(request: {
-  readonly item: Item;
+const readUniqueList = <Element extends z.ZodType>(request: {
+  readonly item: Element;
   readonly duplicateMessage: string;
   readonly description: string;
 }) =>
   z
     .array(request.item)
-    .refine((values) => values.length === new Set(values).size, { message: request.duplicateMessage })
+    .refine((fields) => fields.length === new Set(fields).size, { message: request.duplicateMessage })
     .describe(request.description);
 
 const agentDetectionSchema = z
   .strictObject({
-    homePaths: uniqueList({
+    homePaths: readUniqueList({
       item: homePathSchema,
       duplicateMessage: "Home detection paths must be unique for one agent.",
       description: "Explicit home-relative detection paths, matched with OR semantics.",
     }),
-    absolutePaths: uniqueList({
+    absolutePaths: readUniqueList({
       item: absolutePathSchema,
       duplicateMessage: "Absolute detection paths must be unique for one agent.",
       description: "Explicit absolute detection paths, matched with OR semantics.",
     }),
-    commands: uniqueList({
+    commands: readUniqueList({
       item: commandSchema,
       duplicateMessage: "Detection commands must be unique for one agent.",
       description: "Explicit command names, matched with OR semantics.",
@@ -118,16 +118,21 @@ export const agentDefinitionSchema = z.strictObject({
 
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 
-const duplicateAgentIdIssues = (agents: ReadonlyArray<AgentDefinition>) =>
-  agents.flatMap((agent, index) =>
-    agents.findIndex((candidate) => candidate.id === agent.id) === index
-      ? []
-      : [{ path: [index, "id"], message: "Agent IDs must be unique." }],
-  );
+const listDuplicateAgentIdIssues = (agents: ReadonlyArray<AgentDefinition>) =>
+  agents.flatMap((agent, index) => {
+    const firstIndexWithThisId = agents.findIndex((candidate) => candidate.id === agent.id);
+    const isFirstWithThisId = firstIndexWithThisId === index;
 
-export const agentCatalogSchema = z.array(agentDefinitionSchema).superRefine((agents, context) => {
-  for (const issue of duplicateAgentIdIssues(agents)) {
-    context.addIssue({ code: "custom", message: issue.message, path: [...issue.path] });
+    if (isFirstWithThisId) {
+      return [];
+    }
+
+    return [{ path: [index, "id"], message: "Agent IDs must be unique." }];
+  });
+
+export const agentCatalogSchema = z.array(agentDefinitionSchema).superRefine((agents, scope) => {
+  for (const issue of listDuplicateAgentIdIssues(agents)) {
+    scope.addIssue({ code: "custom", message: issue.message, path: [...issue.path] });
   }
 });
 
@@ -244,17 +249,17 @@ export const agentCatalog: ReadonlyArray<AgentDefinition> = agentCatalogSchema.p
 
 export const agentEvidenceSchema = z
   .strictObject({
-    homePaths: uniqueList({
+    homePaths: readUniqueList({
       item: homePathSchema,
       duplicateMessage: "Observed home paths must be unique.",
       description: "Observed home-relative paths.",
     }),
-    absolutePaths: uniqueList({
+    absolutePaths: readUniqueList({
       item: absolutePathSchema,
       duplicateMessage: "Observed absolute paths must be unique.",
       description: "Observed absolute paths.",
     }),
-    commands: uniqueList({
+    commands: readUniqueList({
       item: commandSchema,
       duplicateMessage: "Observed commands must be unique.",
       description: "Observed executable names.",
@@ -265,7 +270,7 @@ export const agentEvidenceSchema = z
 export type AgentEvidence = z.infer<typeof agentEvidenceSchema>;
 
 const hasObservedEvidence = (declared: ReadonlyArray<string>, observed: ReadonlyArray<string>): boolean =>
-  declared.some((value) => observed.includes(value));
+  declared.some((field) => observed.includes(field));
 
 const isAgentInstalled = (agent: AgentDefinition, evidence: AgentEvidence): boolean =>
   hasObservedEvidence(agent.detection.homePaths, evidence.homePaths) ||

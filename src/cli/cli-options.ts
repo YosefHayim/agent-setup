@@ -4,17 +4,17 @@ import type { Scope } from "#src/install/receipt.js";
 import { scopeSchema } from "#src/install/receipt.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export type OutputFormat = "text" | "json";
+export type PrintFormat = "text" | "json";
 
-export interface FormatOptions {
-  readonly format: OutputFormat;
+export interface FormatSettings {
+  readonly format: PrintFormat;
 }
 
-export interface ScopeOptions extends FormatOptions {
+export interface ScopeSettings extends FormatSettings {
   readonly scope: Scope;
 }
 
-export interface ScopeYesOptions extends ScopeOptions {
+export interface ScopeYesSettings extends ScopeSettings {
   readonly yes: boolean;
 }
 
@@ -31,7 +31,7 @@ export const formatOption = new Option("--format <format>", "Render human-readab
   .choices(["text", "json"])
   .default("text");
 
-export const featureIdsArgument = (description: string): Argument => new Argument("[feature-id...]", description);
+export const readFeatureIdsArgument = (description: string): Argument => new Argument("[feature-id...]", description);
 
 // Bad usage exits with code 2. main finds it by name, so no Error subclass is needed.
 export const createCliUsageError = (issue: string): Error => Object.assign(new Error(issue), { name: "CliUsageError" });

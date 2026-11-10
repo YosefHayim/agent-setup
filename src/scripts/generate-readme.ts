@@ -1,10 +1,8 @@
-// Rewrites the marked README.md sections from the feature catalog, the SKILL.md files, the config schema and
-// the environment variable list. `--check` fails instead of writing when README.md is stale.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { type FeatureDefinition, featureCatalog } from "#src/catalog/feature-catalog.js";
-import { configSettings, defaultConfig } from "#src/config/config-schema.js";
+import { defaultConfig, settingList } from "#src/config/config-schema.js";
 import { environmentVariables } from "#src/config/environment-variables.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -35,13 +33,13 @@ const PLATFORM_LABELS: Record<FeatureDefinition["platform"], string> = {
 };
 
 // Keep table cells on one line.
-const tableCell = (text: string): string => text.replaceAll("|", "\\|").replaceAll("\n", " ");
+const readTableCell = (cell: string): string => cell.replaceAll("|", "\\|").replaceAll("\n", " ");
 
 // Only single-line top-level values are needed, so this is not a YAML parser.
-const frontmatterValue = (skill: string, key: string): string => {
-  const frontmatter = /^---\n([\s\S]*?)\n---/u.exec(skill)?.[1] || "";
-  const line = frontmatter.split("\n").find((entry) => entry.startsWith(`${key}:`));
-  return (line || "")
+const readFrontmatterField = (skill: string, key: string): string => {
+  const frontmatterBlock = /^---\n([\s\S]*?)\n---/u.exec(skill)?.[1] ?? "";
+  const frontmatterLine = frontmatterBlock.split("\n").find((candidate) => candidate.startsWith(`${key}:`));
+  return (frontmatterLine ?? "")
     .slice(key.length + 1)
     .trim()
     .replace(/^["']|["']$/gu, "");
@@ -54,25 +52,31 @@ const readSkillDescriptions = (): ReadonlyMap<string, string> =>
       .filter((file) => existsSync(file))
       .flatMap((file) => {
         const skill = readFileSync(file, "utf8");
-        const description = frontmatterValue(skill, "description");
-        if (!description) {
+
+        const description = readFrontmatterField(skill, "description");
+
+        const isDescriptionMissing = !description;
+        if (isDescriptionMissing) {
           console.warn(`⚠️  Skipping ${file}: no description`);
           return [];
         }
-        return [[frontmatterValue(skill, "name") || path.basename(path.dirname(file)), description] as const];
+
+        return [[readFrontmatterField(skill, "name") || path.basename(path.dirname(file)), description] as const];
       }),
   );
 
-const featuresTable = (): string =>
+const readFeaturesTable = (): string =>
   [
     "| Feature | What it does | Runs on |",
     "| --- | --- | --- |",
     ...featureCatalog
       .filter((feature) => !COMMUNITY_SKILLS.has(feature.id))
-      .map((feature) => `| **${feature.id}** | ${tableCell(feature.summary)} | ${PLATFORM_LABELS[feature.platform]} |`),
+      .map(
+        (feature) => `| **${feature.id}** | ${readTableCell(feature.summary)} | ${PLATFORM_LABELS[feature.platform]} |`,
+      ),
   ].join("\n");
 
-const communitySection = (descriptions: ReadonlyMap<string, string>): string =>
+const readCommunitySection = (descriptions: ReadonlyMap<string, string>): string =>
   [
     "These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx --conditions=source src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:",
     "",
@@ -81,25 +85,33 @@ const communitySection = (descriptions: ReadonlyMap<string, string>): string =>
     ...[...COMMUNITY_SKILLS].flatMap(([id, credit]) => {
       const description = descriptions.get(id);
       const upstreamNames = credit.upstreamNames.map((name) => `\`${name}\``).join(", ");
-      return description
-        ? [`| **${id}** | ${description} | [${credit.author}](${credit.url}) (upstream: ${upstreamNames}) |`]
-        : [];
+      const isSkillDescribed = description != null;
+
+      if (!isSkillDescribed) return [];
+
+      return [`| **${id}** | ${description} | [${credit.author}](${credit.url}) (upstream: ${upstreamNames}) |`];
     }),
     "",
     "> `code-style` is an agent-setup-original skill that builds on Matt Pocock's grilling pattern — it stays in the owned catalog above.",
   ].join("\n");
 
-const defaultText = (value: unknown): string => (value === undefined ? "absent" : `\`${JSON.stringify(value)}\``);
+const readDefaultString = (defaultSetting: unknown): string => {
+  const isDefaultAbsent = typeof defaultSetting === "undefined";
 
-const settingsSection = (): string =>
+  if (isDefaultAbsent) return "absent";
+
+  return `\`${JSON.stringify(defaultSetting)}\``;
+};
+
+const readSettingsSection = (): string =>
   [
     "agent-setup keeps one `config.json` in its install root: `~/.claude/agent-setup/config.json` for a global install, `.claude/agent-setup/config.json` for a project install. Change a setting with `agent-setup config set <setting> <value>`, show it with `agent-setup config show`, and reset it with `agent-setup config reset`. A file with an unknown key does not load; fix it or run `agent-setup config reset`.",
     "",
     "| Setting | config.json key | Default | What it does |",
     "| --- | --- | --- | --- |",
-    ...configSettings.map(
+    ...settingList.map(
       (setting) =>
-        `| \`${setting.name}\` | \`${setting.key}\` | ${defaultText(defaultConfig[setting.key])} | ${tableCell(setting.description)} |`,
+        `| \`${setting.name}\` | \`${setting.key}\` | ${readDefaultString(defaultConfig[setting.key])} | ${readTableCell(setting.description)} |`,
     ),
     "",
     "### Environment variables",
@@ -107,7 +119,8 @@ const settingsSection = (): string =>
     "| Variable | Default | What it does |",
     "| --- | --- | --- |",
     ...environmentVariables.map(
-      (variable) => `| \`${variable.name}\` | ${tableCell(variable.defaultValue)} | ${tableCell(variable.purpose)} |`,
+      (variable) =>
+        `| \`${variable.name}\` | ${readTableCell(variable.defaultValue)} | ${readTableCell(variable.purpose)} |`,
     ),
   ].join("\n");
 
@@ -115,31 +128,42 @@ const replaceSection = (readme: string, section: { marker: string; content: stri
   const start = `<!-- AUTO:${section.marker}:START -->`;
   const end = `<!-- AUTO:${section.marker}:END -->`;
   const startIndex = readme.indexOf(start);
+
   const endIndex = readme.indexOf(end);
-  if (startIndex === -1 || endIndex === -1) {
-    console.error(`Markers not found: ${start} / ${end}\nAdd them to README.md and re-run.`);
-    process.exit(1);
+
+  const isMarkerMissing = startIndex === -1 || endIndex === -1;
+  if (isMarkerMissing) {
+    throw new Error(`Markers not found: ${start} / ${end}. Add them to README.md and re-run.`);
   }
 
   return `${readme.slice(0, startIndex + start.length)}\n${section.content}\n${readme.slice(endIndex)}`;
 };
 
 const descriptions = readSkillDescriptions();
-console.log(`Found ${featureCatalog.length} features, ${descriptions.size} skills, ${configSettings.length} settings`);
+console.log(`Found ${featureCatalog.length} features, ${descriptions.size} skills, ${settingList.length} settings`);
 
 const currentReadme = readFileSync(README_PATH, "utf8");
 const renderedReadme = [
-  { marker: "FEATURES", content: featuresTable() },
-  { marker: "SKILLS", content: communitySection(descriptions) },
-  { marker: "SETTINGS", content: settingsSection() },
+  { marker: "FEATURES", content: readFeaturesTable() },
+  { marker: "SKILLS", content: readCommunitySection(descriptions) },
+  { marker: "SETTINGS", content: readSettingsSection() },
 ].reduce(replaceSection, currentReadme);
 
-if (!process.argv.includes("--check")) {
+const isWriteRequested = !process.argv.includes("--check");
+
+if (isWriteRequested) {
   writeFileSync(README_PATH, renderedReadme);
   console.log("✅ README.md updated");
-} else if (renderedReadme !== currentReadme) {
-  console.error("README.md is stale. Run `pnpm readme:generate`.");
-  process.exitCode = 1;
-} else {
+}
+
+const isCheckRequested = !isWriteRequested;
+const isReadmeStale = renderedReadme !== currentReadme;
+
+const isStaleCheckFailed = isCheckRequested && isReadmeStale;
+if (isStaleCheckFailed) {
+  throw new Error("README.md is stale. Run `pnpm readme:generate`.");
+}
+
+if (isCheckRequested) {
   console.log("README.md matches its sources");
 }

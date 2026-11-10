@@ -1,9 +1,9 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { readDestinationForScope, scanHost } from "#src/config/host-scan.js";
 import { checkHealth, type Discrepancy, type HealthReport } from "#src/doctor/doctor.js";
 import { preparePackage } from "#src/install/prepare-package.js";
-import { createCommand, type FormatOptions, formatOption } from "./cli-options.js";
+import { createCommand, type FormatSettings, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
 export type HealthStatus = "healthy" | "unhealthy";
@@ -13,18 +13,29 @@ interface ScopeHealth {
   readonly report: HealthReport;
 }
 
-const installationLine = (installation: HealthReport["installation"]): string =>
-  installation._tag === "present"
-    ? `installation v${installation.version}: ${installation.features.join(", ") || "(no features)"}`
-    : "installation: missing";
+const readInstallationLine = (installation: HealthReport["installation"]): string => {
+  const isInstallationMissing = installation._tag !== "present";
 
-const agentsLine = (agents: HealthReport["agents"]): string =>
-  `agents: ${
-    agents
-      .filter((agent) => agent.detected || agent.managed)
-      .map((agent) => `${agent.displayName}${agent.managed ? "*" : ""} [idle hooks: ${agent.nativeHookSupport}]`)
-      .join(", ") || "none detected"
-  }`;
+  if (isInstallationMissing) return "installation: missing";
+
+  return `installation v${installation.version}: ${installation.features.join(", ") || "(no features)"}`;
+};
+
+const readAgentLabel = (agent: HealthReport["agents"][number]): string => {
+  const isAgentManaged = agent.managed;
+  const managedMark = isAgentManaged ? "*" : "";
+
+  return `${agent.displayName}${managedMark} [idle hooks: ${agent.nativeHookSupport}]`;
+};
+
+const readAgentsLine = (agents: HealthReport["agents"]): string => {
+  const agentLabels = agents
+    .filter((agent) => agent.detected || agent.managed)
+    .map(readAgentLabel)
+    .join(", ");
+
+  return `agents: ${agentLabels || "none detected"}`;
+};
 
 export const checkBothScopes = async (): Promise<ReadonlyArray<ScopeHealth>> => {
   const host = await scanHost();
@@ -34,7 +45,7 @@ export const checkBothScopes = async (): Promise<ReadonlyArray<ScopeHealth>> => 
   return Promise.all(
     scopes.map(async (scope): Promise<ScopeHealth> => {
       const report = await checkHealth({
-        destination: destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
+        destination: readDestinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
         preparedPackage,
         platform: host.platform,
         agentEvidence: host.agentEvidence,
@@ -56,11 +67,11 @@ const describeDiscrepancy = (discrepancy: Discrepancy): string => {
 
 // Reports every discrepancy without offering a repair.
 export const showScopeHealth = async ({ scope, report }: ScopeHealth): Promise<void> => {
-  const isConfigPresent = report.config._tag === "present";
-  await TerminalUI.step(`${scope} scope`);
-  await TerminalUI.detail(installationLine(report.installation));
-  await TerminalUI.detail(isConfigPresent ? "config: present" : "config: missing");
-  await TerminalUI.detail(agentsLine(report.agents));
+  const isSettingsPresent = report.config._tag === "present";
+  await TerminalUI.runStep(`${scope} scope`);
+  await TerminalUI.runDetail(readInstallationLine(report.installation));
+  await TerminalUI.runDetail(isSettingsPresent ? "config: present" : "config: missing");
+  await TerminalUI.runDetail(readAgentsLine(report.agents));
 
   for (const discrepancy of report.discrepancies) {
     await TerminalUI.warn(describeDiscrepancy(discrepancy));
@@ -72,27 +83,28 @@ export const createDoctorCommand = (reportHealthStatus: (healthStatus: HealthSta
   createCommand("doctor")
     .description("Read-only health check across global + project scopes")
     .addOption(formatOption)
-    .action(async (options: FormatOptions) => {
-      const isTextFormat = options.format === "text";
-      const isJsonFormat = options.format === "json";
+    .action(async (settings: FormatSettings) => {
+      const isPlainFormat = settings.format === "text";
+      const isDocumentFormat = settings.format === "json";
 
-      if (isTextFormat) {
-        await TerminalUI.intro("doctor");
+      if (isPlainFormat) {
+        await TerminalUI.runIntro("doctor");
       }
 
       const scopes = await checkBothScopes();
       const isUnhealthy = scopes.some((scopeHealth) => scopeHealth.report.discrepancies.length > 0);
       const healthStatus: HealthStatus = isUnhealthy ? "unhealthy" : "healthy";
-      if (isJsonFormat) {
+
+      if (isDocumentFormat) {
         await TerminalUI.showDocument({ _tag: healthStatus, scopes });
       }
 
-      if (isTextFormat) {
+      if (isPlainFormat) {
         for (const scopeHealth of scopes) {
           await showScopeHealth(scopeHealth);
         }
 
-        await TerminalUI.outro("Read-only check complete.");
+        await TerminalUI.runOutro("Read-only check complete.");
       }
 
       reportHealthStatus(healthStatus);

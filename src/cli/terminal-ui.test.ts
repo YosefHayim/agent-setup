@@ -4,14 +4,14 @@ import * as TerminalUI from "./terminal-ui.js";
 
 describe("TerminalUI", () => {
   it("presentation calls complete without throwing", async () => {
-    await TerminalUI.intro("test");
-    await TerminalUI.step("working");
-    await TerminalUI.success("ok");
+    await TerminalUI.runIntro("test");
+    await TerminalUI.runStep("working");
+    await TerminalUI.runSuccess("ok");
     await TerminalUI.warn("careful");
-    await TerminalUI.detail("note");
+    await TerminalUI.runDetail("note");
     await TerminalUI.fail("problem");
     await TerminalUI.note("line one\nline two", "Details");
-    await TerminalUI.outro("done");
+    await TerminalUI.runOutro("done");
     await TerminalUI.showError(new Error("expected failure"));
     expect(typeof TerminalUI.isInteractiveTerminal()).toBe("boolean");
   });
@@ -37,7 +37,7 @@ describe("TerminalUI", () => {
 
   it("formats ordered flow steps as a numbered plan", () => {
     expect(
-      TerminalUI.formatPlan([
+      TerminalUI.createPlanLines([
         { label: "Scope", detail: "global" },
         { label: "Features", detail: "scratch-folder-guard" },
       ]),

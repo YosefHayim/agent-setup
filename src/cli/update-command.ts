@@ -1,9 +1,9 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { readDestinationForScope, scanHost } from "#src/config/host-scan.js";
 import { preparePackage } from "#src/install/prepare-package.js";
 import { update } from "#src/install/update.js";
-import { createCommand, featureIdsArgument, formatOption, type ScopeOptions, scopeOption } from "./cli-options.js";
+import { createCommand, formatOption, readFeatureIdsArgument, type ScopeSettings, scopeOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
 interface UpdateSummary {
@@ -15,26 +15,29 @@ interface UpdateSummary {
 export const showUpdate = async (updateSummary: UpdateSummary): Promise<void> => {
   const features = `${updateSummary.features.join(", ")} (${updateSummary.scope})`;
   const isUpdatedNow = updateSummary._tag === "updated";
-  await TerminalUI.success(isUpdatedNow ? `Updated ${features}` : `Already current: ${features}`);
+  await TerminalUI.runSuccess(isUpdatedNow ? `Updated ${features}` : `Already current: ${features}`);
 };
 
 export const createUpdateCommand = (abortSignal: AbortSignal): Command =>
   createCommand("update")
     .description("Refresh every installed feature and keep the receipt selection")
-    .addArgument(featureIdsArgument("Feature IDs that must already be installed; the whole installation is refreshed"))
+    .addArgument(
+      readFeatureIdsArgument("Feature IDs that must already be installed; the whole installation is refreshed"),
+    )
     .addOption(scopeOption)
     .addOption(formatOption)
-    .action(async (featureIds: ReadonlyArray<string>, options: ScopeOptions) => {
-      const isJsonFormat = options.format === "json";
-      const isTextFormat = options.format === "text";
+    .action(async (featureIds: ReadonlyArray<string>, settings: ScopeSettings) => {
+      const isDocumentFormat = settings.format === "json";
 
-      if (isTextFormat) {
-        await TerminalUI.intro("update");
+      const isPlainFormat = settings.format === "text";
+
+      if (isPlainFormat) {
+        await TerminalUI.runIntro("update");
       }
 
       const host = await scanHost();
-      const destination = destinationForScope({
-        scope: options.scope,
+      const destination = readDestinationForScope({
+        scope: settings.scope,
         homeRoot: host.homeRoot,
         projectRoot: host.projectRoot,
       });
@@ -54,11 +57,11 @@ export const createUpdateCommand = (abortSignal: AbortSignal): Command =>
         abortSignal,
       );
 
-      if (isJsonFormat) {
+      if (isDocumentFormat) {
         await TerminalUI.showDocument(updateSummary);
         return;
       }
 
       await showUpdate(updateSummary);
-      await TerminalUI.outro("Done.");
+      await TerminalUI.runOutro("Done.");
     });

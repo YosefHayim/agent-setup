@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { configSettings } from "#src/config/config-schema.js";
+import { settingList } from "#src/config/config-schema.js";
 import { environmentVariables } from "#src/config/environment-variables.js";
 
 const readme = readFileSync(path.resolve("README.md"), "utf8");
 
-const generatedSection = (marker: string): string => {
+const readGeneratedSection = (marker: string): string => {
   const start = `<!-- AUTO:${marker}:START -->`;
   const startIndex = readme.indexOf(start);
   const endIndex = readme.indexOf(`<!-- AUTO:${marker}:END -->`);
@@ -19,7 +19,7 @@ const generatedSection = (marker: string): string => {
 
 describe("README generation", () => {
   it("lists agent-setup-owned skills in the catalog, minus community and user-global skills", () => {
-    const catalog = generatedSection("FEATURES");
+    const catalog = readGeneratedSection("FEATURES");
 
     expect(catalog).toContain("**write-readme**");
     expect(catalog).toContain("**update-agent-docs**");
@@ -36,7 +36,7 @@ describe("README generation", () => {
   });
 
   it("credits third-party skills in a separate community table with upstream links", () => {
-    const community = generatedSection("SKILLS");
+    const community = readGeneratedSection("SKILLS");
 
     expect(community).toContain("**make-code-readable**");
     expect(community).toContain("(upstream: `deslop`)");
@@ -49,10 +49,10 @@ describe("README generation", () => {
   });
 
   it("lists every setting and environment variable under the Settings heading AGENTS.md links to", () => {
-    const settings = generatedSection("SETTINGS");
+    const settings = readGeneratedSection("SETTINGS");
 
     expect(readme).toContain("\n## Settings\n\n<!-- AUTO:SETTINGS:START -->");
-    configSettings.forEach((setting) => {
+    settingList.forEach((setting) => {
       expect(settings).toContain(`| \`${setting.name}\` | \`${setting.key}\` |`);
     });
     environmentVariables.forEach((variable) => {

@@ -7,10 +7,10 @@ import { Argument, type Command, Option } from "commander";
 import { isNotFound } from "#src/install/file-bytes.js";
 import { findPackageRoot } from "#src/install/package-root.js";
 import { copyWorkflows } from "#src/workflows/copy-workflows.js";
-import { createCliUsageError, createCommand, type FormatOptions, formatOption } from "./cli-options.js";
+import { createCliUsageError, createCommand, type FormatSettings, formatOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-interface ScaffoldOptions extends FormatOptions {
+interface ScaffoldSettings extends FormatSettings {
   readonly overwrite: boolean;
 }
 
@@ -69,25 +69,27 @@ const createScaffoldCommand = (): Command =>
     .addArgument(new Argument("[workspace]", "Target repository root (default: current working directory)"))
     .addOption(overwriteOption)
     .addOption(formatOption)
-    .action(async (workspace: string | undefined, options: ScaffoldOptions) => {
+    .action(async (workspace: string | undefined, settings: ScaffoldSettings) => {
       const targetRoot = await readWorkspaceRoot(workspace);
-      const isJsonFormat = options.format === "json";
-      const isTextFormat = options.format === "text";
+      const isDocumentFormat = settings.format === "json";
 
-      if (isTextFormat) {
-        await TerminalUI.intro("workflow scaffold");
-        await TerminalUI.step(`workspace: ${targetRoot}`);
+      const isPlainFormat = settings.format === "text";
+
+      if (isPlainFormat) {
+        await TerminalUI.runIntro("workflow scaffold");
+        await TerminalUI.runStep(`workspace: ${targetRoot}`);
       }
 
       const templateDirectory = await findWorkflowTemplateDirectory();
-      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: options.overwrite });
-      if (isJsonFormat) {
+      const copiedWorkflows = await copyWorkflows({ targetRoot, templateDirectory, force: settings.overwrite });
+
+      if (isDocumentFormat) {
         await TerminalUI.showDocument({ workspace: targetRoot, ...copiedWorkflows });
         return;
       }
 
       await showCopiedWorkflows(copiedWorkflows);
-      await TerminalUI.outro(
+      await TerminalUI.runOutro(
         "Next: register the npm trusted publisher (repo + publish.yml) — see the publish.yml header.",
       );
     });

@@ -28,18 +28,18 @@ const healthRequestSchema = z.strictObject({
 
 type HealthRequest = z.infer<typeof healthRequestSchema>;
 
-export type ConfigHealth = { readonly _tag: "missing" } | { readonly _tag: "present"; readonly config: Config };
+type SettingsHealth = { readonly _tag: "missing" } | { readonly _tag: "present"; readonly config: Config };
 
-export type InstallationHealth =
+type InstallationHealth =
   | { readonly _tag: "missing" }
   | { readonly _tag: "present"; readonly version: string; readonly features: Array<string> };
 
-export type PreparedRuntimeStatus =
+type PreparedRuntimeStatus =
   | { readonly _tag: "notRequired" }
   | { readonly _tag: "present"; readonly path: string }
   | { readonly _tag: "missing"; readonly path: string };
 
-export interface FeatureHealth {
+interface FeatureHealth {
   readonly id: FeatureId;
   readonly title: string;
   readonly platform: FeaturePlatform;
@@ -47,7 +47,7 @@ export interface FeatureHealth {
   readonly preparedRuntime: PreparedRuntimeStatus;
 }
 
-export interface AgentHealth {
+interface AgentHealth {
   readonly id: string;
   readonly displayName: string;
   readonly detected: boolean;
@@ -67,7 +67,7 @@ export type Discrepancy =
 
 export interface HealthReport {
   readonly scope: Scope;
-  readonly config: ConfigHealth;
+  readonly config: SettingsHealth;
   readonly installation: InstallationHealth;
   readonly features: Array<FeatureHealth>;
   readonly agents: Array<AgentHealth>;
@@ -83,8 +83,9 @@ interface Inspection {
 const createInspectError = (issue: string, cause: unknown): Error =>
   new Error(`Cannot inspect agent-setup: ${issue}`, { cause });
 
-const decodeHealthRequest = (input: unknown): HealthRequest => {
-  const requestCheck = healthRequestSchema.safeParse(input);
+const decodeHealthRequest = (details: unknown): HealthRequest => {
+  const requestCheck = healthRequestSchema.safeParse(details);
+
   const isRequestAccepted = requestCheck.success;
 
   if (isRequestAccepted) {
@@ -94,7 +95,7 @@ const decodeHealthRequest = (input: unknown): HealthRequest => {
   throw createInspectError(joinZodIssueMessages(requestCheck.error), requestCheck.error);
 };
 
-const platformAvailable = (feature: FeatureDefinition, platform: HealthRequest["platform"]): boolean => {
+const isPlatformAvailable = (feature: FeatureDefinition, platform: HealthRequest["platform"]): boolean => {
   const isAnyPlatform = feature.platform === "any";
 
   if (isAnyPlatform) {
@@ -110,7 +111,7 @@ const platformAvailable = (feature: FeatureDefinition, platform: HealthRequest["
   return feature.platform === "macos";
 };
 
-const preparedRuntimeStatus = async (
+const readPreparedRuntimeStatus = async (
   feature: FeatureDefinition,
   packageRoot: string,
 ): Promise<PreparedRuntimeStatus> => {
@@ -125,6 +126,7 @@ const preparedRuntimeStatus = async (
   const typeScriptExtensionLength = 3;
   const entrypoint = `${runtime.sourceEntrypoint.slice(0, -typeScriptExtensionLength)}.js`;
   const relativePath = `hooks/${feature.sourceDirectory}/${entrypoint}`;
+
   const isEntrypointPresent = await isPathPresent(path.join(packageRoot, relativePath));
 
   if (isEntrypointPresent) {
@@ -135,13 +137,13 @@ const preparedRuntimeStatus = async (
 };
 
 const checkFeature = async (feature: FeatureDefinition, request: HealthRequest): Promise<FeatureHealth> => {
-  const preparedRuntime = await preparedRuntimeStatus(feature, request.preparedPackage.root);
+  const preparedRuntime = await readPreparedRuntimeStatus(feature, request.preparedPackage.root);
 
   return {
     id: feature.id,
     title: feature.title,
     platform: feature.platform,
-    platformAvailable: platformAvailable(feature, request.platform),
+    platformAvailable: isPlatformAvailable(feature, request.platform),
     preparedRuntime,
   };
 };
@@ -154,9 +156,10 @@ const checkFeatureHealth = async (request: HealthRequest, receipt: Receipt): Pro
 };
 
 // The receipt lists what is installed; a dependency it lacks is reported, and install or update adds it.
-const findMissingDependencies = (receipt: Receipt): Array<Discrepancy> => {
+const findMissingCollaborators = (receipt: Receipt): Array<Discrepancy> => {
   const recordedIds = new Set<string>(receipt.features);
   const dependencyCheck = addDependencies(receipt.features);
+
   const isRequiredFeatureUnknown = dependencyCheck.status === "unknown";
 
   if (isRequiredFeatureUnknown) {
@@ -211,30 +214,31 @@ const readReceiptOrInstallError = async (receiptFilePath: string): Promise<Recei
 };
 
 const inspectInstallation = async (request: HealthRequest): Promise<Inspection> => {
-  const configFilePath = path.join(request.destination.root, managedConfigPath);
+  const settingsFilePath = path.join(request.destination.root, managedConfigPath);
   const receiptFilePath = path.join(request.destination.root, receiptPath);
 
   try {
-    const configSnapshot = await readConfigFile(configFilePath);
+    const settingsSnapshot = await readConfigFile(settingsFilePath);
     const receiptSnapshot = await readReceiptOrInstallError(receiptFilePath);
+
     const isReceiptMissing = receiptSnapshot._tag === "missing";
 
     if (isReceiptMissing) {
-      return { configSnapshot, receipt: null, features: [] };
+      return { configSnapshot: settingsSnapshot, receipt: null, features: [] };
     }
 
     const features = await checkFeatureHealth(request, receiptSnapshot.receipt);
 
-    return { configSnapshot, receipt: receiptSnapshot.receipt, features };
+    return { configSnapshot: settingsSnapshot, receipt: receiptSnapshot.receipt, features };
   } catch (error) {
     throw createInspectError(readErrorMessage(error), error);
   }
 };
 
-const pickConfigHealth = (snapshot: ConfigFileSnapshot): ConfigHealth => {
-  const isConfigMissing = snapshot._tag === "missing";
+const pickSettingsHealth = (snapshot: ConfigFileSnapshot): SettingsHealth => {
+  const isSettingsMissing = snapshot._tag === "missing";
 
-  if (isConfigMissing) {
+  if (isSettingsMissing) {
     return { _tag: "missing" };
   }
 
@@ -253,6 +257,7 @@ const pickInstallationHealth = (receipt: Receipt | null): InstallationHealth => 
 
 const findReceiptDiscrepancies = (request: HealthRequest, inspection: Inspection): Array<Discrepancy> => {
   const receipt = inspection.receipt;
+
   const isReceiptMissing = receipt == null;
 
   if (isReceiptMissing) {
@@ -260,6 +265,7 @@ const findReceiptDiscrepancies = (request: HealthRequest, inspection: Inspection
   }
 
   const discrepancies: Array<Discrepancy> = [];
+
   const isScopeMismatched = receipt.scope !== request.destination._tag;
 
   if (isScopeMismatched) {
@@ -280,19 +286,20 @@ const findReceiptDiscrepancies = (request: HealthRequest, inspection: Inspection
     });
   }
 
-  const isManagedConfigMissing = inspection.configSnapshot._tag === "missing";
+  const isManagedSettingsMissing = inspection.configSnapshot._tag === "missing";
 
-  if (isManagedConfigMissing) {
+  if (isManagedSettingsMissing) {
     discrepancies.push({ _tag: "missingManagedConfig" });
   }
 
-  discrepancies.push(...findMissingDependencies(receipt));
+  discrepancies.push(...findMissingCollaborators(receipt));
 
   return discrepancies;
 };
 
 const findFeatureDiscrepancies = (feature: FeatureHealth): Array<Discrepancy> => {
   const discrepancies: Array<Discrepancy> = [];
+
   const isPlatformUnavailable = !feature.platformAvailable;
 
   if (isPlatformUnavailable) {
@@ -300,6 +307,7 @@ const findFeatureDiscrepancies = (feature: FeatureHealth): Array<Discrepancy> =>
   }
 
   const preparedRuntime = feature.preparedRuntime;
+
   const isRuntimeMissing = preparedRuntime._tag === "missing";
 
   if (isRuntimeMissing) {
@@ -343,15 +351,15 @@ const findDiscrepancies = (
 };
 
 // Compares the strict receipt and config with catalog-derived host observations, without writing anything.
-export const checkHealth = async (input: unknown): Promise<HealthReport> => {
-  const request = decodeHealthRequest(input);
+export const checkHealth = async (details: unknown): Promise<HealthReport> => {
+  const request = decodeHealthRequest(details);
   const inspection = await inspectInstallation(request);
   const agents = checkAgentHealth(request.agentEvidence, inspection.receipt);
   const discrepancies = findDiscrepancies(request, inspection, agents);
 
   return {
     scope: request.destination._tag,
-    config: pickConfigHealth(inspection.configSnapshot),
+    config: pickSettingsHealth(inspection.configSnapshot),
     installation: pickInstallationHealth(inspection.receipt),
     features: inspection.features,
     agents,

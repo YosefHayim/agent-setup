@@ -5,15 +5,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  assertManagedConfigPlan,
+  assertManagedSettingsPlan,
   type ManagedConfigPlan,
   managedConfigPath,
   planManagedConfig,
   readConfigFile,
 } from "./config-file.js";
-import { type Config, defaultConfig, encodeConfigJson } from "./config-schema.js";
+import { type Config, defaultConfig, encodeSettingsDocument } from "./config-schema.js";
 
-const textEncoder = new TextEncoder();
+const stringEncoder = new TextEncoder();
 
 const hashBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
@@ -31,21 +31,22 @@ const makeTemporaryRoot = (prefix: string): string => {
   return root;
 };
 
-const writeConfigContents = (contents: Uint8Array | string): string => {
+const writeSettingsMessages = (messages: Uint8Array | string): string => {
   const root = makeTemporaryRoot("agent-setup-config-file-");
-  const configPath = path.join(root, "config.json");
-  writeFileSync(configPath, typeof contents === "string" ? textEncoder.encode(contents) : contents);
-  return configPath;
+  const settingsPath = path.join(root, "config.json");
+  const isStringMessage = typeof messages === "string";
+  writeFileSync(settingsPath, isStringMessage ? stringEncoder.encode(messages) : messages);
+  return settingsPath;
 };
 
-const bytesWithInvalidUtf8 = () => {
+const createBytesWithInvalidUtf8 = () => {
   const marker = "replacement-marker";
-  const json = JSON.stringify({ ...defaultConfig, sessionRehomeRoots: [marker] });
-  const markerIndex = json.indexOf(marker);
+  const decodedSettingsFile = JSON.stringify({ ...defaultConfig, sessionRehomeRoots: [marker] });
+  const markerIndex = decodedSettingsFile.indexOf(marker);
   return new Uint8Array([
-    ...textEncoder.encode(json.slice(0, markerIndex)),
+    ...stringEncoder.encode(decodedSettingsFile.slice(0, markerIndex)),
     0xff,
-    ...textEncoder.encode(json.slice(markerIndex + marker.length)),
+    ...stringEncoder.encode(decodedSettingsFile.slice(markerIndex + marker.length)),
   ]);
 };
 
@@ -57,16 +58,16 @@ describe("readConfigFile", () => {
   });
 
   it("returns exact file bytes with one strict complete managed config", async () => {
-    const bytes = textEncoder.encode(`\n${encodeConfigJson(defaultConfig)}\n`);
+    const bytes = stringEncoder.encode(`\n${encodeSettingsDocument(defaultConfig)}\n`);
 
-    const snapshot = await readConfigFile(writeConfigContents(bytes));
+    const snapshot = await readConfigFile(writeSettingsMessages(bytes));
 
     expect(snapshot._tag === "present" && [...snapshot.bytes]).toEqual([...bytes]);
     expect(snapshot._tag === "present" && snapshot.config).toEqual(defaultConfig);
   });
 
   it("applies schema defaults to an incomplete config", async () => {
-    const snapshot = await readConfigFile(writeConfigContents(JSON.stringify({ debugLogs: true })));
+    const snapshot = await readConfigFile(writeSettingsMessages(JSON.stringify({ debugLogs: true })));
 
     expect(snapshot._tag === "present" && snapshot.config).toEqual({ ...defaultConfig, debugLogs: true });
   });
@@ -83,7 +84,7 @@ describe("readConfigFile", () => {
       contents: JSON.stringify({ ...defaultConfig, sessionRehomeRoots: [""] }),
       mentions: "sessionRehomeRoots",
     },
-    { name: "non-UTF-8 bytes", contents: bytesWithInvalidUtf8(), mentions: "UTF-8" },
+    { name: "non-UTF-8 bytes", contents: createBytesWithInvalidUtf8(), mentions: "UTF-8" },
     {
       name: "duplicate properties that JSON parsing would collapse",
       contents: JSON.stringify(defaultConfig).replace(
@@ -94,11 +95,11 @@ describe("readConfigFile", () => {
     },
     {
       name: "a UTF-8 byte-order mark",
-      contents: new Uint8Array([0xef, 0xbb, 0xbf, ...textEncoder.encode(JSON.stringify(defaultConfig))]),
+      contents: new Uint8Array([0xef, 0xbb, 0xbf, ...stringEncoder.encode(JSON.stringify(defaultConfig))]),
       mentions: "byte-order mark",
     },
-  ])("rejects $name", async ({ contents, mentions }) => {
-    await expect(readConfigFile(writeConfigContents(contents))).rejects.toThrow(mentions);
+  ])("rejects $name", async ({ contents: messages, mentions }) => {
+    await expect(readConfigFile(writeSettingsMessages(messages))).rejects.toThrow(mentions);
   });
 
   it("preserves non-missing filesystem errors", async () => {
@@ -110,39 +111,42 @@ describe("readConfigFile", () => {
 
 const missingPrevious = { _tag: "missing" };
 
-const presentConfigSnapshot = (config: Config) => ({
+const createPresentSettingsSnapshot = (settings: Config) => ({
   _tag: "present",
-  bytes: textEncoder.encode(`${JSON.stringify(config)}\n`),
-  config,
+  bytes: stringEncoder.encode(`${JSON.stringify(settings)}\n`),
+  config: settings,
 });
 
-const selectedRequest = (scope: "global" | "project", config: Config) => ({
+const createSelectedRequest = (scope: "global" | "project", settings: Config) => ({
   scope,
-  selection: { _tag: "selected", config },
+  selection: { _tag: "selected", config: settings },
   previousConfigFile: missingPrevious,
 });
 
-const wholeFileOwnership = (plan: ManagedConfigPlan) => {
-  if (plan.managedConfigWrite.file.ownership._tag !== "wholeFile") {
+const readWholeFileOwnership = (plan: ManagedConfigPlan) => {
+  const ownership = plan.managedConfigWrite.file.ownership;
+  const isNotWholeFileOwnership = ownership._tag !== "wholeFile";
+
+  if (isNotWholeFileOwnership) {
     throw new Error("Expected one whole-file managed config write.");
   }
 
-  return plan.managedConfigWrite.file.ownership;
+  return ownership;
 };
 
-const expectManagedConfigWrite = (plan: ManagedConfigPlan) => {
+const expectManagedSettingsWrite = (plan: ManagedConfigPlan) => {
   expect(plan.managedConfigWrite.file.path).toBe(managedConfigPath);
   expect(plan.managedConfigWrite.file.kind._tag).toBe("managedConfig");
-  expect(wholeFileOwnership(plan).installedHash).toBe(hashBytes(plan.managedConfigWrite.bytes));
+  expect(readWholeFileOwnership(plan).installedHash).toBe(hashBytes(plan.managedConfigWrite.bytes));
   expect(new TextDecoder().decode(plan.managedConfigWrite.bytes)).toContain('"debugLogs"');
 };
 
 describe("planManagedConfig", () => {
   it("copies the global snapshot once for a first project install and otherwise uses defaults", () => {
-    const globalConfig = { ...defaultConfig, sessionRehomeRoots: ["fixtures"], debugLogs: true };
+    const globalSettings = { ...defaultConfig, sessionRehomeRoots: ["fixtures"], debugLogs: true };
     const copied = planManagedConfig({
       scope: "project",
-      selection: { _tag: "firstProjectInstall", globalConfig: presentConfigSnapshot(globalConfig) },
+      selection: { _tag: "firstProjectInstall", globalConfig: createPresentSettingsSnapshot(globalSettings) },
       previousConfigFile: missingPrevious,
     });
     const defaulted = planManagedConfig({
@@ -151,23 +155,23 @@ describe("planManagedConfig", () => {
       previousConfigFile: missingPrevious,
     });
 
-    expect(copied.config).toEqual(globalConfig);
+    expect(copied.config).toEqual(globalSettings);
     expect(defaulted.config).toEqual(defaultConfig);
-    expectManagedConfigWrite(copied);
-    expectManagedConfigWrite(defaulted);
+    expectManagedSettingsWrite(copied);
+    expectManagedSettingsWrite(defaulted);
   });
 
   it("rejects a global snapshot whose decoded config does not match its source bytes", () => {
-    const sourceConfig = { ...defaultConfig, sessionRehomeRoots: ["fixtures"] };
-    const globalConfig = {
-      ...presentConfigSnapshot(sourceConfig),
-      config: { ...sourceConfig, sessionRehomeRoots: ["vendor"] },
+    const originSettings = { ...defaultConfig, sessionRehomeRoots: ["fixtures"] };
+    const globalSnapshot = {
+      ...createPresentSettingsSnapshot(originSettings),
+      config: { ...originSettings, sessionRehomeRoots: ["vendor"] },
     };
 
     expect(() =>
       planManagedConfig({
         scope: "project",
-        selection: { _tag: "firstProjectInstall", globalConfig },
+        selection: { _tag: "firstProjectInstall", globalConfig: globalSnapshot },
         previousConfigFile: missingPrevious,
       }),
     ).toThrow("source bytes");
@@ -188,15 +192,17 @@ describe("planManagedConfig", () => {
       planManagedConfig({
         scope: "project",
         selection: { _tag: "firstProjectInstall", globalConfig: { _tag: "missing" } },
-        previousConfigFile: { _tag: "priorFile", bytes: textEncoder.encode("original config") },
+        previousConfigFile: { _tag: "priorFile", bytes: stringEncoder.encode("original config") },
       }),
     ).toThrow("missing target managed config");
   });
 
   it("keeps later global and project selections independent", () => {
-    const global = planManagedConfig(selectedRequest("global", { ...defaultConfig, sessionRehomeRoots: ["vendor"] }));
+    const global = planManagedConfig(
+      createSelectedRequest("global", { ...defaultConfig, sessionRehomeRoots: ["vendor"] }),
+    );
     const project = planManagedConfig(
-      selectedRequest("project", { ...defaultConfig, sessionRehomeRoots: ["generated"] }),
+      createSelectedRequest("project", { ...defaultConfig, sessionRehomeRoots: ["generated"] }),
     );
 
     expect(global.config.sessionRehomeRoots).toEqual(["vendor"]);
@@ -205,40 +211,40 @@ describe("planManagedConfig", () => {
   });
 
   it("preserves exact prior config bytes and correlates desired bytes with their hash", () => {
-    const priorBytes = textEncoder.encode('{  "user": "format"  }\n');
+    const priorBytes = stringEncoder.encode('{  "user": "format"  }\n');
     const plan = planManagedConfig({
       scope: "project",
       selection: { _tag: "selected", config: defaultConfig },
       previousConfigFile: { _tag: "priorFile", bytes: priorBytes },
     });
 
-    expect(wholeFileOwnership(plan).previous).toEqual({ _tag: "priorFile", bytes: priorBytes });
-    expect(wholeFileOwnership(plan).installedHash).toBe(hashBytes(plan.managedConfigWrite.bytes));
+    expect(readWholeFileOwnership(plan).previous).toEqual({ _tag: "priorFile", bytes: priorBytes });
+    expect(readWholeFileOwnership(plan).installedHash).toBe(hashBytes(plan.managedConfigWrite.bytes));
   });
 
   it("strictly rejects unknown request properties", () => {
     expect(() =>
       planManagedConfig({
-        ...selectedRequest("project", defaultConfig),
+        ...createSelectedRequest("project", defaultConfig),
         unexpected: true,
       }),
     ).toThrow("Unrecognized key");
   });
 
   it("rejects managed plan data whose config and write drift apart", () => {
-    const plan = planManagedConfig(selectedRequest("project", defaultConfig));
-    const bytes = textEncoder.encode(
+    const plan = planManagedConfig(createSelectedRequest("project", defaultConfig));
+    const bytes = stringEncoder.encode(
       `${JSON.stringify({ ...defaultConfig, sessionRehomeRoots: ["different"] }, null, 2)}\n`,
     );
 
     expect(() =>
-      assertManagedConfigPlan({
+      assertManagedSettingsPlan({
         ...plan,
         managedConfigWrite: {
           ...plan.managedConfigWrite,
           file: {
             ...plan.managedConfigWrite.file,
-            ownership: { ...wholeFileOwnership(plan), installedHash: hashBytes(bytes) },
+            ownership: { ...readWholeFileOwnership(plan), installedHash: hashBytes(bytes) },
           },
           bytes,
         },
