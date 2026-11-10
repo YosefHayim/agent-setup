@@ -313,13 +313,13 @@ const queryCruxWithOriginFallback = async (argumentList) => {
   const requestedLookup = await queryCrux(requestedTarget, argumentList.formFactor, argumentList.key);
 
   const isUrlLookupMissing = requestedLookup.notFound && !isOriginRequested;
-  if (!isUrlLookupMissing) {
-    const requestedLevel = isOriginRequested ? ORIGIN_LEVEL : "url";
-    return { level: requestedLevel, cruxLookup: requestedLookup };
+  if (isUrlLookupMissing) {
+    const originLookup = await queryCrux({ origin: argumentList.url }, argumentList.formFactor, argumentList.key);
+    return { level: ORIGIN_LEVEL, cruxLookup: originLookup };
   }
 
-  const originLookup = await queryCrux({ origin: argumentList.url }, argumentList.formFactor, argumentList.key);
-  return { level: ORIGIN_LEVEL, cruxLookup: originLookup };
+  const requestedLevel = isOriginRequested ? ORIGIN_LEVEL : "url";
+  return { level: requestedLevel, cruxLookup: requestedLookup };
 };
 
 const runCruxCommand = async () => {

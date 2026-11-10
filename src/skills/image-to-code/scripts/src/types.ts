@@ -1,4 +1,4 @@
-export type MaskBox = [number, number, number, number] | [number, number, number, number, string];
+export type MaskBox = [number, number, number, number, string?];
 
 export interface MaskSettings {
   input: string;

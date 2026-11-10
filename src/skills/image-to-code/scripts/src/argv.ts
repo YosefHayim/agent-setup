@@ -32,11 +32,11 @@ export const parseArgumentList = (argv: string[], settings?: { repeat?: string[]
   return argumentList;
 };
 
-export const readStringArgument = (argumentList: Record<string, ArgField>, key: string): string | undefined => {
+export const readStringArgument = (argumentList: Record<string, ArgField>, key: string): string | null => {
   const flagArgument = argumentList[key];
 
   const isStringArgument = typeof flagArgument === "string";
-  return isStringArgument ? flagArgument : undefined;
+  return isStringArgument ? flagArgument : null;
 };
 
 export const readBooleanArgument = (argumentList: Record<string, ArgField>, key: string): boolean => {

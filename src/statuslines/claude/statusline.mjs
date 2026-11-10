@@ -201,9 +201,18 @@ const readNewLines = (transcriptPath, offset, size) => {
   return { lines: buffer.subarray(0, end).toString(UTF8_ENCODING).split(NEWLINE_CHARACTER), bytes: end };
 };
 
-const countTranscriptLine = (stats, line) => {
-  const parsedLine = JSON.parse(line);
+// A half-written last line fails JSON.parse with a SyntaxError; that line is skipped, anything else rethrows.
+const readTranscriptLineOrNull = (line) => {
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    const isUnexpectedError = !(error instanceof SyntaxError);
+    if (isUnexpectedError) throw error;
+  }
+  return null;
+};
 
+const countTranscriptLine = (stats, parsedLine) => {
   const isCompactBoundary = parsedLine.type === "system" && parsedLine.subtype === "compact_boundary";
   if (isCompactBoundary) {
     stats.compacts += 1;
@@ -235,9 +244,11 @@ const updateTranscriptStats = (sessionId, transcriptPath) => {
     const isBlankLine = !line;
     if (isBlankLine) continue;
 
-    try {
-      countTranscriptLine(stats, line);
-    } catch {}
+    const parsedLine = readTranscriptLineOrNull(line);
+    const isUnreadableLine = parsedLine == null;
+    if (isUnreadableLine) continue;
+
+    countTranscriptLine(stats, parsedLine);
   }
 
   stats.offset += bytes;

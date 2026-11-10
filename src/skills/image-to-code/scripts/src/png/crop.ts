@@ -4,21 +4,33 @@ import { PNG } from "pngjs";
 import { parseArgumentList, readStringArgument } from "#src/argv.js";
 
 const BYTES_PER_PIXEL = 4;
+const GREEN_OFFSET = 1;
+const BLUE_OFFSET = 2;
+const ALPHA_OFFSET = 3;
+const OPAQUE_ALPHA_LEVEL = 255;
 
 const firstArgumentIndex = 2;
 
 const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
-const column = Number(readStringArgument(argumentList, "x"));
-const y = Number(readStringArgument(argumentList, "y"));
-const w = Number(readStringArgument(argumentList, "w"));
-const h = Number(readStringArgument(argumentList, "h"));
+
+// A missing flag becomes NaN, as it did before readStringArgument returned null.
+const cropLeftText = readStringArgument(argumentList, "x");
+const cropLeft = Number(cropLeftText ?? Number.NaN);
+const cropTopText = readStringArgument(argumentList, "y");
+const cropTop = Number(cropTopText ?? Number.NaN);
+const cropWidthText = readStringArgument(argumentList, "w");
+const cropWidth = Number(cropWidthText ?? Number.NaN);
+const cropHeightText = readStringArgument(argumentList, "h");
+const cropHeight = Number(cropHeightText ?? Number.NaN);
+
 const defaultScaleFactor = 3;
+const scaleFactorText = readStringArgument(argumentList, "scale");
+const scaleFactor = Number(scaleFactorText || defaultScaleFactor);
 
-const s = Number(readStringArgument(argumentList, "scale") || defaultScaleFactor);
-const out = readStringArgument(argumentList, "out");
-const pngPath = readStringArgument(argumentList, "input") || "target.png";
+const outPath = readStringArgument(argumentList, "out");
+const inputPath = readStringArgument(argumentList, "input") || "target.png";
 
-const isCropArgumentMissing = !Number.isFinite(column) || !out;
+const isCropArgumentMissing = !Number.isFinite(cropLeft) || !outPath;
 if (isCropArgumentMissing) {
   console.error("usage: tsx src/png/crop.ts --x N --y N --w N --h N [--scale 3] --out out.png [--input target.png]");
   const usageExitCode = 2;
@@ -26,27 +38,23 @@ if (isCropArgumentMissing) {
   process.exit(usageExitCode);
 }
 
-const src = PNG.sync.read(fs.readFileSync(pngPath));
-const outPng = new PNG({ width: w * s, height: h * s });
-for (let oy = 0; oy < h * s; oy++) {
-  for (let ox = 0; ox < w * s; ox++) {
-    const sx = column + Math.floor(ox / s);
-    const sy = y + Math.floor(oy / s);
-    const si = (sy * src.width + sx) * BYTES_PER_PIXEL;
-    const oi = (oy * outPng.width + ox) * BYTES_PER_PIXEL;
-    outPng.data[oi] = src.data[si];
-    outPng.data[oi + 1] = src.data[si + 1];
-    const blueChannelOffset = 2;
+const sourcePng = PNG.sync.read(fs.readFileSync(inputPath));
+const scaledCropPng = new PNG({ width: cropWidth * scaleFactor, height: cropHeight * scaleFactor });
 
-    const blueByteOffsetInPixel = 2;
+for (let outRow = 0; outRow < cropHeight * scaleFactor; outRow++) {
+  for (let outColumn = 0; outColumn < cropWidth * scaleFactor; outColumn++) {
+    const originalColumn = cropLeft + Math.floor(outColumn / scaleFactor);
+    const originalRow = cropTop + Math.floor(outRow / scaleFactor);
 
-    outPng.data[oi + blueChannelOffset] = src.data[si + blueByteOffsetInPixel];
-    const opaqueAlphaLevel = 255;
+    const originalByteIndex = (originalRow * sourcePng.width + originalColumn) * BYTES_PER_PIXEL;
+    const outByteIndex = (outRow * scaledCropPng.width + outColumn) * BYTES_PER_PIXEL;
 
-    const alphaChannelOffset = 3;
-
-    outPng.data[oi + alphaChannelOffset] = opaqueAlphaLevel;
+    scaledCropPng.data[outByteIndex] = sourcePng.data[originalByteIndex];
+    scaledCropPng.data[outByteIndex + GREEN_OFFSET] = sourcePng.data[originalByteIndex + GREEN_OFFSET];
+    scaledCropPng.data[outByteIndex + BLUE_OFFSET] = sourcePng.data[originalByteIndex + BLUE_OFFSET];
+    scaledCropPng.data[outByteIndex + ALPHA_OFFSET] = OPAQUE_ALPHA_LEVEL;
   }
 }
-fs.writeFileSync(out, PNG.sync.write(outPng));
-console.log(`wrote ${out} (${w * s}x${h * s})`);
+
+fs.writeFileSync(outPath, PNG.sync.write(scaledCropPng));
+console.log(`wrote ${outPath} (${cropWidth * scaleFactor}x${cropHeight * scaleFactor})`);

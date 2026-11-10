@@ -154,8 +154,8 @@ const runFfmpeg = (argumentList, workingDirectory) => {
 // True when this ffmpeg was built with libass, so it can burn captions.
 const hasSubtitlesFilter = () => {
   const filterListProcess = spawnSync(FFMPEG_COMMAND, [FFMPEG_HIDE_BANNER_FLAG, "-filters"], { encoding: UTF8_ENCODING });
-  const isFilterListCaptured = typeof filterListProcess.stdout === "string";
-  if (!isFilterListCaptured) return false;
+  const isFilterListMissing = typeof filterListProcess.stdout !== "string";
+  if (isFilterListMissing) return false;
 
   return /\bsubtitles\b/.test(filterListProcess.stdout);
 };

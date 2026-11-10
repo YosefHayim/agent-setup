@@ -128,17 +128,17 @@ const parseArgumentList = (argv) => {
 };
 
 const readListingDocument = (listingFile) => {
-  const isListingFileGiven = Boolean(listingFile);
-  if (!isListingFileGiven) return {};
+  const isListingFileMissing = !listingFile;
+  if (isListingFileMissing) return null;
 
   return JSON.parse(readFileSync(listingFile, UTF8_ENCODING));
 };
 
 const readListingFields = (argumentList) => {
   const listingDocument = readListingDocument(argumentList.listingFile);
-  const name = String(listingDocument.name || argumentList.name || "");
-  const summary = String(listingDocument.summary || argumentList.summary || "");
-  const descriptionFromListing = String(listingDocument.description || argumentList.description || "");
+  const name = String(listingDocument?.name || argumentList.name || "");
+  const summary = String(listingDocument?.summary || argumentList.summary || "");
+  const descriptionFromListing = String(listingDocument?.description || argumentList.description || "");
 
   const isDescriptionFileGiven = Boolean(argumentList.descriptionFile);
   const description = isDescriptionFileGiven
