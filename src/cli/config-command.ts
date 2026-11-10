@@ -1,7 +1,4 @@
-/** `agent-setup config show|set|reset` — managed configuration as explicit verbs. */
-
-import { Args, Command } from "@effect/cli";
-import { Effect, Option } from "effect";
+import { Argument, type Command } from "commander";
 import { ZodError } from "zod";
 
 import {
@@ -18,12 +15,19 @@ import { joinZodIssueMessages } from "../zod-issue-messages.js";
 import {
   confirmDestructive,
   createCliUsageError,
+  createCommand,
   formatOption,
   type OutputFormat,
+  type ScopeOptions,
+  type ScopeYesOptions,
   scopeOption,
   yesOption,
 } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
+
+export type ConfigSetting = (typeof configSettings)[number];
+
+const settingNames = configSettings.map((setting) => setting.name);
 
 // A rejected setting value is bad usage (exit 2), shown as zod's own messages.
 const describeSettingRejection = (error: unknown): string => {
@@ -35,191 +39,212 @@ const describeSettingRejection = (error: unknown): string => {
   return String(error);
 };
 
-type ConfigSetting = (typeof configSettings)[number];
+const findConfigSetting = (settingName: string): ConfigSetting => {
+  const setting = configSettings.find((candidate) => candidate.name === settingName);
+  if (setting == null) {
+    throw new Error(`Unknown managed setting: ${settingName}`);
+  }
 
-const settingArgument = Args.choice(
-  configSettings.map((setting): [string, ConfigSetting] => [setting.name, setting]),
-  { name: "setting" },
-).pipe(Args.withDescription("Managed setting name"));
+  return setting;
+};
+
+// Parses the typed text and returns the config with that value; a bad value is bad usage.
+export const withSettingText = (request: {
+  readonly config: Config;
+  readonly setting: ConfigSetting;
+  readonly typedAnswer: string;
+}): Config => {
+  try {
+    const parsedSetting = settingValueFromText({ setting: request.setting, text: request.typedAnswer });
+    return withSettingValue({ config: request.config, key: request.setting.key, value: parsedSetting });
+  } catch (error) {
+    throw createCliUsageError(describeSettingRejection(error));
+  }
+};
 
 export const formatSettingValue = (request: { readonly config: Config; readonly setting: ConfigSetting }): string => {
-  const value: unknown = request.config[request.setting.key];
-  if (value === undefined) {
+  const configuredSetting: unknown = request.config[request.setting.key];
+  const isSettingNotSet = configuredSetting == null;
+  if (isSettingNotSet) {
     return "(not set)";
   }
 
-  return Array.isArray(value) ? value.join(", ") : String(value);
+  return Array.isArray(configuredSetting) ? configuredSetting.join(", ") : String(configuredSetting);
 };
 
-export const showConfig = (request: {
+const showOneSetting = async (request: {
   readonly scope: Scope;
-  readonly setting: Option.Option<ConfigSetting>;
+  readonly config: Config;
+  readonly setting: ConfigSetting;
   readonly format: OutputFormat;
-}) =>
-  Effect.gen(function* () {
-    const { config } = yield* Effect.tryPromise({ try: () => readConfig(request.scope), catch: (error) => error });
-    if (Option.isSome(request.setting)) {
-      const setting = request.setting.value;
-      if (request.format === "json") {
-        yield* Effect.tryPromise({
-          try: () =>
-            TerminalUI.showDocument({ scope: request.scope, setting: setting.name, value: config[setting.key] }),
-          catch: (error) => error,
-        });
-      } else {
-        yield* Effect.tryPromise({
-          try: () => TerminalUI.note(`${setting.label}  ${formatSettingValue({ config, setting })}`, "managed config"),
-          catch: (error) => error,
-        });
-      }
-      return;
-    }
+}): Promise<void> => {
+  const { config, setting } = request;
+  const isJsonFormat = request.format === "json";
+  if (isJsonFormat) {
+    await TerminalUI.showDocument({ scope: request.scope, setting: setting.name, value: config[setting.key] });
+    return;
+  }
 
-    if (request.format === "json") {
-      yield* Effect.tryPromise({
-        try: () => TerminalUI.showDocument({ scope: request.scope, config }),
-        catch: (error) => error,
-      });
-      return;
-    }
-    const lines = configSettings.map(
-      (setting) => `${setting.label.padEnd(40)} ${formatSettingValue({ config, setting })}`,
-    );
-    yield* Effect.tryPromise({
-      try: () => TerminalUI.note(lines.join("\n"), "managed config"),
-      catch: (error) => error,
+  await TerminalUI.note(`${setting.label}  ${formatSettingValue({ config, setting })}`, "managed config");
+};
+
+const showAllSettings = async (config: Config): Promise<void> => {
+  const lines = configSettings.map(
+    (setting) => `${setting.label.padEnd(40)} ${formatSettingValue({ config, setting })}`,
+  );
+  await TerminalUI.note(lines.join("\n"), "managed config");
+};
+
+export const showConfig = async (request: {
+  readonly scope: Scope;
+  readonly setting: ConfigSetting | null;
+  readonly format: OutputFormat;
+}): Promise<void> => {
+  const { config } = await readConfig(request.scope);
+  const { setting } = request;
+  if (setting != null) {
+    await showOneSetting({ scope: request.scope, config, setting, format: request.format });
+    return;
+  }
+
+  const isJsonFormat = request.format === "json";
+  if (isJsonFormat) {
+    await TerminalUI.showDocument({ scope: request.scope, config });
+    return;
+  }
+
+  await showAllSettings(config);
+};
+
+const createSettingArgument = (argumentSyntax: "<setting>" | "[setting]"): Argument =>
+  new Argument(argumentSyntax, "Managed setting name").choices(settingNames);
+
+const createShowCommand = (): Command =>
+  createCommand("show")
+    .description("Show all settings or one named setting")
+    .addArgument(createSettingArgument("[setting]"))
+    .addOption(scopeOption)
+    .addOption(formatOption)
+    .action(async (settingName: string | undefined, options: ScopeOptions) => {
+      const isSettingGiven = settingName != null;
+      const setting = isSettingGiven ? findConfigSetting(settingName) : null;
+      await showConfig({ scope: options.scope, setting, format: options.format });
     });
+
+const createSetCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("set")
+    .description("Set one managed setting")
+    .addArgument(createSettingArgument("<setting>"))
+    .addArgument(new Argument("<value>", "New setting value"))
+    .addOption(scopeOption)
+    .addOption(formatOption)
+    .action(async (settingName: string, typedAnswer: string, options: ScopeOptions) => {
+      const setting = findConfigSetting(settingName);
+      const current = await readConfig(options.scope);
+      const nextConfig = withSettingText({ config: current.config, setting, typedAnswer });
+      const owner = await saveConfig(
+        { target: current, configuration: { _tag: "selected", config: nextConfig } },
+        abortSignal,
+      );
+
+      const isTextFormat = options.format === "text";
+      if (isTextFormat) {
+        await TerminalUI.success(`${setting.label} → ${formatSettingValue({ config: nextConfig, setting })}`);
+        return;
+      }
+
+      await TerminalUI.showDocument({
+        _tag: "configured",
+        scope: options.scope,
+        setting: setting.name,
+        value: nextConfig[setting.key],
+        owner,
+      });
+    });
+
+const resetEverySetting = async (request: {
+  readonly options: ScopeYesOptions;
+  readonly abortSignal: AbortSignal;
+}): Promise<void> => {
+  const { options } = request;
+  const isConfirmed = await confirmDestructive({
+    yes: options.yes,
+    question: `Reset every ${options.scope} setting to its Schema default?`,
+    missingYesIssue: "Non-interactive full config reset requires --yes.",
   });
 
-const showCommand = Command.make(
-  "show",
-  { setting: settingArgument.pipe(Args.optional), scope: scopeOption, format: formatOption },
-  showConfig,
-).pipe(Command.withDescription("Show all settings or one named setting"));
+  const isDeclined = !isConfirmed;
 
-const setCommand = Command.make(
-  "set",
-  {
-    setting: settingArgument,
-    value: Args.text({ name: "value" }).pipe(Args.withDescription("New setting value")),
-    scope: scopeOption,
-    format: formatOption,
-  },
-  (args) =>
-    Effect.gen(function* () {
-      const { setting } = args;
-      const current = yield* Effect.tryPromise({ try: () => readConfig(args.scope), catch: (error) => error });
-      const value = yield* Effect.try({
-        try: () => settingValueFromText({ setting, text: args.value }),
-        catch: (error) => createCliUsageError(describeSettingRejection(error)),
-      });
-      const nextConfig = yield* Effect.try({
-        try: () => withSettingValue({ config: current.config, key: setting.key, value }),
-        catch: (error) => createCliUsageError(describeSettingRejection(error)),
-      });
-      const owner = yield* Effect.tryPromise({
-        try: (signal) =>
-          saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
-        catch: (error) => error,
-      });
-      if (args.format === "text") {
-        yield* Effect.tryPromise({
-          try: () => TerminalUI.success(`${setting.label} → ${formatSettingValue({ config: nextConfig, setting })}`),
-          catch: (error) => error,
-        });
-        return;
-      }
-      yield* Effect.tryPromise({
-        try: () =>
-          TerminalUI.showDocument({
-            _tag: "configured",
-            scope: args.scope,
-            setting: setting.name,
-            value: nextConfig[setting.key],
-            owner,
-          }),
-        catch: (error) => error,
-      });
-    }),
-).pipe(Command.withDescription("Set one managed setting"));
+  if (isDeclined) {
+    await TerminalUI.showCancelled(options);
+    return;
+  }
 
-const resetCommand = Command.make(
-  "reset",
-  { setting: settingArgument.pipe(Args.optional), scope: scopeOption, yes: yesOption, format: formatOption },
-  (args) =>
-    Effect.gen(function* () {
-      if (Option.isNone(args.setting)) {
-        const confirmed = yield* Effect.tryPromise({
-          try: () =>
-            confirmDestructive({
-              yes: args.yes,
-              question: `Reset every ${args.scope} setting to its Schema default?`,
-              missingYesIssue: "Non-interactive full config reset requires --yes.",
-            }),
-          catch: (error) => error,
-        });
-        if (!confirmed) {
-          yield* Effect.tryPromise({ try: () => TerminalUI.showCancelled(args), catch: (error) => error });
-          return;
-        }
+  const target = await locateConfigTarget(options.scope);
+  const owner = await saveConfig({ target, configuration: { _tag: "reset" } }, request.abortSignal);
 
-        const target = yield* Effect.tryPromise({
-          try: () => locateConfigTarget(args.scope),
-          catch: (error) => error,
-        });
-        const owner = yield* Effect.tryPromise({
-          try: (signal) => saveConfig({ target, configuration: { _tag: "reset" } }, signal),
-          catch: (error) => error,
-        });
-        if (args.format === "json") {
-          yield* Effect.tryPromise({
-            try: () => TerminalUI.showDocument({ _tag: "reset", scope: args.scope, config: defaultConfig, owner }),
-            catch: (error) => error,
-          });
-        } else {
-          yield* Effect.tryPromise({
-            try: () => TerminalUI.success(`All ${args.scope} settings reset to Schema defaults.`),
-            catch: (error) => error,
-          });
-        }
+  const isJsonFormat = options.format === "json";
+  if (isJsonFormat) {
+    await TerminalUI.showDocument({ _tag: "reset", scope: options.scope, config: defaultConfig, owner });
+    return;
+  }
+
+  await TerminalUI.success(`All ${options.scope} settings reset to Schema defaults.`);
+};
+
+const resetOneSetting = async (request: {
+  readonly settingName: string;
+  readonly options: ScopeYesOptions;
+  readonly abortSignal: AbortSignal;
+}): Promise<void> => {
+  const { options } = request;
+  const setting = findConfigSetting(request.settingName);
+  const current = await readConfig(options.scope);
+  const nextConfig = withSettingValue({
+    config: current.config,
+    key: setting.key,
+    value: defaultSettingValue(setting.key),
+  });
+  const owner = await saveConfig(
+    { target: current, configuration: { _tag: "selected", config: nextConfig } },
+    request.abortSignal,
+  );
+
+  const isJsonFormat = options.format === "json";
+  if (isJsonFormat) {
+    await TerminalUI.showDocument({
+      _tag: "reset",
+      scope: options.scope,
+      setting: setting.name,
+      config: nextConfig,
+      owner,
+    });
+    return;
+  }
+
+  await TerminalUI.success(`${setting.label} reset to ${formatSettingValue({ config: nextConfig, setting })}`);
+};
+
+const createResetCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("reset")
+    .description("Reset one setting or every setting to Schema defaults")
+    .addArgument(createSettingArgument("[setting]"))
+    .addOption(scopeOption)
+    .addOption(yesOption)
+    .addOption(formatOption)
+    .action(async (settingName: string | undefined, options: ScopeYesOptions) => {
+      const isEverySettingReset = settingName == null;
+      if (isEverySettingReset) {
+        await resetEverySetting({ options, abortSignal });
         return;
       }
 
-      const setting = args.setting.value;
-      const current = yield* Effect.tryPromise({ try: () => readConfig(args.scope), catch: (error) => error });
-      const nextConfig = yield* Effect.try({
-        try: () =>
-          withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
-        catch: (error) => error,
-      });
-      const owner = yield* Effect.tryPromise({
-        try: (signal) =>
-          saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
-        catch: (error) => error,
-      });
-      if (args.format === "json") {
-        yield* Effect.tryPromise({
-          try: () =>
-            TerminalUI.showDocument({
-              _tag: "reset",
-              scope: args.scope,
-              setting: setting.name,
-              config: nextConfig,
-              owner,
-            }),
-          catch: (error) => error,
-        });
-      } else {
-        yield* Effect.tryPromise({
-          try: () =>
-            TerminalUI.success(`${setting.label} reset to ${formatSettingValue({ config: nextConfig, setting })}`),
-          catch: (error) => error,
-        });
-      }
-    }),
-).pipe(Command.withDescription("Reset one setting or every setting to Schema defaults"));
+      await resetOneSetting({ settingName, options, abortSignal });
+    });
 
-export const configCommand = Command.make("config").pipe(
-  Command.withDescription("Inspect or change managed configuration"),
-  Command.withSubcommands([showCommand, setCommand, resetCommand]),
-);
+export const createConfigCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("config")
+    .description("Inspect or change managed configuration")
+    .addCommand(createShowCommand())
+    .addCommand(createSetCommand(abortSignal))
+    .addCommand(createResetCommand(abortSignal));

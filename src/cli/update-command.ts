@@ -1,69 +1,64 @@
-/** `agent-setup update [feature-id...]` — refresh every installed feature and keep the receipt selection. */
-
-import { Command } from "@effect/cli";
-import { Effect } from "effect";
+import type { Command } from "commander";
 
 import { destinationForScope, scanHost } from "../config/host-scan.js";
 import { preparePackage } from "../install/prepare-package.js";
 import { update } from "../install/update.js";
-import { featureIdsArgument, formatOption, scopeOption } from "./cli-options.js";
+import { createCommand, featureIdsArgument, formatOption, type ScopeOptions, scopeOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const showUpdate = (updateSummary: {
+interface UpdateSummary {
   readonly _tag: "updated" | "unchanged";
   readonly scope: string;
   readonly features: ReadonlyArray<string>;
-}) => {
+}
+
+export const showUpdate = async (updateSummary: UpdateSummary): Promise<void> => {
   const features = `${updateSummary.features.join(", ")} (${updateSummary.scope})`;
-  return Effect.tryPromise({
-    try: () =>
-      TerminalUI.success(updateSummary._tag === "updated" ? `Updated ${features}` : `Already current: ${features}`),
-    catch: (error) => error,
-  });
+  const isUpdatedNow = updateSummary._tag === "updated";
+  await TerminalUI.success(isUpdatedNow ? `Updated ${features}` : `Already current: ${features}`);
 };
 
-export const updateCommand = Command.make(
-  "update",
-  {
-    featureIds: featureIdsArgument("Feature IDs that must already be installed; the whole installation is refreshed"),
-    scope: scopeOption,
-    format: formatOption,
-  },
-  (args) =>
-    Effect.gen(function* () {
-      const isTextFormat = args.format === "text";
+export const createUpdateCommand = (abortSignal: AbortSignal): Command =>
+  createCommand("update")
+    .description("Refresh every installed feature and keep the receipt selection")
+    .addArgument(featureIdsArgument("Feature IDs that must already be installed; the whole installation is refreshed"))
+    .addOption(scopeOption)
+    .addOption(formatOption)
+    .action(async (featureIds: ReadonlyArray<string>, options: ScopeOptions) => {
+      const isJsonFormat = options.format === "json";
+      const isTextFormat = options.format === "text";
+
       if (isTextFormat) {
-        yield* Effect.tryPromise({ try: () => TerminalUI.intro("update"), catch: (error) => error });
+        await TerminalUI.intro("update");
       }
-      const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
+
+      const host = await scanHost();
       const destination = destinationForScope({
-        scope: args.scope,
+        scope: options.scope,
         homeRoot: host.homeRoot,
         projectRoot: host.projectRoot,
       });
-      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
-      const updateSummary = yield* Effect.tryPromise({
-        try: (signal) =>
-          update(
-            {
-              destination,
-              host: { homeRoot: host.homeRoot },
-              preparedPackage,
-              features: args.featureIds.length === 0 ? { _tag: "preserve" } : { _tag: "refresh", ids: args.featureIds },
-              agents: { _tag: "detected", evidence: host.agentEvidence },
-              interaction: { _tag: "scripted" },
-              configuration: { _tag: "automatic" },
-            },
-            signal,
-          ),
-        catch: (error) => error,
-      });
-      if (args.format === "json") {
-        yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(updateSummary), catch: (error) => error });
+      const preparedPackage = await preparePackage();
+      const isNoFeatureGiven = featureIds.length === 0;
+      const featureChoice = isNoFeatureGiven ? { _tag: "preserve" } : { _tag: "refresh", ids: featureIds };
+      const updateSummary = await update(
+        {
+          destination,
+          host: { homeRoot: host.homeRoot },
+          preparedPackage,
+          features: featureChoice,
+          agents: { _tag: "detected", evidence: host.agentEvidence },
+          interaction: { _tag: "scripted" },
+          configuration: { _tag: "automatic" },
+        },
+        abortSignal,
+      );
+
+      if (isJsonFormat) {
+        await TerminalUI.showDocument(updateSummary);
         return;
       }
 
-      yield* showUpdate(updateSummary);
-      yield* Effect.tryPromise({ try: () => TerminalUI.outro("Done."), catch: (error) => error });
-    }),
-).pipe(Command.withDescription("Refresh every installed feature and keep the receipt selection"));
+      await showUpdate(updateSummary);
+      await TerminalUI.outro("Done.");
+    });
