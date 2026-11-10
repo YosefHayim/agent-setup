@@ -6,8 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { managedConfigPath } from "../config/config-file.js";
-import { defaultConfig } from "../config/config-schema.js";
+import { managedSettingsPath } from "../config/config-file.js";
+import { defaultSettings } from "../config/config-schema.js";
 import { hooksPath } from "../install/install-paths.js";
 import { decodeHookSettings } from "./hook-config.js";
 
@@ -18,7 +18,7 @@ describe("hook config resolution", () => {
   it("keeps the dependency-free hook defaults aligned with application defaults", () => {
     const hookDefaults = decodeHookSettings({});
     for (const [field, value] of Object.entries(hookDefaults)) {
-      expect(value).toEqual(Object.getOwnPropertyDescriptor(defaultConfig, field)?.value);
+      expect(value).toEqual(Object.getOwnPropertyDescriptor(defaultSettings, field)?.value);
     }
   });
 
@@ -28,7 +28,7 @@ describe("hook config resolution", () => {
     try {
       // Install copies the shared files in src/hooks into each feature's lib/ under hooksPath.
       const installedModule = path.join(installRoot, hooksPath, "scratch-folder-guard", "lib", "hook-config.ts");
-      const installedSettings = path.join(installRoot, managedConfigPath);
+      const installedSettings = path.join(installRoot, managedSettingsPath);
       mkdirSync(path.dirname(installedModule), { recursive: true });
       copyFileSync(settingsModuleOrigin, installedModule);
       // Installed hooks are .js that Node detects as ES modules. On Node 22, tsx loads a .ts copy outside any
@@ -55,7 +55,7 @@ describe("hook config resolution", () => {
       expect(printed.installRoot).toBe(path.join(installRoot, ".claude", "agent-setup"));
       expect(printed.config.debugLogs).toBe(true);
       expect(printed.config.sessionRehomeRoots).toEqual(["Work"]);
-      expect(printed.config.diskCleanupRoots).toEqual(defaultConfig.diskCleanupRoots);
+      expect(printed.config.diskCleanupRoots).toEqual(defaultSettings.diskCleanupRoots);
     } finally {
       rmSync(installRoot, { recursive: true, force: true });
     }
@@ -63,7 +63,7 @@ describe("hook config resolution", () => {
 
   it("keeps the default for a field whose value has the wrong shape", () => {
     const settings = decodeHookSettings({ debugLogs: "yes" });
-    expect(settings.debugLogs).toBe(defaultConfig.debugLogs);
+    expect(settings.debugLogs).toBe(defaultSettings.debugLogs);
   });
 
   it("trims root folders and drops blank ones, which would scan the whole home folder", () => {

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { type FeatureDefinition, featureCatalog } from "#src/catalog/feature-catalog.js";
-import { defaultConfig, settingList } from "#src/config/config-schema.js";
+import { defaultSettings, settingList } from "#src/config/config-schema.js";
 import { environmentVariables } from "#src/config/environment-variables.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -111,7 +111,7 @@ const readSettingsSection = (): string =>
     "| --- | --- | --- | --- |",
     ...settingList.map(
       (setting) =>
-        `| \`${setting.name}\` | \`${setting.key}\` | ${readDefaultString(defaultConfig[setting.key])} | ${readTableCell(setting.description)} |`,
+        `| \`${setting.name}\` | \`${setting.key}\` | ${readDefaultString(defaultSettings[setting.key])} | ${readTableCell(setting.description)} |`,
     ),
     "",
     "### Environment variables",

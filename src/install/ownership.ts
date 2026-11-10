@@ -239,13 +239,13 @@ export const isPathsConflict = (left: string, right: string): boolean =>
   isNestedOrEqual(left.toLowerCase(), right.toLowerCase());
 
 const listPointerConflictIssues = (owned: ReadonlyArray<{ readonly pointer: string }>): Array<ZodIssueDetail> =>
-  owned.flatMap((ownedLine, index) =>
+  owned.flatMap((ownedEvent, index) =>
     owned.slice(index + 1).flatMap((candidate, offset) =>
-      isNestedOrEqual(ownedLine.pointer, candidate.pointer)
+      isNestedOrEqual(ownedEvent.pointer, candidate.pointer)
         ? [
             {
               path: [index + offset + 1, "pointer"],
-              message: `JSON pointer ${candidate.pointer} conflicts with ${ownedLine.pointer}.`,
+              message: `JSON pointer ${candidate.pointer} conflicts with ${ownedEvent.pointer}.`,
             },
           ]
         : [],
@@ -316,7 +316,7 @@ const ownedHookEventSchema = z.strictObject({
 
 export type OwnedHookEvent = z.infer<typeof ownedHookEventSchema>;
 
-export const hookLinesOwnershipSchema = z
+export const hookEntriesOwnershipSchema = z
   .strictObject({
     _tag: z.literal("hookEntries"),
     filePreviouslyPresent: z
@@ -340,7 +340,7 @@ export const hookLinesOwnershipSchema = z
     ),
   );
 
-export type HookLinesOwnership = z.infer<typeof hookLinesOwnershipSchema>;
+export type HookEntriesOwnership = z.infer<typeof hookEntriesOwnershipSchema>;
 
 const yamlSequenceFieldsSchema = z.strictObject({
   _tag: z.literal("yamlSequenceValue"),
@@ -390,7 +390,7 @@ const ownershipSchema = z.union([
   wholeFileOwnershipSchema,
   managedBlockOwnershipSchema,
   documentFieldsOwnershipSchema,
-  hookLinesOwnershipSchema,
+  hookEntriesOwnershipSchema,
   yamlSequenceFieldOwnershipSchema,
 ]);
 

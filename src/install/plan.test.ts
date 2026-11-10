@@ -31,14 +31,14 @@ const skillFile = {
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: { _tag: "priorFile", bytes: previousSkillBytes } },
 };
 
-const ruleFileLine = {
+const ruleOwnedFile = {
   path: ".cursor/rules/make-code-readable.mdc",
   kind: { _tag: "rule" },
   owner: createAgentOwner(["cursor"]),
   ownership: { _tag: "wholeFile", installedHash: oldHash, previous: missingPrevious },
 };
 
-const instructionFileLine = {
+const instructionOwnedFile = {
   path: "AGENTS.md",
   kind: { _tag: "instruction" },
   owner: createAgentOwner(["cline", "codex"]),
@@ -118,8 +118,8 @@ const managedSettingsFile = {
 const desiredFiles = [
   runtimeFile,
   skillFile,
-  ruleFileLine,
-  instructionFileLine,
+  ruleOwnedFile,
+  instructionOwnedFile,
   documentReferenceFile,
   yamlReferenceFile,
   settingsFile,
@@ -392,11 +392,11 @@ describe("checkPlan", () => {
     { name: "skill owned by the application", file: { ...skillFile, owner: applicationOwner } },
     {
       name: "instruction with whole-file ownership",
-      file: { ...instructionFileLine, ownership: skillFile.ownership },
+      file: { ...instructionOwnedFile, ownership: skillFile.ownership },
     },
     {
       name: "settings with managed-block ownership",
-      file: { ...settingsFile, ownership: instructionFileLine.ownership },
+      file: { ...settingsFile, ownership: instructionOwnedFile.ownership },
     },
   ])("rejects invalid ownership-kind combination: $name", ({ file }) => {
     expect(readRejectionMessage(() => checkPlan({ ...completePlan, operations: [write(file)] }))).toContain(
@@ -410,7 +410,7 @@ describe("checkPlan", () => {
   ])("rejects $name", ({ owner }) => {
     expect(
       readRejectionMessage(() =>
-        checkPlan({ ...completePlan, operations: [write({ ...instructionFileLine, owner })] }),
+        checkPlan({ ...completePlan, operations: [write({ ...instructionOwnedFile, owner })] }),
       ),
     ).toContain("agentIds");
   });
@@ -478,11 +478,11 @@ describe("checkPlan", () => {
   });
 
   it("allows deletion only when the receipt proves the whole file or partial host file was originally absent", () => {
-    const absentPartialFile = attachOwnership(instructionFileLine, { filePreviouslyPresent: false });
+    const absentPartialFile = attachOwnership(instructionOwnedFile, { filePreviouslyPresent: false });
 
     expect(() => checkPlan(createRemovalPlan([remove(runtimeFile), remove(absentPartialFile)]))).not.toThrow();
     expect(() => checkPlan(createRemovalPlan([remove(skillFile)]))).toThrow();
-    expect(() => checkPlan(createRemovalPlan([remove(instructionFileLine)]))).toThrow();
+    expect(() => checkPlan(createRemovalPlan([remove(instructionOwnedFile)]))).toThrow();
   });
 
   it.each([
@@ -496,7 +496,7 @@ describe("checkPlan", () => {
   });
 
   it("requires empty unowned bytes before deleting an absent partial host", () => {
-    const absentPartialFile = attachOwnership(instructionFileLine, { filePreviouslyPresent: false });
+    const absentPartialFile = attachOwnership(instructionOwnedFile, { filePreviouslyPresent: false });
 
     expect(
       readRejectionMessage(() =>
@@ -506,7 +506,7 @@ describe("checkPlan", () => {
   });
 
   it("restores an originally present partial file even when its final bytes are empty", () => {
-    expect(() => checkPlan(createRemovalPlan([restore(instructionFileLine, new Uint8Array())]))).not.toThrow();
+    expect(() => checkPlan(createRemovalPlan([restore(instructionOwnedFile, new Uint8Array())]))).not.toThrow();
   });
 
   it("requires restore and remove actions to be absent from a published receipt", () => {
@@ -547,7 +547,7 @@ describe("planInstall", () => {
 
   it("adds, changes, removes only receipt-owned stale entries, omits unchanged state, and preserves restoration metadata", () => {
     const unchanged = runtimeFile;
-    const stale = { ...ruleFileLine, path: ".cursor/rules/removed.mdc" };
+    const stale = { ...ruleOwnedFile, path: ".cursor/rules/removed.mdc" };
     const desiredChanged = {
       ...skillFile,
       ownership: { _tag: "wholeFile", installedHash: newHash, previous: missingPrevious },
@@ -713,7 +713,7 @@ describe("planInstall", () => {
   });
 
   it("preserves retained managed-block and YAML restoration history", () => {
-    const desiredInstruction = attachOwnership(instructionFileLine, {
+    const desiredInstruction = attachOwnership(instructionOwnedFile, {
       filePreviouslyPresent: false,
       installedBodyHash: newHash,
     });
@@ -723,7 +723,7 @@ describe("planInstall", () => {
     const expectedYaml = attachOwnership(yamlReferenceFile, { keyPreviouslyPresent: false, insertedPrefix: "\n" });
     const plan = planInstall(
       installRequest({
-        previous: [instructionFileLine, previousYaml],
+        previous: [instructionOwnedFile, previousYaml],
         desired: [desiredInstruction, desiredYaml],
       }),
     );
@@ -776,7 +776,7 @@ describe.each([
 
   it.each([
     { name: "a missing", restorations: [remove(runtimeFile)] },
-    { name: "an extra", restorations: [...exactRestorations, remove(ruleFileLine)] },
+    { name: "an extra", restorations: [...exactRestorations, remove(ruleOwnedFile)] },
     {
       name: "a duplicate",
       restorations: [restore(skillFile, previousSkillBytes), restore(skillFile, previousSkillBytes)],
@@ -796,11 +796,11 @@ describe.each([
 describe("planUninstall", () => {
   it("uses exact reverse-order final restorations from receipt entries and removes the receipt last", () => {
     const restorations = [
-      restore(instructionFileLine, previousInstructionBytes),
+      restore(instructionOwnedFile, previousInstructionBytes),
       restore(skillFile, previousSkillBytes),
       remove(runtimeFile),
     ];
-    const plan = planUninstall(createUninstallRequest([runtimeFile, skillFile, instructionFileLine], restorations));
+    const plan = planUninstall(createUninstallRequest([runtimeFile, skillFile, instructionOwnedFile], restorations));
 
     expect(plan.operations).toEqual(restorations);
     expect(plan.receipt).toEqual({ _tag: "remove", target: receiptTarget, expectedCurrent: expectedPresent });

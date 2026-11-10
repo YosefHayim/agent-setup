@@ -10,7 +10,7 @@ import {
   documentPointerSchema,
   fileKindSchema,
   fileOwnerSchema,
-  hookLinesOwnershipSchema,
+  hookEntriesOwnershipSchema,
   managedBlockOwnershipSchema,
   type OwnedFile,
   ownedFileSchema,
@@ -90,7 +90,7 @@ const settingsDocumentFieldsOwnership = createDocumentFields([
   },
 ]);
 
-const createHookLines = (
+const createHookEntries = (
   events: ReadonlyArray<{ pointer: string; entries: ReadonlyArray<string> }>,
   createdContainers: ReadonlyArray<string> = [],
 ) => ({
@@ -165,14 +165,14 @@ const createStrictDecoder =
     zodSchema.parse(uncheckedReceipt);
 
 const decodeReceipt = createStrictDecoder(receiptSchema);
-const decodeLine = createStrictDecoder(ownedFileSchema);
+const decodeOwnedFile = createStrictDecoder(ownedFileSchema);
 const decodeOwner = createStrictDecoder(fileOwnerSchema);
 const decodeKind = createStrictDecoder(fileKindSchema);
 const decodePreviousFile = createStrictDecoder(previousFileFieldSchema);
 const decodePreviousDocument = createStrictDecoder(previousDocumentFieldSchema);
 const decodeDocumentFields = createStrictDecoder(documentFieldsOwnershipSchema);
 const decodeYamlSequenceField = createStrictDecoder(yamlSequenceFieldOwnershipSchema);
-const decodeHookLines = createStrictDecoder(hookLinesOwnershipSchema);
+const decodeHookEntries = createStrictDecoder(hookEntriesOwnershipSchema);
 
 const completeReceipt = decodeReceipt(completeReceiptFields);
 const completeReceiptDocument = encodeReceiptDocument(completeReceipt);
@@ -228,15 +228,15 @@ describe("receiptSchema", () => {
       "managedConfig",
       "receipt",
     ];
-    const receiptLine = createOwnedFile("receipt", {
+    const receiptOwnedFile = createOwnedFile("receipt", {
       owner: applicationOwner,
       path: ".claude/agent-setup/receipt.json",
       ownership: wholeFileOwnership,
     });
 
     expect(kindTags.map((_tag) => decodeKind({ _tag })._tag)).toEqual(kindTags);
-    expect(decodeLine(receiptLine).kind._tag).toBe("receipt");
-    expect(() => decodeReceipt(createReceiptWithFiles([receiptLine]))).toThrow(/itself|receipt/i);
+    expect(decodeOwnedFile(receiptOwnedFile).kind._tag).toBe("receipt");
+    expect(() => decodeReceipt(createReceiptWithFiles([receiptOwnedFile]))).toThrow(/itself|receipt/i);
   });
 
   it("round-trips every receipt field through the JSON codec", () => {
@@ -310,7 +310,7 @@ describe("receiptSchema", () => {
     { name: "kind", decode: () => decodeKind({ _tag: "runtime", extra: true }) },
     { name: "previous file", decode: () => decodePreviousFile({ _tag: "missing", extra: true }) },
     { name: "previous JSON field", decode: () => decodePreviousDocument({ _tag: "field", field: null, extra: true }) },
-    { name: "owned file", decode: () => decodeLine({ ...completeReceiptFields.ownedFiles[0], extra: true }) },
+    { name: "owned file", decode: () => decodeOwnedFile({ ...completeReceiptFields.ownedFiles[0], extra: true }) },
     {
       name: "owned JSON field",
       decode: () => decodeDocumentFields(createDocumentFields([{ ...createOwnedField("/field"), extra: true }])),
@@ -396,8 +396,8 @@ describe("receiptSchema", () => {
   });
 
   it("records the hash of each owned hook entry per event with exact created containers", () => {
-    const ownership = decodeHookLines(
-      createHookLines([{ pointer: "/hooks/Stop", entries: [installedFieldHash, installedFieldHash] }], ["/hooks"]),
+    const ownership = decodeHookEntries(
+      createHookEntries([{ pointer: "/hooks/Stop", entries: [installedFieldHash, installedFieldHash] }], ["/hooks"]),
     );
 
     expect(ownership.createdContainers).toEqual(["/hooks"]);
@@ -420,12 +420,14 @@ describe("receiptSchema", () => {
       ],
     },
   ])("rejects hook entry ownership with a $name", ({ events }) => {
-    expect(() => decodeHookLines(createHookLines(events))).toThrow();
+    expect(() => decodeHookEntries(createHookEntries(events))).toThrow();
   });
 
   it("rejects a hook entry created container that holds no owned event", () => {
     expect(() =>
-      decodeHookLines(createHookLines([{ pointer: "/hooks/Stop", entries: [installedFieldHash] }], ["/permissions"])),
+      decodeHookEntries(
+        createHookEntries([{ pointer: "/hooks/Stop", entries: [installedFieldHash] }], ["/permissions"]),
+      ),
     ).toThrow(/container|ancestor/i);
   });
 
@@ -488,24 +490,24 @@ describe("receiptSchema", () => {
     createOwnedFile("instructionLink", { owner: agentOwner, path: "config.json", ownership: managedBlockOwnership }),
     createOwnedFile("managedConfig", { owner: agentOwner, path: "managed-config.json", ownership: wholeFileOwnership }),
   ])("rejects incompatible owner or ownership combinations", (line) => {
-    expect(() => decodeLine(line)).toThrow(/owner|ownership/i);
+    expect(() => decodeOwnedFile(line)).toThrow(/owner|ownership/i);
   });
 
-  const runtimeLine = createOwnedFile("runtime", {
+  const runtimeOwnedFile = createOwnedFile("runtime", {
     owner: applicationOwner,
     path: "hooks/guard.js",
     ownership: wholeFileOwnership,
   });
-  const instructionLine = createOwnedFile("instruction", {
+  const instructionOwnedFile = createOwnedFile("instruction", {
     owner: sharedAgentOwner,
     path: "AGENTS.md",
     ownership: managedBlockOwnership,
   });
 
   it.each([
-    { name: "duplicate", files: [runtimeLine, runtimeLine] },
-    { name: "parent-child", files: [runtimeLine, { ...runtimeLine, path: "hooks/guard.js/map" }] },
-    { name: "case-folded", files: [instructionLine, { ...instructionLine, path: "agents.md" }] },
+    { name: "duplicate", files: [runtimeOwnedFile, runtimeOwnedFile] },
+    { name: "parent-child", files: [runtimeOwnedFile, { ...runtimeOwnedFile, path: "hooks/guard.js/map" }] },
+    { name: "case-folded", files: [instructionOwnedFile, { ...instructionOwnedFile, path: "agents.md" }] },
   ])("rejects $name file paths", ({ files }) => {
     expect(() => decodeReceipt(createReceiptWithFiles(files))).toThrow(/path/i);
   });

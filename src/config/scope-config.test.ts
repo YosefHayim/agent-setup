@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { managedConfigPath } from "./config-file.js";
-import { defaultConfig } from "./config-schema.js";
+import { managedSettingsPath } from "./config-file.js";
+import { defaultSettings } from "./config-schema.js";
 import { readSettingsAt } from "./scope-config.js";
 
 const temporaryDirectories: string[] = [];
@@ -30,7 +30,7 @@ const makeRoots = async (): Promise<{ homeRoot: string; projectRoot: string }> =
 };
 
 const writeSettings = async (request: { readonly root: string; readonly config: object }): Promise<void> => {
-  const settingsPath = join(request.root, managedConfigPath);
+  const settingsPath = join(request.root, managedSettingsPath);
   await mkdir(dirname(settingsPath), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(request.config)}\n`);
 };
@@ -43,13 +43,13 @@ describe("readConfigAt", () => {
 
     const settingsAtProjectRoot = await readSettingsAt({ root: projectRoot, homeRoot });
 
-    expect(settingsAtProjectRoot).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
+    expect(settingsAtProjectRoot).toEqual({ ...defaultSettings, sessionRehomeRoots: ["vendor"] });
   });
 
   it("falls back to the global config.json, then to defaults", async () => {
     const { homeRoot, projectRoot } = await makeRoots();
 
-    expect(await readSettingsAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
+    expect(await readSettingsAt({ root: projectRoot, homeRoot })).toEqual(defaultSettings);
 
     await writeSettings({ root: homeRoot, config: { debugLogs: true } });
     expect((await readSettingsAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);

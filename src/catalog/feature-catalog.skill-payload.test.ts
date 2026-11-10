@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-import { featureCatalog, skillsForFeatures } from "./feature-catalog.js";
+import { featureCatalog, listSkillsForFeatures } from "./feature-catalog.js";
 
 type Frontmatter = {
   name?: string;
@@ -29,7 +29,7 @@ const parseFrontmatter = (file: string): { frontmatter: Frontmatter | null; body
 
 const skillRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
 
-const installedSkills = skillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => {
+const installedSkills = listSkillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => {
   const feature = featureCatalog.find(
     (candidate) => candidate.installedSkill._tag === "skill" && candidate.installedSkill.id === skill.id,
   );

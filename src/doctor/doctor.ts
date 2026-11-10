@@ -10,7 +10,7 @@ import {
   type FeaturePlatform,
   featureCatalog,
 } from "#src/catalog/feature-catalog.js";
-import { type ConfigFileSnapshot, managedConfigPath, readConfigFile } from "#src/config/config-file.js";
+import { type ConfigFileSnapshot, managedSettingsPath, readSettingsFile } from "#src/config/config-file.js";
 import type { Config } from "#src/config/config-schema.js";
 import { hostPlatformSchema } from "#src/config/host-scan.js";
 import { installationDestinationSchema, receiptPath } from "#src/install/install-paths.js";
@@ -83,8 +83,8 @@ interface Inspection {
 const createInspectError = (issue: string, cause: unknown): Error =>
   new Error(`Cannot inspect agent-setup: ${issue}`, { cause });
 
-const decodeHealthRequest = (details: unknown): HealthRequest => {
-  const requestCheck = healthRequestSchema.safeParse(details);
+const decodeHealthRequest = (uncheckedRequest: unknown): HealthRequest => {
+  const requestCheck = healthRequestSchema.safeParse(uncheckedRequest);
 
   const isRequestAccepted = requestCheck.success;
 
@@ -214,11 +214,11 @@ const readReceiptOrInstallError = async (receiptFilePath: string): Promise<Recei
 };
 
 const inspectInstallation = async (request: HealthRequest): Promise<Inspection> => {
-  const settingsFilePath = path.join(request.destination.root, managedConfigPath);
+  const settingsFilePath = path.join(request.destination.root, managedSettingsPath);
   const receiptFilePath = path.join(request.destination.root, receiptPath);
 
   try {
-    const settingsSnapshot = await readConfigFile(settingsFilePath);
+    const settingsSnapshot = await readSettingsFile(settingsFilePath);
     const receiptSnapshot = await readReceiptOrInstallError(receiptFilePath);
 
     const isReceiptMissing = receiptSnapshot._tag === "missing";
@@ -351,8 +351,8 @@ const findDiscrepancies = (
 };
 
 // Compares the strict receipt and config with catalog-derived host observations, without writing anything.
-export const checkHealth = async (details: unknown): Promise<HealthReport> => {
-  const request = decodeHealthRequest(details);
+export const checkHealth = async (uncheckedRequest: unknown): Promise<HealthReport> => {
+  const request = decodeHealthRequest(uncheckedRequest);
   const inspection = await inspectInstallation(request);
   const agents = checkAgentHealth(request.agentEvidence, inspection.receipt);
   const discrepancies = findDiscrepancies(request, inspection, agents);

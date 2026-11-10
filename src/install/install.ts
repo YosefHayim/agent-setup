@@ -7,11 +7,11 @@ import {
   type ConfigFileSnapshot,
   type ManagedConfigPlan,
   type ManagedConfigRequest,
-  managedConfigPath,
-  planManagedConfig,
-  readConfigFile,
+  managedSettingsPath,
+  planManagedSettings,
+  readSettingsFile,
 } from "#src/config/config-file.js";
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { createAgentWrites } from "./agent-files.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";
@@ -129,7 +129,7 @@ const readAutomaticSettingsSelection = (selectionRead: {
     };
   }
 
-  return { _tag: "selected", config: defaultConfig };
+  return { _tag: "selected", config: defaultSettings };
 };
 
 type ManagedSettingsInspection = {
@@ -145,7 +145,7 @@ const readInheritedSettings = async (inheritedRead: {
   const isInheritedSettingsNeeded =
     inheritedRead.request.destination._tag === "project" && inheritedRead.target._tag === "missing";
   if (isInheritedSettingsNeeded) {
-    return readConfigFile(path.join(inheritedRead.request.host.homeRoot, managedConfigPath));
+    return readSettingsFile(path.join(inheritedRead.request.host.homeRoot, managedSettingsPath));
   }
 
   return null;
@@ -154,7 +154,7 @@ const readInheritedSettings = async (inheritedRead: {
 // Decode config.json only when the automatic selection reuses or inherits it; an explicit or reset
 // configuration needs just its bytes, so a file the schema no longer accepts cannot block replacing it.
 const inspectManagedSettings = async (request: InstallRequest): Promise<ManagedSettingsInspection> => {
-  const settingsPath = path.join(request.destination.root, managedConfigPath);
+  const settingsPath = path.join(request.destination.root, managedSettingsPath);
   switch (request.configuration._tag) {
     case "selected":
       return {
@@ -164,10 +164,10 @@ const inspectManagedSettings = async (request: InstallRequest): Promise<ManagedS
     case "reset":
       return {
         file: await readFileSnapshot(settingsPath),
-        selection: { _tag: "selected", config: defaultConfig },
+        selection: { _tag: "selected", config: defaultSettings },
       } satisfies ManagedSettingsInspection;
     case "automatic": {
-      const target = await readConfigFile(settingsPath);
+      const target = await readSettingsFile(settingsPath);
       const globalSnapshot = await readInheritedSettings({ request, target });
 
       return {
@@ -184,7 +184,7 @@ const resetPreviousSettingsFile = (previousFileReset: {
   receipt: Receipt | null;
   snapshot: FileSnapshot;
 }): PreviousFileValue => {
-  const file = readPreviousReceiptFile(previousFileReset.receipt, managedConfigPath);
+  const file = readPreviousReceiptFile(previousFileReset.receipt, managedSettingsPath);
 
   const isSettingsNotReceipted = file == null;
   if (isSettingsNotReceipted) {
@@ -195,7 +195,7 @@ const resetPreviousSettingsFile = (previousFileReset: {
 
   const isOwnershipIncompatible = ownership._tag !== "wholeFile";
   if (isOwnershipIncompatible) {
-    throw createInstallError(`Receipted whole-file file ${managedConfigPath} has incompatible ownership.`);
+    throw createInstallError(`Receipted whole-file file ${managedSettingsPath} has incompatible ownership.`);
   }
 
   return ownership.previous;
@@ -216,7 +216,7 @@ const pickPreviousSettingsFile = (previousFilePick: {
 
   return readPreviousWholeFile({
     receipt: previousFilePick.previousReceipt,
-    filePath: managedConfigPath,
+    filePath: managedSettingsPath,
     snapshot: previousFilePick.inspection.file,
     desiredBytes: null,
   });
@@ -229,7 +229,7 @@ const createManagedSettingsPlan = (managedPlanning: {
 }): ManagedConfigPlan => {
   const previousSettingsFile = pickPreviousSettingsFile(managedPlanning);
 
-  return planManagedConfig({
+  return planManagedSettings({
     scope: managedPlanning.request.destination._tag,
     selection: managedPlanning.inspection.selection,
     previousConfigFile: previousSettingsFile,
@@ -283,8 +283,8 @@ const planHookSettings = async (hookSettingsRequest: {
 }): Promise<FileChange[]> => {
   const claude = agentCatalog.find((agent) => agent.id === "claude-code");
 
-  const isClaudeCatalogLineMissing = claude == null;
-  if (isClaudeCatalogLineMissing) {
+  const isClaudeCatalogEntryMissing = claude == null;
+  if (isClaudeCatalogEntryMissing) {
     throw createInstallError("Claude Code catalog entry is missing.");
   }
 

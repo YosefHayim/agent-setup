@@ -5,7 +5,7 @@ import { z } from "zod";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import {
   type DocumentFieldsOwnership,
-  type HookLinesOwnership,
+  type HookEntriesOwnership,
   isOwnedFilesEqual,
   isPathsConflict,
   type OwnedFile,
@@ -100,7 +100,7 @@ const listDesiredWriteIssues = (desired: DesiredStatus): ReadonlyArray<ZodIssueD
     ];
   });
 
-const listDesiredReceiptLineIssues = (desired: DesiredStatus): ReadonlyArray<ZodIssueDetail> =>
+const listDesiredReceiptFileIssues = (desired: DesiredStatus): ReadonlyArray<ZodIssueDetail> =>
   desired.receipt.ownedFiles.flatMap((file, index) => {
     const writeCount = desired.writes.filter((operation) => operation.file.path === file.path).length;
 
@@ -123,7 +123,7 @@ const desiredStatusSchema = z
     writes: z.array(plannedWriteOperationSchema),
   })
   .superRefine((desired, scope) =>
-    addZodIssueDetails(scope, [...listDesiredWriteIssues(desired), ...listDesiredReceiptLineIssues(desired)]),
+    addZodIssueDetails(scope, [...listDesiredWriteIssues(desired), ...listDesiredReceiptFileIssues(desired)]),
   );
 
 type DesiredStatus = z.infer<typeof desiredStatusSchema>;
@@ -177,7 +177,7 @@ const listOwnershipChangeIssues = (retained: RetainedFile): ReadonlyArray<ZodIss
   ];
 };
 
-type DocumentPointerOwnership = DocumentFieldsOwnership | HookLinesOwnership;
+type DocumentPointerOwnership = DocumentFieldsOwnership | HookEntriesOwnership;
 
 const listOwnedDocumentPointers = (ownership: DocumentPointerOwnership): ReadonlyArray<string> => {
   const isDocumentValuesOwnership = ownership._tag === "jsonValues";
@@ -358,9 +358,9 @@ const readPriorEventPresence = (previous: DocumentPointerOwnership): ReadonlyMap
   );
 };
 
-const readPreserveHookLinesRestoration = (
+const readPreserveHookEntriesRestoration = (
   previous: DocumentPointerOwnership,
-  desired: HookLinesOwnership,
+  desired: HookEntriesOwnership,
 ): Ownership => {
   const presence = readPriorEventPresence(previous);
 
@@ -409,9 +409,9 @@ const readPreserveRestoration = (previous: Ownership, desired: Ownership): Owner
 
   const previousDocumentOwnership = readDocumentPointerOwnership(previous);
 
-  const isHookLinesOverDocumentPointer = previousDocumentOwnership != null && desired._tag === "hookEntries";
-  if (isHookLinesOverDocumentPointer) {
-    return readPreserveHookLinesRestoration(previousDocumentOwnership, desired);
+  const isHookEntriesOverDocumentPointer = previousDocumentOwnership != null && desired._tag === "hookEntries";
+  if (isHookEntriesOverDocumentPointer) {
+    return readPreserveHookEntriesRestoration(previousDocumentOwnership, desired);
   }
 
   const isManagedBlockChange = previous._tag === "managedBlock" && desired._tag === "managedBlock";

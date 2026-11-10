@@ -7,7 +7,7 @@ import {
   type FeatureId,
   featureCatalog,
   installedSkillSchema,
-  skillsForFeatures,
+  listSkillsForFeatures,
 } from "#src/catalog/feature-catalog.js";
 import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { decodeStrictString, hashBytes } from "./file-bytes.js";
@@ -242,7 +242,7 @@ interface PreparedSkillsRequest {
 
 export const readPreparedSkills = async (skillsRequest: PreparedSkillsRequest): Promise<Array<PreparedSkill>> => {
   const preparedSkills: Array<PreparedSkill> = [];
-  for (const installedSkill of skillsForFeatures(skillsRequest.featureIds)) {
+  for (const installedSkill of listSkillsForFeatures(skillsRequest.featureIds)) {
     const preparedSkill = await readPreparedSkill(skillsRequest.request.preparedPackage.root, installedSkill);
     preparedSkills.push(preparedSkill);
   }

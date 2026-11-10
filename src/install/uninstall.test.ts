@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "#src/config/config-schema.js";
+import { defaultSettings } from "#src/config/config-schema.js";
 import { install } from "./install.js";
 import { uninstall, uninstallRequestSchema } from "./uninstall.js";
 
@@ -62,7 +62,7 @@ const installRequest = (roots: { root: string; preparedRoot: string }) => ({
   features: { _tag: "selected", ids: ["make-code-readable", "scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
-  configuration: { _tag: "selected", config: { ...defaultConfig, sessionRehomeRoots: ["vendor"] } },
+  configuration: { _tag: "selected", config: { ...defaultSettings, sessionRehomeRoots: ["vendor"] } },
 });
 
 const createUninstallRequest = (root: string) => ({
@@ -77,7 +77,7 @@ describe("uninstall", () => {
   it("restores every receipted format exactly and removes installer-created files", async () => {
     const { root, preparedRoot } = await createWorkspace();
     const originals = {
-      ".claude/agent-setup/config.json": `${JSON.stringify(defaultConfig, null, 2)}\n`,
+      ".claude/agent-setup/config.json": `${JSON.stringify(defaultSettings, null, 2)}\n`,
       ".claude/settings.json": '{\r\n\t"theme":"dark",\r\n\t"hooks": { }\r\n}\r\n',
       "AGENTS.md": "User instructions.\n",
       ".aider.conf.yml": "model: sonnet\n",
