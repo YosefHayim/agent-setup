@@ -1,14 +1,14 @@
-import { codeRootFolders, repoRootsUnder } from "../code-repos.js";
-import { gitSucceeds } from "../git-answers.js";
-import { folderPaths, isInsideAnyFolder } from "./folder-paths.js";
-import { keptWorktreeLine, readKeptWorktrees, saveKeptWorktrees } from "./kept-worktrees.js";
+import { listCodeRootFolders, listRepoRootsUnder } from "../code-repos.js";
+import { isGitSuccessful } from "../git-answers.js";
+import { isInsideAnyFolder, readFolderPaths } from "./folder-paths.js";
+import { readKeptWorktreeLine, readKeptWorktrees, saveKeptWorktrees } from "./kept-worktrees.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linked-worktrees.js";
 import { reportLine } from "./report-line.js";
-import { foldersOwnedBy } from "./session-transcripts.js";
+import { listFoldersOwnedBy } from "./session-transcripts.js";
 import { decideWorktreeCleanup, type WorktreeCleanupDecision } from "./worktree-cleanup-decision.js";
 import { readWorktreeFacts } from "./worktree-facts.js";
 import { removeWorktree } from "./worktree-removal.js";
-import { worktreesInUse } from "./worktrees-in-use.js";
+import { readWorktreesInUse } from "./worktrees-in-use.js";
 
 type WorktreeCleanupRequest = {
   readonly homeRoot: string;
@@ -20,7 +20,8 @@ type WorktreeCleanupRequest = {
 type RemovalPlan = Extract<WorktreeCleanupDecision, { readonly _tag: "remove" }>;
 
 const pushDetail = (request: { readonly pushVerb: string; readonly push: boolean; readonly branch: string }) => {
-  if (!request.push) {
+  const isRequestPushMissing = !request.push;
+  if (isRequestPushMissing) {
     return "nothing to push";
   }
 
@@ -34,13 +35,17 @@ const applyRemoval = (request: {
   readonly dryRun: boolean;
 }): string => {
   const { worktree, plan } = request;
-  if (request.dryRun) {
+  const isDryRun = request.dryRun;
+
+  if (isDryRun) {
     const plannedPush = pushDetail({ pushVerb: "push", push: plan.push, branch: worktree.branch });
     return reportLine({ action: "would remove", detail: plannedPush, target: worktree.folder });
   }
 
   const removal = removeWorktree({ worktree, remote: request.remote, saveChanges: plan.saveChanges, push: plan.push });
-  if (removal._tag === "failed") {
+
+  const isRemoval_tagFailed = removal._tag === "failed";
+  if (isRemoval_tagFailed) {
     return reportLine({ action: "kept", detail: removal.detail, target: worktree.folder });
   }
 
@@ -65,16 +70,17 @@ const cleanUpWorktree = (request: {
 
 // A worktree whose folder is already gone leaves only git's record of it, which prune drops, wherever the folder was.
 // Prune keeps the record of a locked worktree.
-const pruneGoneWorktrees = (request: {
+const listPruneGoneWorktrees = (request: {
   readonly worktrees: ReadonlyArray<LinkedWorktree>;
   readonly dryRun: boolean;
 }): ReadonlyArray<string> => {
   const goneWorktrees = request.worktrees.filter((worktree) => worktree.prunable);
   const mainFolders = [...new Set(goneWorktrees.map((worktree) => worktree.mainFolder))];
-  const prunedMainFolders = request.dryRun
+  const isDryRun = request.dryRun;
+  const prunedMainFolders = isDryRun
     ? mainFolders
-    : mainFolders.filter((folder) => gitSucceeds({ folder, query: ["worktree", "prune"] }));
-  const action = request.dryRun ? "would prune" : "pruned";
+    : mainFolders.filter((folder) => isGitSuccessful({ folder, query: ["worktree", "prune"] }));
+  const action = isDryRun ? "would prune" : "pruned";
   return goneWorktrees
     .filter((worktree) => prunedMainFolders.includes(worktree.mainFolder))
     .map((worktree) => reportLine({ action, detail: "folder gone", target: worktree.folder }));
@@ -87,7 +93,8 @@ const rememberKeptWorktrees = (request: {
   readonly earlierKeptLines: ReadonlyArray<string> | undefined;
   readonly dryRun: boolean;
 }): void => {
-  if (request.dryRun) {
+  const isDryRun = request.dryRun;
+  if (isDryRun) {
     return;
   }
 
@@ -101,25 +108,25 @@ const reportUnreadableRepos = (repoRoots: ReadonlyArray<string>): ReadonlyArray<
 // folders belong to whoever made them. Besides the ended session's own worktrees, each pass looks again at the ones an
 // earlier pass kept.
 export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray<string> => {
-  const roots = codeRootFolders(request);
-  const repoRoots = repoRootsUnder(roots);
-  const rootPaths = roots.flatMap((root) => folderPaths({ folder: root, roots: [] }).paths);
+  const roots = listCodeRootFolders(request);
+  const repoRoots = listRepoRootsUnder(roots);
+  const rootPaths = roots.flatMap((root) => readFolderPaths({ folder: root, roots: [] }).paths);
   const worktreeListing = listLinkedWorktrees(repoRoots);
-  const unreadableRepoRoots = foldersOwnedBy({ ...request, folders: worktreeListing.unreadableRepoRoots, roots });
+  const unreadableRepoRoots = listFoldersOwnedBy({ ...request, folders: worktreeListing.unreadableRepoRoots, roots });
   const worktrees = worktreeListing.worktrees.filter((worktree) =>
     isInsideAnyFolder({ candidate: worktree.folder, folders: rootPaths }),
   );
   const presentWorktrees = worktrees.filter((worktree) => !worktree.prunable);
   const presentFolders = presentWorktrees.map((worktree) => worktree.folder);
-  const sessionFolders = foldersOwnedBy({ ...request, folders: presentFolders, roots });
+  const sessionFolders = listFoldersOwnedBy({ ...request, folders: presentFolders, roots });
   const earlierKeptLines = readKeptWorktrees();
   const keptLines = earlierKeptLines || [];
   const ownedWorktrees = presentWorktrees.filter((worktree) => {
-    const keptLine = keptWorktreeLine(worktree);
+    const keptLine = readKeptWorktreeLine(worktree);
     return sessionFolders.includes(worktree.folder) || keptLines.includes(keptLine);
   });
   const worktreeFolders = ownedWorktrees.map((worktree) => worktree.folder);
-  const usedFolders = worktreesInUse({ ...request, worktreeFolders, roots });
+  const usedFolders = readWorktreesInUse({ ...request, worktreeFolders, roots });
   const worktreeLines = ownedWorktrees.map((worktree) =>
     cleanUpWorktree({ worktree, inUse: usedFolders.has(worktree.folder), dryRun: request.dryRun }),
   );
@@ -130,6 +137,6 @@ export const cleanUpWorktrees = (request: WorktreeCleanupRequest): ReadonlyArray
     dryRun: request.dryRun,
   });
   const unreadableLines = reportUnreadableRepos(unreadableRepoRoots);
-  const pruneLines = pruneGoneWorktrees({ worktrees: worktreeListing.worktrees, dryRun: request.dryRun });
+  const pruneLines = listPruneGoneWorktrees({ worktrees: worktreeListing.worktrees, dryRun: request.dryRun });
   return [...worktreeLines, ...unreadableLines, ...pruneLines];
 };

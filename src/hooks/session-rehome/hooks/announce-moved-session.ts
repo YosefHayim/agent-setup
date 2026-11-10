@@ -1,41 +1,50 @@
 #!/usr/bin/env node
-// SessionStart hook: when a resumed session was moved by session-rehome, says where it went; also starts an
-// occasional background sweep that catches sessions whose agent exited without a SessionEnd. Fails open.
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { readAgentId } from "../../environment.js";
 import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
-import { movedSessionNotice } from "../moved-session-notice.js";
-import { claimSweepSlot, ledgerEntryFor, readLastMoves, recordLedgerEntry, rehomeAgentFrom } from "../rehome-ledger.js";
+import { readMovedSessionNotice } from "../moved-session-notice.js";
+import {
+  claimSweepSlot,
+  readLastMoves,
+  readLedgerLine,
+  readRehomeAgentFrom,
+  saveLedgerLine,
+} from "../rehome-ledger.js";
 
 type SessionStartEvent = { readonly sessionId: string; readonly source: string; readonly cwd: string };
 
 const SWEEP_EVERY_SECONDS = 10 * 60;
 
-const textProperty = (candidate: object, property: string): string => {
-  const value = Object.getOwnPropertyDescriptor(candidate, property)?.value;
-  return typeof value === "string" ? value : "";
+const readStringProperty = (candidate: object, property: string): string => {
+  const field = Object.getOwnPropertyDescriptor(candidate, property)?.value;
+
+  const isStringField = typeof field === "string";
+  return isStringField ? field : "";
 };
 
 const decodeSessionStart = (candidate: unknown): SessionStartEvent | undefined => {
-  if (typeof candidate !== "object" || candidate === null || !textProperty(candidate, "session_id")) {
+  const isNotSessionStartObject =
+    typeof candidate !== "object" || candidate === null || !readStringProperty(candidate, "session_id");
+  if (isNotSessionStartObject) {
     return undefined;
   }
 
   return {
-    sessionId: textProperty(candidate, "session_id"),
-    source: textProperty(candidate, "source"),
-    cwd: textProperty(candidate, "cwd"),
+    sessionId: readStringProperty(candidate, "session_id"),
+    source: readStringProperty(candidate, "source"),
+    cwd: readStringProperty(candidate, "cwd"),
   };
 };
 
 // The watcher has this file's extension: .js when installed, .ts under tsx in tests.
 const startSweepIfDue = (): void => {
-  if (!claimSweepSlot(SWEEP_EVERY_SECONDS)) {
+  const isSweepSlotTaken = !claimSweepSlot(SWEEP_EVERY_SECONDS);
+  if (isSweepSlotTaken) {
     return;
   }
 
@@ -44,37 +53,47 @@ const startSweepIfDue = (): void => {
   spawn(process.execPath, [...process.execArgv, watcherFile, "--sweep"], { detached: true, stdio: "ignore" }).unref();
 };
 
-const announceMovedSession = (): never => {
-  const agent = rehomeAgentFrom(process.env.AGENT_SETUP_AGENT_ID);
+const readAnnounceMovedSession = (): never => {
+  const agentId = readAgentId();
+  const agent = readRehomeAgentFrom(agentId);
+
   const sessionStart = decodeSessionStart(JSON.parse(readFileSync(0, "utf8")));
-  if (!agent || !sessionStart) {
+
+  const hasNoAgentOrSession = !agent || !sessionStart;
+  if (hasNoAgentOrSession) {
     return allowAndExit();
   }
 
   startSweepIfDue();
-  const entry = ledgerEntryFor({ ledger: readLastMoves(), agent, sessionId: sessionStart.sessionId });
-  const homeRoot = process.env.HOME || os.homedir();
-  const notice =
-    sessionStart.source === "resume" && entry
-      ? movedSessionNotice({ entry, cwd: sessionStart.cwd, homeRoot })
-      : undefined;
-  if (!entry || !notice) {
+  const line = readLedgerLine({ ledger: readLastMoves(), agent, sessionId: sessionStart.sessionId });
+  const homeRoot = os.homedir();
+
+  const isResumedWithLine = sessionStart.source === "resume" && line != null;
+  const notice = isResumedWithLine
+    ? readMovedSessionNotice({ entry: line, cwd: sessionStart.cwd, homeRoot })
+    : undefined;
+
+  const hasNoLineOrNotice = !line || !notice;
+  if (hasNoLineOrNotice) {
     return allowAndExit();
   }
 
-  if (agent === "codex") {
-    recordLedgerEntry({ ...entry, notifiedAt: new Date().toISOString() });
+  const isAgentCodex = agent === "codex";
+  if (isAgentCodex) {
+    saveLedgerLine({ ...line, notifiedAt: new Date().toISOString() });
   }
+
+  const hasAgentNote = notice.agentContext !== "";
   return printDecisionAndExit({
     systemMessage: notice.userMessage,
-    ...(notice.agentContext
+    ...(hasAgentNote
       ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notice.agentContext } }
       : {}),
   });
 };
 
 try {
-  announceMovedSession();
+  readAnnounceMovedSession();
 } catch {
   process.exit(0);
 }

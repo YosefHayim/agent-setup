@@ -41,10 +41,10 @@ const createWorkspace = (): Workspace => {
   return { homeRoot, codeRoot, stateFolder: path.join(homeRoot, "rehome-state") };
 };
 
-const projectFolder = (request: { readonly workspace: Workspace; readonly folder: string }) =>
+const createProjectFolder = (request: { readonly workspace: Workspace; readonly folder: string }) =>
   path.join(request.workspace.homeRoot, ".claude", "projects", request.folder.replace(/[^A-Za-z0-9-]/g, "-"));
 
-const toolLine = (request: { readonly cwd: string; readonly filePath: string }) =>
+const readToolLine = (request: { readonly cwd: string; readonly filePath: string }) =>
   JSON.stringify({
     type: "assistant",
     cwd: request.cwd,
@@ -56,7 +56,7 @@ const toolLine = (request: { readonly cwd: string; readonly filePath: string }) 
   });
 
 // Old enough that the sweep's quiet window does not treat it as a running session.
-const ageFile = (file: string) => {
+const runAgeFile = (file: string) => {
   const anHourAgo = new Date(Date.now() - 60 * 60 * 1_000);
   utimesSync(file, anHourAgo, anHourAgo);
 };
@@ -66,7 +66,7 @@ const createClaudeSession = (request: {
   readonly startFolder: string;
   readonly editedRepo: string;
 }) => {
-  const folder = projectFolder({ workspace: request.workspace, folder: request.startFolder });
+  const folder = createProjectFolder({ workspace: request.workspace, folder: request.startFolder });
   mkdirSync(path.join(folder, sessionId, "subagents"), { recursive: true });
   writeFileSync(path.join(folder, sessionId, "subagents", "agent-1.jsonl"), "{}\n");
   const prompt = JSON.stringify({
@@ -76,18 +76,18 @@ const createClaudeSession = (request: {
     message: { role: "user", content: `fix the ${request.editedRepo} checkout page` },
   });
   const edits = Array.from({ length: 12 }, (_, index) =>
-    toolLine({
+    readToolLine({
       cwd: request.startFolder,
       filePath: path.join(request.workspace.codeRoot, request.editedRepo, `src/page${index}.ts`),
     }),
   );
   const transcript = path.join(folder, `${sessionId}.jsonl`);
   writeFileSync(transcript, `${[prompt, ...edits].join("\n")}\n`);
-  ageFile(transcript);
+  runAgeFile(transcript);
   return transcript;
 };
 
-const watcherEnvironment = (workspace: Workspace) => ({
+const readWatcherEnvironment = (workspace: Workspace) => ({
   ...process.env,
   HOME: workspace.homeRoot,
   CLAUDE_CONFIG_DIR: path.join(workspace.homeRoot, ".claude"),
@@ -99,26 +99,26 @@ const runWatcher = (request: { readonly workspace: Workspace; readonly args: Rea
   spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.args], {
     cwd: packageRoot,
     encoding: "utf8",
-    env: watcherEnvironment(request.workspace),
+    env: readWatcherEnvironment(request.workspace),
   });
 
-const ledgerLines = (workspace: Workspace) =>
+const readLedgerLines = (workspace: Workspace) =>
   readFileSync(path.join(workspace.stateFolder, "ledger.jsonl"), "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
 
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
-const linkToItself = (folder: string) => {
+const runLinkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
   symlinkSync(folder, folder);
 };
 
-const lastLine = (file: string) => JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1) || "{}");
+const readLastLine = (file: string) => JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1) || "{}");
 
 const waitUntil = async (condition: () => boolean) => {
   for (let attempt = 0; attempt < 40 && !condition(); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((fulfill) => setTimeout(fulfill, 250));
   }
 };
 
@@ -133,7 +133,7 @@ describe("rehome watcher with Claude Code sessions", () => {
     const workspace = createWorkspace();
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
     const vybekiitRoot = path.join(workspace.codeRoot, "vybekiit");
-    const movedTranscript = path.join(projectFolder({ workspace, folder: vybekiitRoot }), `${sessionId}.jsonl`);
+    const movedTranscript = path.join(createProjectFolder({ workspace, folder: vybekiitRoot }), `${sessionId}.jsonl`);
 
     const execution = runWatcher({ workspace, args: ["--sweep"] });
 
@@ -141,8 +141,8 @@ describe("rehome watcher with Claude Code sessions", () => {
     expect(existsSync(transcript)).toBe(false);
     expect(existsSync(movedTranscript)).toBe(true);
     expect(existsSync(path.join(path.dirname(movedTranscript), sessionId, "subagents", "agent-1.jsonl"))).toBe(true);
-    expect(lastLine(movedTranscript)).toEqual({ type: "relocated", sessionId, relocatedCwd: vybekiitRoot });
-    expect(ledgerLines(workspace)).toEqual([
+    expect(readLastLine(movedTranscript)).toEqual({ type: "relocated", sessionId, relocatedCwd: vybekiitRoot });
+    expect(readLedgerLines(workspace)).toEqual([
       expect.objectContaining({ agent: "claude-code", sessionId, decision: "moved", toFolder: vybekiitRoot }),
     ]);
   });
@@ -150,10 +150,10 @@ describe("rehome watcher with Claude Code sessions", () => {
   it("leaves a session id stored in two project folders untouched", () => {
     const workspace = createWorkspace();
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
-    const strayCopy = path.join(projectFolder({ workspace, folder: workspace.homeRoot }), `${sessionId}.jsonl`);
+    const strayCopy = path.join(createProjectFolder({ workspace, folder: workspace.homeRoot }), `${sessionId}.jsonl`);
     mkdirSync(path.dirname(strayCopy), { recursive: true });
     copyFileSync(transcript, strayCopy);
-    ageFile(strayCopy);
+    runAgeFile(strayCopy);
 
     const sweep = runWatcher({ workspace, args: ["--sweep", "--json"] });
     const ended = runWatcher({ workspace, args: ["--agent", "claude-code", "--session", sessionId, "--json"] });
@@ -220,7 +220,7 @@ describe("rehome watcher with Claude Code sessions", () => {
   it("leaves every session alone while a jobs folder cannot be listed", () => {
     const workspace = createWorkspace();
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
-    linkToItself(path.join(workspace.homeRoot, ".claude", "jobs"));
+    runLinkToItself(path.join(workspace.homeRoot, ".claude", "jobs"));
 
     runWatcher({ workspace, args: ["--sweep"] });
 
@@ -311,8 +311,8 @@ describe("rehome watcher with Claude Code sessions", () => {
 
     expect(execution.status).toBe(0);
     expect(existsSync(transcript)).toBe(false);
-    expect(existsSync(projectFolder({ workspace, folder: ariaFolder }))).toBe(false);
-    expect(ledgerLines(workspace)).toEqual([expect.objectContaining({ decision: "deleted", repoName: "aria" })]);
+    expect(existsSync(createProjectFolder({ workspace, folder: ariaFolder }))).toBe(false);
+    expect(readLedgerLines(workspace)).toEqual([expect.objectContaining({ decision: "deleted", repoName: "aria" })]);
   });
 
   it("places an uncertain session where the user assigns it", () => {
@@ -322,14 +322,16 @@ describe("rehome watcher with Claude Code sessions", () => {
 
     runWatcher({ workspace, args: ["--sweep", "--assign", `${sessionId.slice(0, 8)}=replybase`] });
 
-    expect(existsSync(path.join(projectFolder({ workspace, folder: replybaseRoot }), `${sessionId}.jsonl`))).toBe(true);
+    expect(existsSync(path.join(createProjectFolder({ workspace, folder: replybaseRoot }), `${sessionId}.jsonl`))).toBe(
+      true,
+    );
   });
 
   it("is handed an ended session by the SessionEnd hook and moves it once the agent lets go", async () => {
     const workspace = createWorkspace();
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
     const movedTranscript = path.join(
-      projectFolder({ workspace, folder: path.join(workspace.codeRoot, "vybekiit") }),
+      createProjectFolder({ workspace, folder: path.join(workspace.codeRoot, "vybekiit") }),
       `${sessionId}.jsonl`,
     );
 
@@ -363,9 +365,9 @@ describe("rehome watcher with Claude Code sessions", () => {
     const waiter = spawn(
       process.execPath,
       ["--import", "tsx", watcherPath, "--agent", "claude-code", "--session", sessionId, "--wait"],
-      { cwd: packageRoot, stdio: "ignore", env: watcherEnvironment(workspace) },
+      { cwd: packageRoot, stdio: "ignore", env: readWatcherEnvironment(workspace) },
     );
-    const waiterExit = new Promise((resolve) => waiter.once("exit", resolve));
+    const waiterExit = new Promise((fulfill) => waiter.once("exit", fulfill));
     try {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       const waitedWhileLocked = existsSync(transcript);
@@ -384,9 +386,9 @@ describe("rehome watcher with Claude Code sessions", () => {
     const workspace = createWorkspace();
     const transcript = createClaudeSession({ workspace, startFolder: workspace.codeRoot, editedRepo: "vybekiit" });
     const replybaseRoot = path.join(workspace.codeRoot, "replybase");
-    const replybaseFolder = projectFolder({ workspace, folder: replybaseRoot });
+    const replybaseFolder = createProjectFolder({ workspace, folder: replybaseRoot });
     const replybaseTranscript = path.join(replybaseFolder, `${sessionId}.jsonl`);
-    const vybekiitFolder = projectFolder({ workspace, folder: path.join(workspace.codeRoot, "vybekiit") });
+    const vybekiitFolder = createProjectFolder({ workspace, folder: path.join(workspace.codeRoot, "vybekiit") });
     const lockFile = path.join(workspace.stateFolder, "watcher.lock");
     mkdirSync(workspace.stateFolder, { recursive: true });
     writeFileSync(lockFile, String(process.pid));
@@ -394,7 +396,7 @@ describe("rehome watcher with Claude Code sessions", () => {
     const waiter = spawn(
       process.execPath,
       ["--import", "tsx", watcherPath, "--agent", "claude-code", "--session", sessionId, "--wait"],
-      { cwd: packageRoot, stdio: "ignore", env: watcherEnvironment(workspace) },
+      { cwd: packageRoot, stdio: "ignore", env: readWatcherEnvironment(workspace) },
     );
     const waiterExit = new Promise((resolve) => waiter.once("exit", resolve));
     try {
@@ -404,7 +406,7 @@ describe("rehome watcher with Claude Code sessions", () => {
       renameSync(path.join(path.dirname(transcript), sessionId), path.join(replybaseFolder, sessionId));
       const relocated = JSON.stringify({ type: "relocated", sessionId, relocatedCwd: replybaseRoot });
       appendFileSync(replybaseTranscript, `${relocated}\n`);
-      ageFile(replybaseTranscript);
+      runAgeFile(replybaseTranscript);
       rmSync(lockFile);
       await waiterExit;
 
@@ -433,7 +435,7 @@ CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, cwd TEXT 
 CREATE TABLE thread_spawn_edges (parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY,
   status TEXT NOT NULL);`;
 
-const settingsLine = (request: { readonly cwd: string; readonly ordinal: number }) =>
+const readSettingsLine = (request: { readonly cwd: string; readonly ordinal: number }) =>
   JSON.stringify({
     timestamp: "2026-09-27T21:33:41.720Z",
     ordinal: request.ordinal,
@@ -445,7 +447,7 @@ const settingsLine = (request: { readonly cwd: string; readonly ordinal: number 
     },
   });
 
-const commandLine = (request: { readonly cwd: string; readonly ordinal: number }) =>
+const readCommandLine = (request: { readonly cwd: string; readonly ordinal: number }) =>
   JSON.stringify({
     ordinal: request.ordinal,
     type: "event_msg",
@@ -461,11 +463,16 @@ const createCodexThread = (workspace: Workspace) => {
   const replybaseRoot = path.join(workspace.codeRoot, "replybase");
   const rolloutFile = path.join(sessionsFolder, `rollout-2026-09-28T00-33-41-${threadId}.jsonl`);
   const childRolloutFile = path.join(sessionsFolder, `rollout-2026-09-28T00-40-00-${childThreadId}.jsonl`);
-  const commands = Array.from({ length: 12 }, (_, index) => commandLine({ cwd: replybaseRoot, ordinal: index + 2 }));
-  writeFileSync(rolloutFile, `${[settingsLine({ cwd: workspace.codeRoot, ordinal: 1 }), ...commands].join("\n")}\n`);
-  writeFileSync(childRolloutFile, `${settingsLine({ cwd: workspace.codeRoot, ordinal: 1 })}\n`);
+  const commands = Array.from({ length: 12 }, (_, index) =>
+    readCommandLine({ cwd: replybaseRoot, ordinal: index + 2 }),
+  );
+  writeFileSync(
+    rolloutFile,
+    `${[readSettingsLine({ cwd: workspace.codeRoot, ordinal: 1 }), ...commands].join("\n")}\n`,
+  );
+  writeFileSync(childRolloutFile, `${readSettingsLine({ cwd: workspace.codeRoot, ordinal: 1 })}\n`);
   for (const file of [rolloutFile, childRolloutFile]) {
-    ageFile(file);
+    runAgeFile(file);
   }
 
   const database = new DatabaseSync(path.join(workspace.homeRoot, ".codex", "state_5.sqlite"));
@@ -480,11 +487,11 @@ const createCodexThread = (workspace: Workspace) => {
   return { rolloutFile, childRolloutFile, replybaseRoot };
 };
 
-const threadCwds = (workspace: Workspace) => {
+const readThreadCwds = (workspace: Workspace) => {
   const database = new DatabaseSync(path.join(workspace.homeRoot, ".codex", "state_5.sqlite"), { readOnly: true });
-  const rows = database.prepare("SELECT id, cwd FROM threads ORDER BY id").all();
+  const databaseRows = database.prepare("SELECT id, cwd FROM threads ORDER BY id").all();
   database.close();
-  return rows;
+  return databaseRows;
 };
 
 describe("rehome watcher with Codex threads", () => {
@@ -495,18 +502,18 @@ describe("rehome watcher with Codex threads", () => {
     const execution = runWatcher({ workspace, args: ["--sweep", "--agent", "codex"] });
 
     expect(execution.status).toBe(0);
-    expect(threadCwds(workspace)).toEqual([
+    expect(readThreadCwds(workspace)).toEqual([
       { id: threadId, cwd: replybaseRoot },
       { id: childThreadId, cwd: replybaseRoot },
     ]);
-    expect(lastLine(rolloutFile)).toMatchObject({
+    expect(readLastLine(rolloutFile)).toMatchObject({
       ordinal: 14,
       payload: {
         type: "thread_settings_applied",
         thread_settings: { cwd: replybaseRoot, runtime_workspace_roots: [replybaseRoot] },
       },
     });
-    expect(lastLine(childRolloutFile)).toMatchObject({
+    expect(readLastLine(childRolloutFile)).toMatchObject({
       ordinal: 2,
       payload: { thread_settings: { cwd: replybaseRoot } },
     });
@@ -522,6 +529,6 @@ describe("rehome watcher with Codex threads", () => {
 
     runWatcher({ workspace, args: ["--sweep", "--agent", "codex"] });
 
-    expect(threadCwds(workspace)).toContainEqual({ id: threadId, cwd: replybaseRoot });
+    expect(readThreadCwds(workspace)).toContainEqual({ id: threadId, cwd: replybaseRoot });
   });
 });

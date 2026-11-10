@@ -4,8 +4,9 @@ import path from "node:path";
 type IntervalSlot = { readonly stampFile: string; readonly minimumSeconds: number };
 
 // The stamp's modified time is when the slow pass last ran.
-const ranWithinInterval = (slot: IntervalSlot): boolean => {
-  if (!existsSync(slot.stampFile)) {
+const isRanWithinInterval = (slot: IntervalSlot): boolean => {
+  const isStampFileMissing = !existsSync(slot.stampFile);
+  if (isStampFileMissing) {
     return false;
   }
 
@@ -14,7 +15,7 @@ const ranWithinInterval = (slot: IntervalSlot): boolean => {
 };
 
 export const claimIntervalSlot = (slot: IntervalSlot): boolean => {
-  if (ranWithinInterval(slot)) {
+  if (isRanWithinInterval(slot)) {
     return false;
   }
 

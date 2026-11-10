@@ -17,11 +17,11 @@ const createHomeRoot = (): string => {
   return homeRoot;
 };
 
-const sessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
+const readSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
   path.join(request.homeRoot, "claude-scratch", `claude-${process.getuid?.()}`, "-Users-me-repo", request.sessionId);
 
 const createSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) => {
-  const scratchpad = path.join(sessionFolder(request), "scratchpad");
+  const scratchpad = path.join(readSessionFolder(request), "scratchpad");
   mkdirSync(scratchpad, { recursive: true });
   writeFileSync(path.join(scratchpad, "notes.txt"), "scratch");
 };
@@ -43,7 +43,7 @@ const runHook = (request: { readonly homeRoot: string; readonly hookInput: strin
 
 const waitUntilRemoved = async (folder: string) => {
   for (let attempt = 0; attempt < 40 && existsSync(folder); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((fulfill) => setTimeout(fulfill, 250));
   }
 };
 
@@ -60,11 +60,11 @@ describe("clearSessionScratch process boundary", () => {
     createSessionFolder({ homeRoot, sessionId: liveSessionId });
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: endedSessionId }) });
-    await waitUntilRemoved(sessionFolder({ homeRoot, sessionId: endedSessionId }));
+    await waitUntilRemoved(readSessionFolder({ homeRoot, sessionId: endedSessionId }));
 
     expect(execution.status).toBe(0);
-    expect(existsSync(sessionFolder({ homeRoot, sessionId: endedSessionId }))).toBe(false);
-    expect(existsSync(sessionFolder({ homeRoot, sessionId: liveSessionId }))).toBe(true);
+    expect(existsSync(readSessionFolder({ homeRoot, sessionId: endedSessionId }))).toBe(false);
+    expect(existsSync(readSessionFolder({ homeRoot, sessionId: liveSessionId }))).toBe(true);
   });
 
   it("starts no watcher for a session ID that is not a UUID", async () => {
@@ -72,10 +72,10 @@ describe("clearSessionScratch process boundary", () => {
     createSessionFolder({ homeRoot, sessionId: endedSessionId });
 
     const execution = runHook({ homeRoot, hookInput: JSON.stringify({ session_id: ".." }) });
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await new Promise((fulfill) => setTimeout(fulfill, 1_500));
 
     expect(execution.status).toBe(0);
-    expect(existsSync(sessionFolder({ homeRoot, sessionId: endedSessionId }))).toBe(true);
+    expect(existsSync(readSessionFolder({ homeRoot, sessionId: endedSessionId }))).toBe(true);
   });
 
   it("fails open on malformed input", () => {

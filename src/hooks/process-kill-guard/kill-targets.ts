@@ -1,5 +1,5 @@
 import { escapeForPattern } from "../pattern-escape.js";
-import { SHELL_VALUE, type ShellSegment, shellSegments } from "../shell-segments.js";
+import { listShellSegments, SHELL_FIELD, type ShellSegment } from "../shell-segments.js";
 
 export type KillTarget = {
   readonly commandWords: string;
@@ -34,9 +34,9 @@ const PID_WORD = /^\d+$/u;
 const SHELL_PROGRAM = /(?:^|\/)(?:ba|z|da|k)?sh$/u;
 const COMMAND_STRING_OPTION = /^-[A-Za-z]*c[A-Za-z]*$/u;
 // A shell value such as "$PATTERN" can hold any text, so it is judged as matching any text.
-const ANY_TEXT = ".*";
+const ANY_STRING = ".*";
 // pkill and pgrep on macOS or Linux: -u root and -P 4242 take a value, and Linux spells options long, e.g. --full
-const PKILL_OPTIONS: OptionTable = {
+const PKILL_SETTINGS: OptionTable = {
   valueFlags: new Set(["F", "G", "J", "M", "N", "P", "U", "d", "g", "j", "r", "s", "t", "u"]),
   longOptionLetters: new Map([
     ["full", "f"],
@@ -56,7 +56,7 @@ const PKILL_OPTIONS: OptionTable = {
   longValueOptions: new Set(["signal", "ns", "nslist", "cgroup", "env", "older"]),
 };
 // killall on macOS (-c -t -u take a value) or Linux (-n -o -s -u -y -Z take a value, plus long options)
-const KILLALL_OPTIONS: OptionTable = {
+const KILLALL_SETTINGS: OptionTable = {
   valueFlags: new Set(["Z", "c", "n", "o", "s", "t", "u", "y"]),
   longOptionLetters: new Map([
     ["ignore-case", "I"],
@@ -72,58 +72,68 @@ const KILLALL_OPTIONS: OptionTable = {
 
 const isProgram = (word: string, program: string): boolean => word === program || word.endsWith(`/${program}`);
 
-const readShortOptions =
-  (options: OptionTable) =>
+const readShortSettings =
+  (settings: OptionTable) =>
   (reading: ArgumentReading, argument: string): ArgumentReading => {
     const letters = argument.slice(1).split("");
-    const valueFlagIndex = letters.findIndex((letter) => options.valueFlags.has(letter));
-    if (valueFlagIndex === -1) {
+
+    const fieldFlagIndex = letters.findIndex((letter) => settings.valueFlags.has(letter));
+
+    const isFieldFlagMissing = fieldFlagIndex === -1;
+    if (isFieldFlagMissing) {
       return { ...reading, flags: reading.flags + letters.join("") };
     }
 
     // A value flag ends the cluster: "-fu root" reads the next word as its value, "-uroot" carries it inline.
-    const flagLetters = letters.slice(0, valueFlagIndex).join("");
-    return { ...reading, flags: reading.flags + flagLetters, skipsNext: valueFlagIndex === letters.length - 1 };
+    const flagLetters = letters.slice(0, fieldFlagIndex).join("");
+    return { ...reading, flags: reading.flags + flagLetters, skipsNext: fieldFlagIndex === letters.length - 1 };
   };
 
 // e.g. "--full" reads as "-f", "--euid root" as "-u root", and "--euid=root" as "-uroot"
 const readLongOption =
-  (options: OptionTable) =>
+  (settings: OptionTable) =>
   (reading: ArgumentReading, argument: string): ArgumentReading => {
-    const [optionName = "", ...inlineValueParts] = argument.slice(2).split("=");
-    const hasInlineValue = inlineValueParts.length > 0;
-    const shortLetter = options.longOptionLetters.get(optionName);
-    if (shortLetter !== undefined) {
-      const inlineValue = inlineValueParts.join("=");
-      const readShortForm = readShortOptions(options);
-      return readShortForm(reading, `-${shortLetter}${inlineValue}`);
+    const [optionName = "", ...inlineFieldParts] = argument.slice(2).split("=");
+    const hasInlineField = inlineFieldParts.length > 0;
+    const shortLetter = settings.longOptionLetters.get(optionName);
+
+    const hasShortLetter = shortLetter != null;
+    if (hasShortLetter) {
+      const inlineField = inlineFieldParts.join("=");
+      const readShortForm = readShortSettings(settings);
+      return readShortForm(reading, `-${shortLetter}${inlineField}`);
     }
 
-    const takesNextWord = options.longValueOptions.has(optionName) && !hasInlineValue;
+    const takesNextWord = settings.longValueOptions.has(optionName) && !hasInlineField;
     return { ...reading, skipsNext: takesNextWord };
   };
 
-const readArgument = (options: OptionTable) => {
-  const readShortOption = readShortOptions(options);
-  const readLongForm = readLongOption(options);
+const readArgument = (settings: OptionTable) => {
+  const readShortOption = readShortSettings(settings);
+  const readLongForm = readLongOption(settings);
   return (reading: ArgumentReading, argument: string): ArgumentReading => {
-    if (reading.skipsNext) {
+    const isSkippingNext = reading.skipsNext;
+    if (isSkippingNext) {
       return { ...reading, skipsNext: false };
     }
 
-    if (reading.optionsEnded || !argument.startsWith("-") || argument === "-") {
+    const isOptionArgumentAfterEnd = reading.optionsEnded || !argument.startsWith("-") || argument === "-";
+    if (isOptionArgumentAfterEnd) {
       return { ...reading, operands: [...reading.operands, argument] };
     }
 
-    if (argument === "--") {
+    const isOptionEndMarker = argument === "--";
+    if (isOptionEndMarker) {
       return { ...reading, optionsEnded: true };
     }
 
-    if (argument.startsWith("--")) {
+    const isLongOption = argument.startsWith("--");
+    if (isLongOption) {
       return readLongForm(reading, argument);
     }
 
-    if (SIGNAL_OPTION.test(argument)) {
+    const isSignalOption = SIGNAL_OPTION.test(argument);
+    if (isSignalOption) {
       return reading;
     }
 
@@ -131,23 +141,23 @@ const readArgument = (options: OptionTable) => {
   };
 };
 
-const readArguments = (argumentList: ReadonlyArray<string>, options: OptionTable): ArgumentReading => {
-  const readNext = readArgument(options);
+const readArguments = (argumentList: ReadonlyArray<string>, settings: OptionTable): ArgumentReading => {
+  const readNext = readArgument(settings);
   return argumentList.reduce(readNext, { flags: "", operands: [], skipsNext: false, optionsEnded: false });
 };
 
-const regexPatternOf = (operand: string): string => operand.replaceAll(SHELL_VALUE, ANY_TEXT);
+const readRegexPattern = (operand: string): string => operand.replaceAll(SHELL_FIELD, ANY_STRING);
 
-const exactNamePatternOf = (operand: string): string => {
-  const literalParts = operand.split(SHELL_VALUE).map(escapeForPattern);
-  return literalParts.join(ANY_TEXT);
+const readExactNamePattern = (operand: string): string => {
+  const literalParts = operand.split(SHELL_FIELD).map(escapeForPattern);
+  return literalParts.join(ANY_STRING);
 };
 
-const pkillTarget = (commandWords: string, argumentList: ReadonlyArray<string>): KillTarget => {
-  const reading = readArguments(argumentList, PKILL_OPTIONS);
+const readPkillTarget = (commandWords: string, argumentList: ReadonlyArray<string>): KillTarget => {
+  const reading = readArguments(argumentList, PKILL_SETTINGS);
   return {
     commandWords,
-    patterns: reading.operands.map(regexPatternOf),
+    patterns: reading.operands.map(readRegexPattern),
     matchesFullCommand: reading.flags.includes("f"),
     ignoresCase: reading.flags.includes("i"),
     matchesWholeText: reading.flags.includes("x"),
@@ -155,25 +165,27 @@ const pkillTarget = (commandWords: string, argumentList: ReadonlyArray<string>):
   };
 };
 
-const killallTarget = (commandWords: string, argumentList: ReadonlyArray<string>): KillTarget => {
-  const reading = readArguments(argumentList, KILLALL_OPTIONS);
+const readKillallTarget = (commandWords: string, argumentList: ReadonlyArray<string>): KillTarget => {
+  const reading = readArguments(argumentList, KILLALL_SETTINGS);
   // macOS killall -m and Linux killall -r take regular expressions; Linux killall -I ignores case.
-  const usesRegex = reading.flags.includes("m") || reading.flags.includes("r");
-  const patterns = reading.operands.map(usesRegex ? regexPatternOf : exactNamePatternOf);
+  const isUsingRegex = reading.flags.includes("m") || reading.flags.includes("r");
+  const patterns = reading.operands.map(isUsingRegex ? readRegexPattern : readExactNamePattern);
   return {
     commandWords,
     patterns,
     matchesFullCommand: false,
     ignoresCase: reading.flags.includes("I"),
-    matchesWholeText: !usesRegex,
+    matchesWholeText: !isUsingRegex,
     inverted: false,
   };
 };
 
 // e.g. "kill $(pgrep -f vite)" or "pgrep -f vite | xargs kill"; "kill 4242" names its pids and takes none from pgrep.
-const killsUnnamedProcesses = (segment: ShellSegment): boolean => {
+const isKillingUnnamedProcesses = (segment: ShellSegment): boolean => {
   const killIndex = segment.words.findIndex((word) => isProgram(word, "kill"));
-  if (killIndex === -1) {
+
+  const isKillMissing = killIndex === -1;
+  if (isKillMissing) {
     return false;
   }
 
@@ -181,32 +193,38 @@ const killsUnnamedProcesses = (segment: ShellSegment): boolean => {
   return pidWords.length === 0 || pidWords.some((word) => !PID_WORD.test(word));
 };
 
-const killTargetsInSegment = (segment: ReadonlyArray<string>, judgedProgram: RegExp): ReadonlyArray<KillTarget> => {
+const listKillTargetsInSegment = (segment: ReadonlyArray<string>, judgedProgram: RegExp): ReadonlyArray<KillTarget> => {
   const programIndex = segment.findIndex((word) => judgedProgram.test(word));
-  if (programIndex === -1) {
+
+  const isProgramMissing = programIndex === -1;
+  if (isProgramMissing) {
     return [];
   }
 
   const programWords = segment.slice(programIndex);
   const [programPath = "", ...argumentList] = programWords;
-  const commandWords = programWords.join(" ").replaceAll(SHELL_VALUE, "$...");
+  const commandWords = programWords.join(" ").replaceAll(SHELL_FIELD, "$...");
+
   if (isProgram(programPath, "killall")) {
-    return [killallTarget(commandWords, argumentList)];
+    return [readKillallTarget(commandWords, argumentList)];
   }
 
-  return [pkillTarget(commandWords, argumentList)];
+  return [readPkillTarget(commandWords, argumentList)];
 };
 
 // e.g. the pgrep in "kill $(pgrep -f vite)", "pids=`pgrep -f vite`", or "pgrep -f vite | xargs kill"
-const passesOnItsOutput = (segment: ShellSegment): boolean =>
+const isPassingOnItsPrintout = (segment: ShellSegment): boolean =>
   segment.openedBy === "(" || segment.openedBy === "`" || segment.closedBy === "|";
 
-const shellCommandStringOf = (segment: ShellSegment): ReadonlyArray<string> => {
+const listShellCommandString = (segment: ShellSegment): ReadonlyArray<string> => {
   const shellIndex = segment.words.findIndex((word) => SHELL_PROGRAM.test(word));
   const shellArguments = segment.words.slice(shellIndex + 1);
   const optionIndex = shellArguments.findIndex((word) => COMMAND_STRING_OPTION.test(word));
+
   const commandString = shellArguments[optionIndex + 1];
-  if (shellIndex === -1 || optionIndex === -1 || commandString === undefined) {
+
+  const isShellCommandMissing = shellIndex === -1 || optionIndex === -1 || commandString == null;
+  if (isShellCommandMissing) {
     return [];
   }
 
@@ -214,9 +232,11 @@ const shellCommandStringOf = (segment: ShellSegment): ReadonlyArray<string> => {
 };
 
 // eval joins its words and runs them as a new command, e.g. eval "pkill -f $PATTERN".
-const evalCommandOf = (segment: ShellSegment): ReadonlyArray<string> => {
+const listEvalCommand = (segment: ShellSegment): ReadonlyArray<string> => {
   const [program, ...evalWords] = segment.words;
-  if (program !== "eval") {
+
+  const isProgramNotEval = program !== "eval";
+  if (isProgramNotEval) {
     return [];
   }
 
@@ -224,17 +244,20 @@ const evalCommandOf = (segment: ShellSegment): ReadonlyArray<string> => {
 };
 
 // A kill with no pattern, e.g. "pkill -P 4242", selects by parent or user, which this guard does not judge.
-export const killTargetsIn = (command: string): ReadonlyArray<KillTarget> => {
-  const segments = shellSegments(command);
-  const killsUnnamed = segments.some(killsUnnamedProcesses);
+export const listKillTargetsIn = (command: string): ReadonlyArray<KillTarget> => {
+  const segments = listShellSegments(command);
+  const killsUnnamed = segments.some(isKillingUnnamedProcesses);
   const directTargets = segments
     .flatMap((segment) => {
-      const feedsKill = killsUnnamed && passesOnItsOutput(segment);
-      const judgedProgram = feedsKill ? KILL_OR_PGREP_PROGRAM : KILL_PROGRAM;
-      return killTargetsInSegment(segment.words, judgedProgram);
+      const isFeedingKill = killsUnnamed && isPassingOnItsPrintout(segment);
+      const judgedProgram = isFeedingKill ? KILL_OR_PGREP_PROGRAM : KILL_PROGRAM;
+      return listKillTargetsInSegment(segment.words, judgedProgram);
     })
     .filter((killTarget) => killTarget.patterns.length > 0);
-  const nestedCommands = segments.flatMap((segment) => [...shellCommandStringOf(segment), ...evalCommandOf(segment)]);
-  const nestedTargets = nestedCommands.flatMap((nestedCommand) => killTargetsIn(nestedCommand));
+  const nestedCommands = segments.flatMap((segment) => [
+    ...listShellCommandString(segment),
+    ...listEvalCommand(segment),
+  ]);
+  const nestedTargets = nestedCommands.flatMap((nestedCommand) => listKillTargetsIn(nestedCommand));
   return [...directTargets, ...nestedTargets];
 };

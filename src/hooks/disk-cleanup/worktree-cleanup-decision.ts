@@ -37,27 +37,34 @@ const keep = (reason: KeepReason): WorktreeCleanupDecision => ({ _tag: "keep", r
 // made may show no use yet, so one less than an hour old stays too.
 export const decideWorktreeCleanup = (facts: WorktreeFacts): WorktreeCleanupDecision => {
   const hasWork = facts.hasChanges || facts.hasUnpushedCommits;
-  if (facts.inUse) {
+
+  const isInUse = facts.inUse;
+  if (isInUse) {
     return keep("in-use");
   }
 
-  if (facts.createdRecently) {
+  const isCreatedRecently = facts.createdRecently;
+  if (isCreatedRecently) {
     return keep("recently-created");
   }
 
-  if (facts.locked) {
+  const isLocked = facts.locked;
+  if (isLocked) {
     return keep("locked");
   }
 
-  if (!facts.readable) {
+  const isFactsReadableMissing = !facts.readable;
+  if (isFactsReadableMissing) {
     return keep("unreadable");
   }
 
-  if (facts.detached && hasWork) {
+  const isDetachedWithWork = facts.detached && hasWork;
+  if (isDetachedWithWork) {
     return keep("detached-work");
   }
 
-  if (facts.onDefaultBranch && hasWork) {
+  const isOnDefaultBranchWithWork = facts.onDefaultBranch && hasWork;
+  if (isOnDefaultBranchWithWork) {
     return keep("default-branch-work");
   }
 
@@ -65,11 +72,13 @@ export const decideWorktreeCleanup = (facts: WorktreeFacts): WorktreeCleanupDeci
     return keep("risky-files");
   }
 
-  if (hasWork && !facts.remote) {
+  const hasWorkWithoutRemote = hasWork && !facts.remote;
+  if (hasWorkWithoutRemote) {
     return keep("no-remote");
   }
 
-  if (hasWork && !facts.knowsDefaultBranch) {
+  const hasWorkWithoutDefaultBranch = hasWork && !facts.knowsDefaultBranch;
+  if (hasWorkWithoutDefaultBranch) {
     return keep("unknown-default-branch");
   }
 

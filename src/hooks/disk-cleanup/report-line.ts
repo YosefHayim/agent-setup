@@ -1,4 +1,3 @@
-// e.g. "kept     in-use               /Users/me/Code/app/.worktrees/login"
 export const reportLine = (request: {
   readonly action: string;
   readonly detail: string;
@@ -8,7 +7,9 @@ export const reportLine = (request: {
 // Every target but a tool command is an absolute path, and a path holds no " /", so the last one starts the target.
 export const reportTarget = (line: string): string | undefined => {
   const targetStart = line.lastIndexOf(" /");
-  if (targetStart < 0) {
+
+  const isTargetMissing = targetStart < 0;
+  if (isTargetMissing) {
     return undefined;
   }
 

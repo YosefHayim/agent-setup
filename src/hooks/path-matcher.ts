@@ -4,8 +4,11 @@ type NamedFolder = { readonly name: string; readonly root: string };
 
 // The longest root wins at each position, and a root only counts when a path boundary follows it, so
 // ".../agent-runner" never matches inside ".../agent-runner-e2e".
-export const createPathMatcher = (folders: ReadonlyArray<NamedFolder>): ((text: string) => ReadonlySet<string>) => {
-  if (folders.length === 0) {
+export const createPathMatcher = (
+  folders: ReadonlyArray<NamedFolder>,
+): ((scannedString: string) => ReadonlySet<string>) => {
+  const isFoldersEmpty = folders.length === 0;
+  if (isFoldersEmpty) {
     return () => new Set();
   }
 
@@ -15,5 +18,6 @@ export const createPathMatcher = (folders: ReadonlyArray<NamedFolder>): ((text: 
     `(${rootsLongestFirst.map((folder) => escapeForPattern(folder.root)).join("|")})(?=[/"'\\s:),\\\\\`]|$)`,
     "gu",
   );
-  return (text) => new Set([...text.matchAll(rootPattern)].map((match) => nameByRoot.get(match[1]) || ""));
+  return (scannedString) =>
+    new Set([...scannedString.matchAll(rootPattern)].map((hit) => nameByRoot.get(hit[1]) || ""));
 };

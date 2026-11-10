@@ -47,7 +47,8 @@ const TEST_BROWSER_PROFILE =
   /--user-data-dir=((?:\/private)?(?:\/var\/folders|\/tmp)\/(?:\S*\/)?(?:lighthouse|playwright|puppeteer)[^/\s]*)/u;
 
 const isInsideFolder = (request: { readonly folder: string; readonly root: string }): boolean => {
-  const insideStart = request.root.endsWith("/") ? request.root : `${request.root}/`;
+  const hasTrailingSlash = request.root.endsWith("/");
+  const insideStart = hasTrailingSlash ? request.root : `${request.root}/`;
   return request.folder === request.root || request.folder.startsWith(insideStart);
 };
 
@@ -79,7 +80,7 @@ const collectAncestors = (
 };
 
 // The process itself and every parent up to launchd, so the hook never stops the session that runs it.
-export const ancestorProcessIds = (request: {
+export const readAncestorProcessIds = (request: {
   readonly processes: ReadonlyArray<RunningProcess>;
   readonly startProcessId: number;
 }): ReadonlySet<number> => {
@@ -87,18 +88,23 @@ export const ancestorProcessIds = (request: {
   return collectAncestors(parentByProcessId, request.startProcessId, new Set());
 };
 
-const folderGoneLeftover = (
+const listFolderGoneLeftover = (
   check: LeftoverProcessCheck,
   runningProcess: RunningProcess,
 ): ReadonlyArray<LeftoverProcess> => {
   const workingFolder = check.workingFolders.get(runningProcess.processId);
-  if (workingFolder === undefined) {
+
+  const isWorkingFolderMissing = workingFolder == null;
+  if (isWorkingFolderMissing) {
     return [];
   }
 
   const isUnderCodeRoot = check.codeRoots.some((root) => isInsideFolder({ folder: workingFolder, root }));
+
   const isFolderGone = check.missingFolders.has(workingFolder);
-  if (!isUnderCodeRoot || !isFolderGone) {
+
+  const isNotUnderCodeRootOrGone = !isUnderCodeRoot || !isFolderGone;
+  if (isNotUnderCodeRootOrGone) {
     return [];
   }
 
@@ -106,26 +112,27 @@ const folderGoneLeftover = (
   return [{ processId: runningProcess.processId, name: runningProcess.name, reason }];
 };
 
-const testBrowserProfileOf = (runningProcess: RunningProcess): string | null =>
+const readTestBrowserProfile = (runningProcess: RunningProcess): string | null =>
   TEST_BROWSER_PROFILE.exec(runningProcess.commandLine)?.[1] ?? null;
 
-const orphanedTestBrowserProfiles = (check: LeftoverProcessCheck): ReadonlySet<string> => {
+const readOrphanedTestBrowserProfiles = (check: LeftoverProcessCheck): ReadonlySet<string> => {
   const profiles = check.processes
     .filter((running) => running.parentProcessId === ORPHAN_PARENT_PROCESS_ID)
     .filter((running) => running.elapsedSeconds > check.testBrowserMinimumAgeSeconds)
-    .map(testBrowserProfileOf)
+    .map(readTestBrowserProfile)
     .filter((profile) => profile !== null);
   return new Set(profiles);
 };
 
 // A browser's helper processes share the profile of the orphaned main process and are not orphans themselves.
-const testBrowserLeftover = (
+const listTestBrowserLeftover = (
   runningProcess: RunningProcess,
   orphanedProfiles: ReadonlySet<string>,
 ): ReadonlyArray<LeftoverProcess> => {
-  const profile = testBrowserProfileOf(runningProcess);
-  const isOrphanedProfile = profile !== null && orphanedProfiles.has(profile);
-  if (!isOrphanedProfile) {
+  const profile = readTestBrowserProfile(runningProcess);
+
+  const isNotOrphanedProfile = profile === null || !orphanedProfiles.has(profile);
+  if (isNotOrphanedProfile) {
     return [];
   }
 
@@ -134,12 +141,12 @@ const testBrowserLeftover = (
 };
 
 export const decideLeftoverProcesses = (check: LeftoverProcessCheck): ReadonlyArray<LeftoverProcess> => {
-  const orphanedProfiles = orphanedTestBrowserProfiles(check);
+  const orphanedProfiles = readOrphanedTestBrowserProfiles(check);
   return check.processes
     .filter((runningProcess) => !isNeverStopped({ runningProcess, protectedProcessIds: check.protectedProcessIds }))
     .flatMap((runningProcess) => {
-      const folderGone = folderGoneLeftover(check, runningProcess);
+      const folderGone = listFolderGoneLeftover(check, runningProcess);
       const isFolderGone = folderGone.length > 0;
-      return isFolderGone ? folderGone : testBrowserLeftover(runningProcess, orphanedProfiles);
+      return isFolderGone ? folderGone : listTestBrowserLeftover(runningProcess, orphanedProfiles);
     });
 };

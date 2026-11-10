@@ -24,13 +24,13 @@ const writeTranscript = (lines: ReadonlyArray<object>): string => {
   return transcriptFile;
 };
 
-const claudeBash = (command: string) => ({
+const readClaudeBash = (command: string) => ({
   type: "assistant",
   cwd: codeFolder,
   message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command } }] },
 });
 
-const codexCommand = (command: string) => ({
+const readCodexCommand = (command: string) => ({
   type: "event_msg",
   payload: {
     type: "item_completed",
@@ -47,10 +47,10 @@ afterEach(() => {
 describe("session evidence", () => {
   it("resolves relative and ~ paths in Claude Code commands against the folder they ran in", () => {
     const transcriptFile = writeTranscript([
-      claudeBash("cat vybekiit/package.json"),
-      claudeBash("sed -n '1,20p' ~/Desktop/Code/vybekiit/README.md"),
-      claudeBash("cat > vybekiit/notes.md <<'EOF'\nhello\nEOF"),
-      claudeBash("npm test"),
+      readClaudeBash("cat vybekiit/package.json"),
+      readClaudeBash("sed -n '1,20p' ~/Desktop/Code/vybekiit/README.md"),
+      readClaudeBash("cat > vybekiit/notes.md <<'EOF'\nhello\nEOF"),
+      readClaudeBash("npm test"),
     ]);
 
     const evidence = readClaudeEvidence({ transcriptFile, matchers, homeRoot });
@@ -60,8 +60,8 @@ describe("session evidence", () => {
 
   it("resolves a Codex command's relative paths against its file:// working folder", () => {
     const transcriptFile = writeTranscript([
-      codexCommand("cat vybekiit/package.json vybekiit/README.md"),
-      codexCommand("ls -la"),
+      readCodexCommand("cat vybekiit/package.json vybekiit/README.md"),
+      readCodexCommand("ls -la"),
     ]);
 
     const evidence = readCodexEvidence({ transcriptFile, matchers, homeRoot });

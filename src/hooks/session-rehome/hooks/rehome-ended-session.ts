@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// SessionEnd hook: hands the ended Claude Code session or Codex thread to a detached rehome watcher and exits at once.
-// Fails open.
 
 import { readFileSync } from "node:fs";
 
 import { startDetachedWatcher } from "../../detached-watcher.js";
-import { sessionIdFrom } from "../../session-ids.js";
-import { rehomeAgentFrom } from "../rehome-ledger.js";
+import { readAgentId } from "../../environment.js";
+import { readSessionIdFrom } from "../../session-ids.js";
+import { readRehomeAgentFrom } from "../rehome-ledger.js";
 
-const handOverEndedSession = (): void => {
-  const agent = rehomeAgentFrom(process.env.AGENT_SETUP_AGENT_ID);
-  const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
-  const sessionId = sessionIdFrom(hookInput);
-  if (!agent || !sessionId) {
+const runHandOverEndedSession = (): void => {
+  const agentId = readAgentId();
+  const agent = readRehomeAgentFrom(agentId);
+  const hookDetails: unknown = JSON.parse(readFileSync(0, "utf8"));
+
+  const sessionId = readSessionIdFrom(hookDetails);
+
+  const hasNoAgentOrSession = !agent || !sessionId;
+  if (hasNoAgentOrSession) {
     return;
   }
 
@@ -24,7 +27,7 @@ const handOverEndedSession = (): void => {
 };
 
 try {
-  handOverEndedSession();
+  runHandOverEndedSession();
 } catch {
   // Never block or delay the agent's exit.
 }

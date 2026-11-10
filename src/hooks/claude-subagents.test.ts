@@ -16,8 +16,8 @@ const createHomeRoot = (): string => {
   return homeRoot;
 };
 
-const subagentFolderOf = (configRoot: string) =>
-  path.join(configRoot, "projects", "-Users-me-repo", sessionId, "subagents");
+const readSubagentFolder = (settingsRoot: string) =>
+  path.join(settingsRoot, "projects", "-Users-me-repo", sessionId, "subagents");
 
 const writeSubagent = (request: {
   readonly configRoot: string;
@@ -25,14 +25,14 @@ const writeSubagent = (request: {
   readonly meta: Record<string, unknown>;
   readonly transcriptLines: ReadonlyArray<Record<string, unknown>>;
 }) => {
-  const subagentFolder = subagentFolderOf(request.configRoot);
+  const subagentFolder = readSubagentFolder(request.configRoot);
   mkdirSync(subagentFolder, { recursive: true });
   writeFileSync(path.join(subagentFolder, `${request.agentName}.meta.json`), JSON.stringify(request.meta));
   const transcript = request.transcriptLines.map((line) => `${JSON.stringify(line)}\n`).join("");
   writeFileSync(path.join(subagentFolder, `${request.agentName}.jsonl`), transcript);
 };
 
-const assistantTurn = (stopReason: string | null) => ({
+const readAssistantTurn = (stopReason: string | null) => ({
   type: "assistant",
   message: { role: "assistant", stop_reason: stopReason },
 });
@@ -40,7 +40,7 @@ const assistantTurn = (stopReason: string | null) => ({
 const toolAnswer = { type: "user", message: { role: "user", content: [{ type: "tool_result" }] } };
 
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
-const linkToItself = (folder: string) => {
+const runLinkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
   symlinkSync(folder, folder);
 };
@@ -58,7 +58,7 @@ describe("hasRunningSubagents", () => {
       configRoot: path.join(homeRoot, ".claude"),
       agentName: "agent-a1",
       meta: { agentType: "general-purpose" },
-      transcriptLines: [assistantTurn("tool_use"), toolAnswer],
+      transcriptLines: [readAssistantTurn("tool_use"), toolAnswer],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(true);
@@ -82,7 +82,7 @@ describe("hasRunningSubagents", () => {
       configRoot: path.join(homeRoot, ".claude"),
       agentName: "agent-a1",
       meta: { agentType: "general-purpose" },
-      transcriptLines: [assistantTurn("tool_use"), toolAnswer, assistantTurn(null)],
+      transcriptLines: [readAssistantTurn("tool_use"), toolAnswer, readAssistantTurn(null)],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(true);
@@ -94,7 +94,7 @@ describe("hasRunningSubagents", () => {
       configRoot: path.join(homeRoot, ".claude"),
       agentName: "agent-a1",
       meta: { agentType: "general-purpose" },
-      transcriptLines: [assistantTurn("tool_use"), toolAnswer, assistantTurn("end_turn")],
+      transcriptLines: [readAssistantTurn("tool_use"), toolAnswer, readAssistantTurn("end_turn")],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(false);
@@ -106,7 +106,7 @@ describe("hasRunningSubagents", () => {
       configRoot: path.join(homeRoot, ".claude"),
       agentName: "agent-a1",
       meta: { agentType: "general-purpose", finished: true },
-      transcriptLines: [assistantTurn("tool_use")],
+      transcriptLines: [readAssistantTurn("tool_use")],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(false);
@@ -119,7 +119,7 @@ describe("hasRunningSubagents", () => {
       configRoot: path.join(homeRoot, ".claude-account2"),
       agentName: "agent-a1",
       meta: { agentType: "general-purpose" },
-      transcriptLines: [assistantTurn("tool_use")],
+      transcriptLines: [readAssistantTurn("tool_use")],
     });
 
     expect(hasRunningSubagents({ homeRoot, sessionId })).toBe(true);
@@ -134,7 +134,7 @@ describe("hasRunningSubagents", () => {
 
   it("throws when the projects folder cannot be listed", () => {
     const homeRoot = createHomeRoot();
-    linkToItself(path.join(homeRoot, ".claude", "projects"));
+    runLinkToItself(path.join(homeRoot, ".claude", "projects"));
 
     expect(() => hasRunningSubagents({ homeRoot, sessionId })).toThrow();
   });

@@ -28,22 +28,26 @@ const ROLE_HEADINGS: Readonly<Record<ProtectedRole, string>> = {
 const PROTECTED_ROLES: ReadonlyArray<ProtectedRole> = ["session", "terminal", "app"];
 
 // pid 1 is launchd or init, the parent of every session's terminal, and no kill pattern can reach it.
-const ancestorsOf = (
+const listAncestorsOf = (
   child: RunningProcess,
   processesById: ReadonlyMap<number, RunningProcess>,
 ): ReadonlyArray<RunningProcess> => {
   const parent = processesById.get(child.parentProcessId);
-  if (!parent || parent.processId <= 1) {
+
+  const isParentMissingOrInit = !parent || parent.processId <= 1;
+  if (isParentMissingOrInit) {
     return [];
   }
 
-  const olderAncestors = ancestorsOf(parent, processesById);
+  const olderAncestors = listAncestorsOf(parent, processesById);
   return [parent, ...olderAncestors];
 };
 
-const appProcessOf = (running: RunningProcess): ReadonlyArray<ProtectedProcess> => {
+const listAppProcess = (running: RunningProcess): ReadonlyArray<ProtectedProcess> => {
   const bundle = APP_BUNDLE.exec(running.commandLine);
-  if (!bundle) {
+
+  const isBundleMissing = !bundle;
+  if (isBundleMissing) {
     return [];
   }
 
@@ -51,13 +55,13 @@ const appProcessOf = (running: RunningProcess): ReadonlyArray<ProtectedProcess> 
   return [{ running, role: "app", label: appName }];
 };
 
-const firstPerProcess = (candidates: ReadonlyArray<ProtectedProcess>): ReadonlyArray<ProtectedProcess> =>
+const listFirstPerProcess = (candidates: ReadonlyArray<ProtectedProcess>): ReadonlyArray<ProtectedProcess> =>
   candidates.filter(
     (candidate, index) =>
       candidates.findIndex((other) => other.running.processId === candidate.running.processId) === index,
   );
 
-const protectedProcesses = (check: KillCheck): ReadonlyArray<ProtectedProcess> => {
+const listProtectedProcesses = (check: KillCheck): ReadonlyArray<ProtectedProcess> => {
   const processesById = new Map(check.processes.map((running) => [running.processId, running]));
   const sessions = check.processes.filter((running) => check.claudeProcessIds.has(running.processId));
   const sessionProcesses = sessions.map(
@@ -68,45 +72,53 @@ const protectedProcesses = (check: KillCheck): ReadonlyArray<ProtectedProcess> =
     }),
   );
   const terminalProcesses = sessions
-    .flatMap((session) => ancestorsOf(session, processesById))
+    .flatMap((session) => listAncestorsOf(session, processesById))
     .map((running): ProtectedProcess => ({ running, role: "terminal", label: running.name }));
-  const appProcesses = check.processes.flatMap(appProcessOf);
-  return firstPerProcess([...sessionProcesses, ...terminalProcesses, ...appProcesses]);
+  const appProcesses = check.processes.flatMap(listAppProcess);
+  return listFirstPerProcess([...sessionProcesses, ...terminalProcesses, ...appProcesses]);
 };
 
 // A pattern names an app through its full name or one of its longer words, e.g. "chrome" names Google Chrome.
-const namesApp = (killTarget: KillTarget, appName: string): boolean => {
-  const patternText = killTarget.patterns.join(" ").toLowerCase();
+const isNamingApp = (killTarget: KillTarget, appName: string): boolean => {
+  const patternString = killTarget.patterns.join(" ").toLowerCase();
   const lowerAppName = appName.toLowerCase();
   const appWords = lowerAppName.split(APP_NAME_WORD).filter((word) => word.length >= 3);
-  return patternText.includes(lowerAppName) || appWords.some((word) => patternText.includes(word));
+  return patternString.includes(lowerAppName) || appWords.some((word) => patternString.includes(word));
 };
 
-const processMatcher = (killTarget: KillTarget) => {
-  const flags = killTarget.ignoresCase ? "i" : "";
+const runMatcher = (killTarget: KillTarget) => {
+  const isIgnoringCase = killTarget.ignoresCase;
+  const flags = isIgnoringCase ? "i" : "";
   const expressions = killTarget.patterns.map((pattern) => {
-    const source = killTarget.matchesWholeText ? `^(?:${pattern})$` : pattern;
-    return new RegExp(source, flags);
+    const isAnchored = killTarget.matchesWholeText;
+    const origin = isAnchored ? `^(?:${pattern})$` : pattern;
+    return new RegExp(origin, flags);
   });
   return (running: RunningProcess): boolean => {
-    const matchedText = killTarget.matchesFullCommand ? running.commandLine : running.name;
-    const matchesAnyPattern = expressions.some((expression) => expression.test(matchedText));
-    return matchesAnyPattern !== killTarget.inverted;
+    const isFullCommand = killTarget.matchesFullCommand;
+    const matchedString = isFullCommand ? running.commandLine : running.name;
+    const isMatchingAnyPattern = expressions.some((expression) => expression.test(matchedString));
+    return isMatchingAnyPattern !== killTarget.inverted;
   };
 };
 
-const hitsOf = (killTarget: KillTarget, guarded: ReadonlyArray<ProtectedProcess>): ReadonlyArray<ProtectedProcess> => {
-  const matchesTarget = processMatcher(killTarget);
+const listHitsOf = (
+  killTarget: KillTarget,
+  guarded: ReadonlyArray<ProtectedProcess>,
+): ReadonlyArray<ProtectedProcess> => {
+  const isMatchingTarget = runMatcher(killTarget);
   return guarded.filter(
     (candidate) =>
-      !(candidate.role === "app" && namesApp(killTarget, candidate.label)) && matchesTarget(candidate.running),
+      !(candidate.role === "app" && isNamingApp(killTarget, candidate.label)) && isMatchingTarget(candidate.running),
   );
 };
 
-const roleSummary = (hits: ReadonlyArray<ProtectedProcess>, role: ProtectedRole): ReadonlyArray<string> => {
+const listRoleSummary = (hits: ReadonlyArray<ProtectedProcess>, role: ProtectedRole): ReadonlyArray<string> => {
   const roleLabels = hits.filter((hit) => hit.role === role).map((hit) => hit.label);
   const uniqueLabels = [...new Set(roleLabels)];
-  if (uniqueLabels.length === 0) {
+
+  const isUniqueLabelsEmpty = uniqueLabels.length === 0;
+  if (isUniqueLabelsEmpty) {
     return [];
   }
 
@@ -114,7 +126,7 @@ const roleSummary = (hits: ReadonlyArray<ProtectedProcess>, role: ProtectedRole)
 };
 
 const denyReason = (killTarget: KillTarget, hits: ReadonlyArray<ProtectedProcess>): string => {
-  const victims = PROTECTED_ROLES.flatMap((role) => roleSummary(hits, role));
+  const victims = PROTECTED_ROLES.flatMap((role) => listRoleSummary(hits, role));
   return [
     `process-kill-guard: \`${killTarget.commandWords}\` matches more than the processes you started.`,
     `It would also stop ${victims.join("; ")}.`,
@@ -124,10 +136,13 @@ const denyReason = (killTarget: KillTarget, hits: ReadonlyArray<ProtectedProcess
 };
 
 export const decideKill = (check: KillCheck): KillDecision => {
-  const guarded = protectedProcesses(check);
-  const judgedKills = check.killTargets.map((killTarget) => ({ killTarget, hits: hitsOf(killTarget, guarded) }));
+  const guarded = listProtectedProcesses(check);
+  const judgedKills = check.killTargets.map((killTarget) => ({ killTarget, hits: listHitsOf(killTarget, guarded) }));
+
   const harmfulKill = judgedKills.find((judgedKill) => judgedKill.hits.length > 0);
-  if (!harmfulKill) {
+
+  const isNotHarmfulKill = !harmfulKill;
+  if (isNotHarmfulKill) {
     return { _tag: "allow" };
   }
 

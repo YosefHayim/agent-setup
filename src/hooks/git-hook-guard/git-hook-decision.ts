@@ -1,27 +1,29 @@
 import os from "node:os";
 import path from "node:path";
 
-import { SHELL_VALUE } from "../shell-segments.js";
-import { commandFactsIn, type GitCall } from "./git-commands.js";
-import type { RepoHooksState } from "./hooks-installed.js";
+import { SHELL_FIELD } from "../shell-segments.js";
+import { type GitCall, readCommandFactsIn } from "./git-commands.js";
+import type { RepoHooksStatus } from "./hooks-installed.js";
 import { skipReasonOf } from "./skips-hooks.js";
 
 export type GitHookCheck = {
   readonly command: string;
   readonly startFolder: string;
-  readonly inspectRepo: (folder: string) => RepoHooksState;
+  readonly inspectRepo: (folder: string) => RepoHooksStatus;
 };
 
 export type GitHookDecision = { readonly _tag: "allow" } | { readonly _tag: "deny"; readonly reason: string };
 
 const ALLOW: GitHookDecision = { _tag: "allow" };
 
-const homeExpanded = (folder: string): string => {
-  if (folder === "~") {
+const readHomeExpanded = (folder: string): string => {
+  const isHomeFolder = folder === "~";
+  if (isHomeFolder) {
     return os.homedir();
   }
 
-  if (folder.startsWith("~/")) {
+  const isHomeSubfolder = folder.startsWith("~/");
+  if (isHomeSubfolder) {
     return path.join(os.homedir(), folder.slice(2));
   }
 
@@ -29,42 +31,50 @@ const homeExpanded = (folder: string): string => {
 };
 
 // A folder that holds a shell value, such as cd "$WORKTREE", is only known when the command runs.
-const repoFolderOf = (gitCall: GitCall, startFolder: string): string | undefined => {
-  const steps = [gitCall.changedFolder, ...gitCall.repoFolders].filter((step) => step !== undefined);
-  if (steps.some((step) => step.includes(SHELL_VALUE))) {
+const readRepoFolder = (gitCall: GitCall, startFolder: string): string | undefined => {
+  const steps = [gitCall.changedFolder, ...gitCall.repoFolders].filter((step) => step != null);
+
+  const hasShellStep = steps.some((step) => step.includes(SHELL_FIELD));
+  if (hasShellStep) {
     return undefined;
   }
 
-  return steps.reduce((folder, step) => path.resolve(folder, homeExpanded(step)), startFolder);
+  return steps.reduce((folder, step) => path.resolve(folder, readHomeExpanded(step)), startFolder);
 };
 
-const missingHooksReason = (repoState: RepoHooksState): string | undefined => {
-  if (repoState._tag === "needsInstall") {
-    return `git-hook-guard: Git hooks are not installed in this worktree. Run \`${repoState.installCommand}\` in ${repoState.toplevel} first, then retry.`;
+const readMissingHooksReason = (repoStatus: RepoHooksStatus): string | undefined => {
+  const isInstallNeeded = repoStatus._tag === "needsInstall";
+  if (isInstallNeeded) {
+    return `git-hook-guard: Git hooks are not installed in this worktree. Run \`${repoStatus.installCommand}\` in ${repoStatus.toplevel} first, then retry.`;
   }
 
-  if (repoState._tag === "needsHooksPath") {
-    return `git-hook-guard: Run \`git config core.hooksPath .githooks\` in ${repoState.toplevel} first, then retry.`;
+  const isHooksPathNeeded = repoStatus._tag === "needsHooksPath";
+  if (isHooksPathNeeded) {
+    return `git-hook-guard: Run \`git config core.hooksPath .githooks\` in ${repoStatus.toplevel} first, then retry.`;
   }
 
   return undefined;
 };
 
 export const decideGitHook = (check: GitHookCheck): GitHookDecision => {
-  const facts = commandFactsIn(check.command, undefined);
+  const facts = readCommandFactsIn(check.command, undefined);
   const skipReason = skipReasonOf(facts);
-  if (skipReason !== undefined) {
+
+  const hasSkipReason = skipReason != null;
+  if (hasSkipReason) {
     return { _tag: "deny", reason: skipReason };
   }
 
   const hookRunningCalls = facts.gitCalls.filter((gitCall) => ["commit", "push"].includes(gitCall.subcommand));
-  const repoFolders = hookRunningCalls.map((gitCall) => repoFolderOf(gitCall, check.startFolder));
-  const knownFolders = repoFolders.filter((folder) => folder !== undefined);
+  const repoFolders = hookRunningCalls.map((gitCall) => readRepoFolder(gitCall, check.startFolder));
+  const knownFolders = repoFolders.filter((folder) => folder != null);
   const uninstalledReasons = [...new Set(knownFolders)]
-    .map((folder) => missingHooksReason(check.inspectRepo(folder)))
-    .filter((reason) => reason !== undefined);
+    .map((folder) => readMissingHooksReason(check.inspectRepo(folder)))
+    .filter((reason) => reason != null);
   const [firstReason] = uninstalledReasons;
-  if (firstReason === undefined) {
+
+  const isFirstReasonMissing = firstReason == null;
+  if (isFirstReasonMissing) {
     return ALLOW;
   }
 

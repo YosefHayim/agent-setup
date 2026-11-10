@@ -19,12 +19,14 @@ const SECONDS_PER_HOUR = 3_600;
 const SECONDS_PER_DAY = 86_400;
 
 // Full command lines of every process can pass Node's default 1 MiB output limit, which cuts the listing short.
-const PS_OUTPUT_LIMIT = 64 * 1024 * 1024;
+const PS_PRINTOUT_LIMIT = 64 * 1024 * 1024;
 
 // A failed or cut-short listing throws, so the hook fails open instead of judging part of the table.
-const psLines = (columns: string): ReadonlyArray<string> => {
-  const listing = spawnSync("ps", ["-A", "-ww", "-o", columns], { encoding: "utf8", maxBuffer: PS_OUTPUT_LIMIT });
-  if (listing.error) {
+const listPsLines = (columns: string): ReadonlyArray<string> => {
+  const listing = spawnSync("ps", ["-A", "-ww", "-o", columns], { encoding: "utf8", maxBuffer: PS_PRINTOUT_LIMIT });
+
+  const hasListingError = listing.error;
+  if (hasListingError) {
     throw listing.error;
   }
 
@@ -32,9 +34,11 @@ const psLines = (columns: string): ReadonlyArray<string> => {
 };
 
 // ps prints the time a process has run as [[days-]hours:]minutes:seconds; a text in another shape counts as 0.
-export const elapsedSecondsOf = (elapsedText: string): number => {
-  const parts = ELAPSED_TIME.exec(elapsedText);
-  if (!parts) {
+export const readElapsedSeconds = (elapsedString: string): number => {
+  const parts = ELAPSED_TIME.exec(elapsedString);
+
+  const hasNoParts = !parts;
+  if (hasNoParts) {
     return 0;
   }
 
@@ -47,43 +51,49 @@ export const elapsedSecondsOf = (elapsedText: string): number => {
   );
 };
 
-interface CommandEntry {
+interface CommandLine {
   readonly commandLine: string;
   readonly elapsedSeconds: number;
 }
 
-const commandLineEntryOf = (line: string): ReadonlyArray<readonly [number, CommandEntry]> => {
-  const match = COMMAND_LINE.exec(line);
-  if (!match) {
+const listCommandLine = (line: string): ReadonlyArray<readonly [number, CommandLine]> => {
+  const hit = COMMAND_LINE.exec(line);
+  const isHitMissing = hit == null;
+  if (isHitMissing) {
     return [];
   }
 
-  const [, processIdText = "", elapsedText = "", commandLine = ""] = match;
-  return [[Number(processIdText), { commandLine, elapsedSeconds: elapsedSecondsOf(elapsedText) }]];
+  const [, processIdString = "", elapsedString = "", commandLine = ""] = hit;
+  return [[Number(processIdString), { commandLine, elapsedSeconds: readElapsedSeconds(elapsedString) }]];
 };
 
 // A process that started between the two ps runs has no command line and is left out.
-const runningProcessOf = (
+const listRunningProcess = (
   line: string,
-  commandEntries: ReadonlyMap<number, CommandEntry>,
+  commandLines: ReadonlyMap<number, CommandLine>,
 ): ReadonlyArray<RunningProcess> => {
-  const match = NAME_LINE.exec(line);
-  if (!match) {
+  const hit = NAME_LINE.exec(line);
+
+  const hasNoHit = !hit;
+  if (hasNoHit) {
     return [];
   }
 
-  const [, processIdText = "", parentProcessIdText = "", nameText = ""] = match;
-  const processId = Number(processIdText);
-  const commandEntry = commandEntries.get(processId);
-  if (commandEntry === undefined) {
+  const [, processIdString = "", parentProcessIdString = "", nameString = ""] = hit;
+  const processId = Number(processIdString);
+
+  const commandLine = commandLines.get(processId);
+
+  const isCommandLineMissing = commandLine == null;
+  if (isCommandLineMissing) {
     return [];
   }
 
-  return [{ processId, parentProcessId: Number(parentProcessIdText), name: nameText.trim(), ...commandEntry }];
+  return [{ processId, parentProcessId: Number(parentProcessIdString), name: nameString.trim(), ...commandLine }];
 };
 
-export const runningProcesses = (): ReadonlyArray<RunningProcess> => {
-  const commandLineEntries = psLines("pid=,etime=,command=").flatMap(commandLineEntryOf);
-  const commandEntries = new Map(commandLineEntries);
-  return psLines("pid=,ppid=,ucomm=").flatMap((line) => runningProcessOf(line, commandEntries));
+export const listRunningProcesses = (): ReadonlyArray<RunningProcess> => {
+  const commandLineLines = listPsLines("pid=,etime=,command=").flatMap(listCommandLine);
+  const commandLines = new Map(commandLineLines);
+  return listPsLines("pid=,ppid=,ucomm=").flatMap((line) => listRunningProcess(line, commandLines));
 };

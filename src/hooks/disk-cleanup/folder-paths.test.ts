@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { folderPaths, isInsideAnyFolder } from "./folder-paths.js";
+import { isInsideAnyFolder, readFolderPaths } from "./folder-paths.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const workspaces: Array<string> = [];
@@ -43,7 +43,7 @@ describe("folderPaths", () => {
   it("names a folder found through a link by its real path too", () => {
     const code = createLinkedCodeFolder();
 
-    expect(folderPaths({ folder: code.linkedAppFolder, roots: [] }).paths).toEqual([
+    expect(readFolderPaths({ folder: code.linkedAppFolder, roots: [] }).paths).toEqual([
       code.linkedAppFolder,
       code.appFolder,
     ]);
@@ -52,7 +52,7 @@ describe("folderPaths", () => {
   it("names a folder found at its real path by its path through a root that links to it", () => {
     const code = createLinkedCodeFolder();
 
-    expect(folderPaths({ folder: code.appFolder, roots: [code.linkedRoot] }).paths).toEqual([
+    expect(readFolderPaths({ folder: code.appFolder, roots: [code.linkedRoot] }).paths).toEqual([
       code.appFolder,
       code.linkedAppFolder,
     ]);
@@ -63,7 +63,7 @@ describe("folderPaths", () => {
     const topLink = path.join(code.realWorkspace, "top");
     symlinkSync("/", topLink);
 
-    expect(folderPaths({ folder: code.appFolder, roots: [topLink] }).paths).toEqual([
+    expect(readFolderPaths({ folder: code.appFolder, roots: [topLink] }).paths).toEqual([
       code.appFolder,
       path.join(topLink, code.appFolder),
     ]);

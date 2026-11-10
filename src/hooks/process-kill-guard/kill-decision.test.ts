@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RunningProcess } from "../process-table.js";
 import { decideKill } from "./kill-decision.js";
-import { killTargetsIn } from "./kill-targets.js";
+import { listKillTargetsIn } from "./kill-targets.js";
 
 const sessionProcessId = 32935;
 const processes: ReadonlyArray<RunningProcess> = [
@@ -37,7 +37,7 @@ const processes: ReadonlyArray<RunningProcess> = [
 ];
 
 const decide = (command: string) =>
-  decideKill({ killTargets: killTargetsIn(command), processes, claudeProcessIds: new Set([sessionProcessId]) });
+  decideKill({ killTargets: listKillTargetsIn(command), processes, claudeProcessIds: new Set([sessionProcessId]) });
 
 describe("decideKill", () => {
   it("denies pkill -f cat and names the session, its terminal, and the apps it would stop", () => {

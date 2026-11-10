@@ -26,11 +26,11 @@ const FILE_MUTATION_COMMAND =
 // "gh pr create --body-file - <<'EOF'" — not under "bash <<'EOF'", "git run-script -F - <<'EOF'" (an alias or an
 // extension may run its input; neither can take the name of a built-in command), "cat <<EOF" (the shell expands
 // it), "cat <<'EOF' | sh" or "cat <<'EOF' > >(sh)"
-const STORED_HEREDOC_TEXT =
+const STORED_HEREDOC_STRING =
   /((?:^|[\n;&|]|\s(?:-[a-z]*m|--message|--body|--title)[ =]"\$\()[ \t]*(?:cat\b|(?:git(?:\s+-[Cc]\s+[^\s;&|(]+)*\s+(?:commit|tag|notes|merge)|gh\s+(?:pr|issue|release|api))(?=\s)[^\n;&|(]*\s(?:-F|--file|--body-file|--notes-file|--input)[ =]-(?=[\s<]))[^\n;&|(]*<<-?[ \t]*(['"])(\w+)\2[^\n|(]*\n)[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g;
 // e.g. the quoted text in "git commit -m 'drop the /tmp log'" or "gh pr create --body \"plain words\"" — not
 // "-m \"$(date)\"", which the shell runs, or "touch -m '/tmp/a'"
-const QUOTED_MESSAGE_VALUE =
+const QUOTED_MESSAGE_FIELD =
   /(?<=\b(?:git|gh)\b[^\n;&|]*\s(?:-[a-z]*m|--message|--body|--title)[ =])(?:'[^']*'|"[^"$`]*")/g;
 // e.g. "ls -la /tmp", "rm -f /tmp/a.log", "find /tmp -name x" — reading or cleaning a scratch folder stays allowed
 const READ_OR_CLEAN_COMMAND =
@@ -73,56 +73,66 @@ const isObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null;
 
 const isScratchPath = (check: ScratchPathCheck): boolean => {
-  if (check.candidate === undefined || check.candidate.length === 0) {
+  const candidate = check.candidate;
+  const hasNoCandidate = candidate == null || candidate.length === 0;
+  if (hasNoCandidate) {
     return false;
   }
 
   const insideSystemScratchFolder =
-    check.candidate === check.systemScratchFolder || check.candidate.startsWith(`${check.systemScratchFolder}/`);
-  if (SCRATCH_FOLDER_REFERENCE.test(check.candidate) || insideSystemScratchFolder) {
+    candidate === check.systemScratchFolder || candidate.startsWith(`${check.systemScratchFolder}/`);
+  const isScratchFolderNamed = SCRATCH_FOLDER_REFERENCE.test(candidate) || insideSystemScratchFolder;
+  if (isScratchFolderNamed) {
     return true;
   }
 
   return (
-    !check.candidate.startsWith("/") &&
-    check.workingDirectory !== undefined &&
-    SCRATCH_FOLDER_REFERENCE.test(path.resolve(check.workingDirectory, check.candidate))
+    !candidate.startsWith("/") &&
+    check.workingDirectory != null &&
+    SCRATCH_FOLDER_REFERENCE.test(path.resolve(check.workingDirectory, candidate))
   );
 };
 
 // Tool inputs nest paths at any depth (MultiEdit edits, MCP arguments), so every path-named field counts.
-const pathFields = (candidate: unknown): ReadonlyArray<string> => {
-  if (!isObject(candidate)) {
+const listPathFields = (candidate: unknown): ReadonlyArray<string> => {
+  const isNotObjectCandidate = !isObject(candidate);
+  if (isNotObjectCandidate) {
     return [];
   }
 
   return Object.entries(candidate).flatMap(([key, field]) => {
-    if (typeof field === "string") {
-      return PATH_FIELD_NAME.test(key) ? [field] : [];
+    const isStringField = typeof field === "string";
+    if (isStringField) {
+      const isPathFieldName = PATH_FIELD_NAME.test(key);
+      return isPathFieldName ? [field] : [];
     }
 
-    return pathFields(field);
+    return listPathFields(field);
   });
 };
 
-const commandTextOf = (toolInput: unknown): string => {
-  if (typeof toolInput === "string") {
-    return toolInput;
+const readToolCommandString = (toolDetails: unknown): string => {
+  const isToolDetailsString = typeof toolDetails === "string";
+  if (isToolDetailsString) {
+    return toolDetails;
   }
 
-  if (!isObject(toolInput)) {
+  const isToolDetailsInvalid = !isObject(toolDetails);
+  if (isToolDetailsInvalid) {
     return "";
   }
 
-  return COMMAND_FIELDS.map((field) => toolInput[field])
+  return COMMAND_FIELDS.map((field) => toolDetails[field])
     .filter((field) => typeof field === "string")
     .join("\n");
 };
 
 // A shell left inside a scratch folder must still be able to leave it.
-const commandFolderOf = (commandText: string, workingDirectory: string | undefined): string | undefined => {
-  const folderChange = LEADING_FOLDER_CHANGE.exec(commandText);
-  if (folderChange === null) {
+const readCommandFolder = (commandString: string, workingDirectory: string | undefined): string | undefined => {
+  const folderChange = LEADING_FOLDER_CHANGE.exec(commandString);
+
+  const isFolderChangeMissing = folderChange === null;
+  if (isFolderChangeMissing) {
     return workingDirectory;
   }
 
@@ -130,66 +140,83 @@ const commandFolderOf = (commandText: string, workingDirectory: string | undefin
   return path.resolve(workingDirectory || os.homedir(), target);
 };
 
-const patchTargetsOf = (commandText: string): ReadonlyArray<string> =>
-  [...commandText.matchAll(PATCH_TARGET_HEADER)].flatMap((header) =>
-    header[1] === undefined ? [] : [header[1].trim()],
-  );
+const listPatchTargets = (commandString: string): ReadonlyArray<string> =>
+  [...commandString.matchAll(PATCH_TARGET_HEADER)].flatMap((header) => {
+    const targetPath = header[1];
+    const hasNoTargetPath = targetPath == null;
+    return hasNoTargetPath ? [] : [targetPath.trim()];
+  });
 
 // Text a command only stores or sends is not a command; the content of a Write call is not judged either.
-const withoutMessageText = (commandText: string): string =>
-  commandText.replace(STORED_HEREDOC_TEXT, "$1").replace(QUOTED_MESSAGE_VALUE, "");
+const readWithoutMessageString = (commandString: string): string =>
+  commandString.replace(STORED_HEREDOC_STRING, "$1").replace(QUOTED_MESSAGE_FIELD, "");
 
-const shellCommandWritesScratch = (request: ScratchWriteRequest & { commandText: string }): boolean => {
-  const { commandText } = request;
-  if (SCRATCH_FILE_FACTORY.test(commandText) || SCRATCH_VARIABLE_ASSIGNMENT.test(commandText)) {
+const isShellCommandWritingScratch = (request: ScratchWriteRequest & { commandText: string }): boolean => {
+  const { commandText: commandString } = request;
+
+  const isScratchWriteCommand =
+    SCRATCH_FILE_FACTORY.test(commandString) || SCRATCH_VARIABLE_ASSIGNMENT.test(commandString);
+  if (isScratchWriteCommand) {
     return true;
   }
 
   const runsInScratchFolder = isScratchPath({
     ...request,
-    candidate: commandFolderOf(commandText, request.workingDirectory),
+    candidate: readCommandFolder(commandString, request.workingDirectory),
   });
-  const mentionsScratchFolder = SCRATCH_FOLDER_REFERENCE.test(commandText) || RUNTIME_SCRATCH_LOOKUP.test(commandText);
-  if (!mentionsScratchFolder && !runsInScratchFolder) {
+
+  const mentionsScratchFolder =
+    SCRATCH_FOLDER_REFERENCE.test(commandString) || RUNTIME_SCRATCH_LOOKUP.test(commandString);
+
+  const isNotScratchReference = !mentionsScratchFolder && !runsInScratchFolder;
+  if (isNotScratchReference) {
     return false;
   }
 
-  if (runsInScratchFolder && !READ_OR_CLEAN_COMMAND.test(commandText)) {
+  const isScratchCommandNotReadOnly = runsInScratchFolder && !READ_OR_CLEAN_COMMAND.test(commandString);
+  if (isScratchCommandNotReadOnly) {
     return true;
   }
 
   return (
-    REDIRECT_INTO_SCRATCH.test(commandText) ||
-    COPY_INTO_SCRATCH.test(commandText) ||
-    FILE_MUTATION_COMMAND.test(commandText) ||
-    patchTargetsOf(commandText).some((candidate) => isScratchPath({ ...request, candidate }))
+    REDIRECT_INTO_SCRATCH.test(commandString) ||
+    COPY_INTO_SCRATCH.test(commandString) ||
+    FILE_MUTATION_COMMAND.test(commandString) ||
+    listPatchTargets(commandString).some((candidate) => isScratchPath({ ...request, candidate }))
   );
 };
 
-const fileToolWritesScratch = (request: ScratchWriteRequest & { commandText: string }): boolean => {
-  if (pathFields(request.toolInput).some((candidate) => isScratchPath({ ...request, candidate }))) {
+const isFileToolWritingScratch = (request: ScratchWriteRequest & { commandText: string }): boolean => {
+  const isAnyPathScratch = listPathFields(request.toolInput).some((candidate) =>
+    isScratchPath({ ...request, candidate }),
+  );
+  if (isAnyPathScratch) {
     return true;
   }
 
-  const patchTargets = patchTargetsOf(request.commandText);
-  if (patchTargets.length > 0) {
+  const patchTargets = listPatchTargets(request.commandText);
+
+  const hasPatchTargets = patchTargets.length > 0;
+  if (hasPatchTargets) {
     return patchTargets.some((candidate) => isScratchPath({ ...request, candidate }));
   }
 
   return SCRATCH_FOLDER_REFERENCE.test(request.commandText);
 };
 
-const writesScratch = (request: ScratchWriteRequest): boolean => {
-  const commandText = commandTextOf(request.toolInput);
-  if (SHELL_TOOL.test(request.toolName) || CODEX_SHELL_CALL.test(commandText)) {
-    const judgedText = withoutMessageText(commandText);
-    return shellCommandWritesScratch({ ...request, commandText: judgedText });
+const isWritingScratch = (request: ScratchWriteRequest): boolean => {
+  const commandString = readToolCommandString(request.toolInput);
+
+  const isShellCommandCheck = SHELL_TOOL.test(request.toolName) || CODEX_SHELL_CALL.test(commandString);
+  if (isShellCommandCheck) {
+    const judgedString = readWithoutMessageString(commandString);
+    return isShellCommandWritingScratch({ ...request, commandText: judgedString });
   }
 
   // MCP and namespaced tools ("mcp__fs__write_file", "functions.apply_patch") are judged by their last segment.
   const toolVerb = request.toolName.slice(request.toolName.lastIndexOf(".") + 1);
-  return FILE_WRITE_TOOL.test(toolVerb) && fileToolWritesScratch({ ...request, commandText });
+  return FILE_WRITE_TOOL.test(toolVerb) && isFileToolWritingScratch({ ...request, commandText: commandString });
 };
 
 export const decideScratchWrite = (request: ScratchWriteRequest): ScratchWriteDecision =>
-  writesScratch(request) ? { _tag: "block", reason: BLOCK_REASON } : { _tag: "allow" };
+  isWritingScratch(request) ? { _tag: "block", reason: BLOCK_REASON } : { _tag: "allow" };

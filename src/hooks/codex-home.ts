@@ -1,3 +1,7 @@
 import path from "node:path";
+import { readCodexHomeFolder } from "./environment.js";
 
-export const codexHome = (homeRoot: string): string => process.env.CODEX_HOME || path.join(homeRoot, ".codex");
+export const readCodexHome = (homeRoot: string): string => {
+  const configuredFolder = readCodexHomeFolder();
+  return configuredFolder ?? path.join(homeRoot, ".codex");
+};

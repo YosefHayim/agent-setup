@@ -13,7 +13,7 @@ import {
 
 describe("decodeTranscriptLine", () => {
   it("reads a Claude Code entry's turn state and token usage from its message", () => {
-    const entry = decodeTranscriptLine(
+    const line = decodeTranscriptLine(
       JSON.stringify({
         type: "assistant",
         message: {
@@ -24,7 +24,7 @@ describe("decodeTranscriptLine", () => {
         },
       }),
     );
-    expect(entry).toEqual({
+    expect(line).toEqual({
       isSidechain: false,
       type: "assistant",
       role: "",
@@ -36,8 +36,14 @@ describe("decodeTranscriptLine", () => {
   });
 
   it("reads a role-only entry whose content sits on the entry itself", () => {
-    const entry = decodeTranscriptLine(JSON.stringify({ role: "user", content: "hello", isSidechain: true }));
-    expect(entry).toMatchObject({ type: "", role: "user", content: "hello", isSidechain: true, usage: undefined });
+    const transcriptLine = decodeTranscriptLine(JSON.stringify({ role: "user", content: "hello", isSidechain: true }));
+    expect(transcriptLine).toMatchObject({
+      type: "",
+      role: "user",
+      content: "hello",
+      isSidechain: true,
+      usage: undefined,
+    });
   });
 
   it("skips blank and malformed lines", () => {

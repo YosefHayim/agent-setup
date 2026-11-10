@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { liveClaudeProcessIds, liveClaudeSessionIds } from "./claude-live-sessions.js";
+import { readLiveClaudeProcessIds, readLiveClaudeSessionIds } from "./claude-live-sessions.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const runningSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
@@ -32,13 +32,13 @@ const registerSession = (request: {
   );
 };
 
-const exitedProcessId = (): number => {
+const readExitedProcessId = (): number => {
   const exitedProcess = spawnSync(process.execPath, ["-e", ""]);
   return exitedProcess.pid;
 };
 
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
-const linkToItself = (folder: string) => {
+const runLinkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
   symlinkSync(folder, folder);
 };
@@ -52,11 +52,11 @@ afterEach(() => {
 describe("liveClaudeSessionIds", () => {
   it("lists the session a running process holds and skips one whose process exited", () => {
     const homeRoot = createHomeRoot();
-    const configRoot = path.join(homeRoot, ".claude");
-    registerSession({ configRoot, sessionId: runningSessionId, processId: process.pid });
-    registerSession({ configRoot, sessionId: exitedSessionId, processId: exitedProcessId() });
+    const settingsRoot = path.join(homeRoot, ".claude");
+    registerSession({ configRoot: settingsRoot, sessionId: runningSessionId, processId: process.pid });
+    registerSession({ configRoot: settingsRoot, sessionId: exitedSessionId, processId: readExitedProcessId() });
 
-    const liveSessionIds = liveClaudeSessionIds(homeRoot);
+    const liveSessionIds = readLiveClaudeSessionIds(homeRoot);
 
     expect(liveSessionIds.has(runningSessionId)).toBe(true);
     expect(liveSessionIds.has(exitedSessionId)).toBe(false);
@@ -70,7 +70,7 @@ describe("liveClaudeSessionIds", () => {
       processId: process.pid,
     });
 
-    expect(liveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
+    expect(readLiveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
   });
 
   it("skips a registry entry that is not a session", () => {
@@ -80,7 +80,7 @@ describe("liveClaudeSessionIds", () => {
     writeFileSync(path.join(registryFolder, "1.json"), "{");
     writeFileSync(path.join(registryFolder, "2.json"), JSON.stringify({ pid: process.pid }));
 
-    expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(false);
+    expect(readLiveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(false);
   });
 
   it("reads a config root that never ran a session as holding none", () => {
@@ -92,11 +92,11 @@ describe("liveClaudeSessionIds", () => {
       processId: process.pid,
     });
 
-    expect(liveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
+    expect(readLiveClaudeSessionIds(homeRoot).has(secondAccountSessionId)).toBe(true);
   });
 
   it.each<[string, (folder: string) => void]>([
-    ["a folder that links to itself", linkToItself],
+    ["a folder that links to itself", runLinkToItself],
     ["a file", (folder) => writeFileSync(folder, "")],
     ["a link to nowhere", (folder) => symlinkSync(`${folder}-gone`, folder)],
   ])("fails while %s stands where a registry folder belongs, since any session could be running", (_blocker, block) => {
@@ -105,14 +105,14 @@ describe("liveClaudeSessionIds", () => {
     mkdirSync(path.dirname(registryFolder), { recursive: true });
     block(registryFolder);
 
-    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+    expect(() => readLiveClaudeSessionIds(homeRoot)).toThrow();
   });
 
   it("fails while a config root is a link to nowhere, since a session could be running from it", () => {
     const homeRoot = createHomeRoot();
     symlinkSync(path.join(homeRoot, "unmounted"), path.join(homeRoot, ".claude-work"));
 
-    expect(() => liveClaudeSessionIds(homeRoot)).toThrow();
+    expect(() => readLiveClaudeSessionIds(homeRoot)).toThrow();
   });
 
   it("skips a file whose name looks like a config root", () => {
@@ -124,19 +124,19 @@ describe("liveClaudeSessionIds", () => {
       processId: process.pid,
     });
 
-    expect(liveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(true);
+    expect(readLiveClaudeSessionIds(homeRoot).has(runningSessionId)).toBe(true);
   });
 });
 
 describe("liveClaudeProcessIds", () => {
   it("lists the pid of each running session and skips one whose process exited", () => {
     const homeRoot = createHomeRoot();
-    const configRoot = path.join(homeRoot, ".claude");
-    const exitedPid = exitedProcessId();
-    registerSession({ configRoot, sessionId: runningSessionId, processId: process.pid });
-    registerSession({ configRoot, sessionId: exitedSessionId, processId: exitedPid });
+    const settingsRoot = path.join(homeRoot, ".claude");
+    const exitedPid = readExitedProcessId();
+    registerSession({ configRoot: settingsRoot, sessionId: runningSessionId, processId: process.pid });
+    registerSession({ configRoot: settingsRoot, sessionId: exitedSessionId, processId: exitedPid });
 
-    const liveProcessIds = liveClaudeProcessIds(homeRoot);
+    const liveProcessIds = readLiveClaudeProcessIds(homeRoot);
 
     expect(liveProcessIds.has(process.pid)).toBe(true);
     expect(liveProcessIds.has(exitedPid)).toBe(false);

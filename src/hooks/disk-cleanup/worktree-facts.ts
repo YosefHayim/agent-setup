@@ -1,8 +1,8 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { gitAnswerLines } from "../git-answers.js";
-import { isDefaultBranch, remoteDefaultBranch, remoteFor } from "./branch-remote.js";
+import { readGitAnswerLines } from "../git-answers.js";
+import { isDefaultBranch, readRemoteDefaultBranch, readRemoteFor } from "./branch-remote.js";
 import { hasLargeBlob, readLargeBlobLines } from "./large-blobs.js";
 import type { LinkedWorktree } from "./linked-worktrees.js";
 import {
@@ -34,7 +34,7 @@ const LATEST_COMMIT_FORMAT = ["--max-count=1", "--format=%H"];
 // git writes a linked worktree's .git file once, when it adds the worktree.
 const RECENT_WORKTREE_MILLISECONDS = 60 * 60 * 1_000;
 
-const fileBytes = (file: string): number => {
+const readFileBytes = (file: string): number => {
   try {
     return statSync(file).size;
   } catch {
@@ -43,28 +43,29 @@ const fileBytes = (file: string): number => {
 };
 
 const isRiskyChangeToPush = (request: { readonly folder: string; readonly relativePath: string }): boolean => {
-  const isLarge = fileBytes(path.join(request.folder, request.relativePath)) > LARGE_FILE_BYTES;
+  const isLarge = readFileBytes(path.join(request.folder, request.relativePath)) > LARGE_FILE_BYTES;
   return isLarge || hasRiskyName(request.relativePath);
 };
 
 // Porcelain lines read "XY path", or "XY old -> new" for a rename; a deleted file has nothing left to push.
-const changedPaths = (changeLines: ReadonlyArray<string>): ReadonlyArray<string> =>
+const listChangedPaths = (changeLines: ReadonlyArray<string>): ReadonlyArray<string> =>
   changeLines.filter((line) => !line.slice(0, 2).includes("D")).map((line) => line.slice(3).split(" -> ").at(-1) || "");
 
-const isInsideDependencies = (relativePath: string): boolean =>
+const isInsideCollaborators = (relativePath: string): boolean =>
   relativePath.split("/").some((folderName) => DEPENDENCY_FOLDERS.has(folderName));
 
 // Removing a worktree deletes its ignored files, so an ignored secret file is only safe to lose when the main
 // worktree holds the same file. One that cannot be read cannot be compared.
 const isUniqueIgnoredSecret = (request: { readonly worktree: LinkedWorktree; readonly relativePath: string }) => {
-  if (!isSecretFile(request.relativePath) || isInsideDependencies(request.relativePath)) {
+  const isKeptPath = !isSecretFile(request.relativePath) || isInsideCollaborators(request.relativePath);
+  if (isKeptPath) {
     return false;
   }
 
   try {
-    const worktreeContent = readFileSync(path.join(request.worktree.folder, request.relativePath));
-    const mainContent = readFileSync(path.join(request.worktree.mainFolder, request.relativePath));
-    return !worktreeContent.equals(mainContent);
+    const worktreeMessage = readFileSync(path.join(request.worktree.folder, request.relativePath));
+    const mainMessage = readFileSync(path.join(request.worktree.mainFolder, request.relativePath));
+    return !worktreeMessage.equals(mainMessage);
   } catch {
     return true;
   }
@@ -82,33 +83,35 @@ const isCreatedRecently = (folder: string): boolean => {
 export const readWorktreeFacts = (request: { readonly worktree: LinkedWorktree; readonly inUse: boolean }) => {
   const { worktree } = request;
   const detached = worktree.branch === "";
-  const unpushedRange = detached ? DETACHED_UNPUSHED_RANGE : BRANCH_UNPUSHED_RANGE;
-  const changeLines = gitAnswerLines({ folder: worktree.folder, query: CHANGE_QUERY });
-  const ignoredSecrets = gitAnswerLines({ folder: worktree.folder, query: IGNORED_SECRET_QUERY });
-  const unpushedCommits = gitAnswerLines({
+
+  const isDetached = detached;
+  const unpushedRange = isDetached ? DETACHED_UNPUSHED_RANGE : BRANCH_UNPUSHED_RANGE;
+  const changeLines = readGitAnswerLines({ folder: worktree.folder, query: CHANGE_QUERY });
+  const ignoredSecrets = readGitAnswerLines({ folder: worktree.folder, query: IGNORED_SECRET_QUERY });
+  const unpushedCommits = readGitAnswerLines({
     folder: worktree.folder,
     query: ["log", ...unpushedRange, ...LATEST_COMMIT_FORMAT],
   });
-  const committedFiles = gitAnswerLines({
+  const committedFiles = readGitAnswerLines({
     folder: worktree.folder,
     query: ["log", ...unpushedRange, ...COMMITTED_FILE_FORMAT],
   });
   const largeBlobLines = readLargeBlobLines({ folder: worktree.folder, range: unpushedRange });
-  const hasRiskyChange = changedPaths(changeLines || []).some((relativePath) =>
+  const hasRiskyChange = listChangedPaths(changeLines || []).some((relativePath) =>
     isRiskyChangeToPush({ folder: worktree.folder, relativePath }),
   );
   const hasRiskyCommit = (committedFiles || []).some(hasRiskyName) || hasLargeBlob(largeBlobLines || []);
   const hasUniqueIgnoredSecret = (ignoredSecrets || []).some((relativePath) =>
     isUniqueIgnoredSecret({ worktree, relativePath }),
   );
-  const remote = remoteFor(worktree);
-  const remoteDefault = remoteDefaultBranch({ folder: worktree.folder, remote });
+  const remote = readRemoteFor(worktree);
+  const remoteDefault = readRemoteDefaultBranch({ folder: worktree.folder, remote });
   const gitAnswers = [changeLines, ignoredSecrets, unpushedCommits, committedFiles, largeBlobLines];
   const facts: WorktreeFacts = {
     inUse: request.inUse,
     createdRecently: isCreatedRecently(worktree.folder),
     locked: worktree.locked,
-    readable: gitAnswers.every((answer) => answer !== undefined),
+    readable: gitAnswers.every((answer) => answer != null),
     detached,
     onDefaultBranch: isDefaultBranch({ branch: worktree.branch, remoteDefault }),
     knowsDefaultBranch: remoteDefault !== "",

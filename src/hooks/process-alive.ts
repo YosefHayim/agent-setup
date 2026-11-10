@@ -1,7 +1,6 @@
-// Signal 0 probes a pid without touching it; kill(0, 0) would probe our own process group, so only real pids count.
-// EPERM means the process is there and another user owns it.
 export const isProcessAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) {
+  const isInvalidPid = !Number.isInteger(pid) || pid <= 0;
+  if (isInvalidPid) {
     return false;
   }
 

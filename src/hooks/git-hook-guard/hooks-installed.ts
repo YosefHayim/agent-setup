@@ -1,34 +1,39 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { type GitQuestion, gitAnswerLines } from "../git-answers.js";
+import { type GitQuestion, readGitAnswerLines } from "../git-answers.js";
 
-export type RepoHooksState =
+export type RepoHooksStatus =
   | { readonly _tag: "ready" }
   | { readonly _tag: "needsInstall"; readonly toplevel: string; readonly installCommand: string }
   | { readonly _tag: "needsHooksPath"; readonly toplevel: string };
 
-const READY: RepoHooksState = { _tag: "ready" };
+const READY: RepoHooksStatus = { _tag: "ready" };
 
 const installCommandIn = (toplevel: string): string => {
   const usesNpm = existsSync(path.join(toplevel, "package-lock.json"));
+
   const usesPnpm = existsSync(path.join(toplevel, "pnpm-lock.yaml"));
-  if (usesNpm && !usesPnpm) {
+
+  const isUsingNpmOnly = usesNpm && !usesPnpm;
+  if (isUsingNpmOnly) {
     return "npm install";
   }
 
   return "pnpm install";
 };
 
-const needsInstall = (toplevel: string): RepoHooksState => ({
+const readNeedsInstall = (toplevel: string): RepoHooksStatus => ({
   _tag: "needsInstall",
   toplevel,
   installCommand: installCommandIn(toplevel),
 });
 
-const firstAnswerLine = (question: GitQuestion): string | undefined => {
-  const answerLines = gitAnswerLines(question);
-  if (!answerLines) {
+const readFirstAnswerLine = (question: GitQuestion): string | undefined => {
+  const answerLines = readGitAnswerLines(question);
+
+  const hasNoAnswerLines = !answerLines;
+  if (hasNoAnswerLines) {
     return undefined;
   }
 
@@ -36,26 +41,32 @@ const firstAnswerLine = (question: GitQuestion): string | undefined => {
 };
 
 // Husky v9 points core.hooksPath at .husky/_, a folder only `pnpm install` creates, so a fresh worktree has none.
-export const inspectRepoHooks = (folder: string): RepoHooksState => {
-  const toplevel = firstAnswerLine({ folder, query: ["rev-parse", "--show-toplevel"] });
-  if (toplevel === undefined) {
+export const inspectRepoHooks = (folder: string): RepoHooksStatus => {
+  const toplevel = readFirstAnswerLine({ folder, query: ["rev-parse", "--show-toplevel"] });
+
+  const isToplevelMissing = toplevel == null;
+  if (isToplevelMissing) {
     return READY;
   }
 
-  const hooksPath = firstAnswerLine({ folder: toplevel, query: ["config", "--type=path", "--get", "core.hooksPath"] });
-  const hasHooksPath = hooksPath !== undefined;
-  const hooksFolderIsMissing = hasHooksPath && !existsSync(path.resolve(toplevel, hooksPath));
-  if (hooksFolderIsMissing) {
-    return needsInstall(toplevel);
+  const hooksPath = readFirstAnswerLine({
+    folder: toplevel,
+    query: ["config", "--type=path", "--get", "core.hooksPath"],
+  });
+  const hasHooksPath = hooksPath != null;
+
+  const isHooksFolderMissing = hasHooksPath && !existsSync(path.resolve(toplevel, hooksPath));
+  if (isHooksFolderMissing) {
+    return readNeedsInstall(toplevel);
   }
 
-  const huskyIsNotInstalled = !hasHooksPath && existsSync(path.join(toplevel, ".husky"));
-  if (huskyIsNotInstalled) {
-    return needsInstall(toplevel);
+  const isHuskyMissing = !hasHooksPath && existsSync(path.join(toplevel, ".husky"));
+  if (isHuskyMissing) {
+    return readNeedsInstall(toplevel);
   }
 
-  const githooksIsNotUsed = !hasHooksPath && existsSync(path.join(toplevel, ".githooks"));
-  if (githooksIsNotUsed) {
+  const isGithooksUnused = !hasHooksPath && existsSync(path.join(toplevel, ".githooks"));
+  if (isGithooksUnused) {
     return { _tag: "needsHooksPath", toplevel };
   }
 

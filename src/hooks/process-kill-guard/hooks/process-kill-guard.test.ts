@@ -35,14 +35,14 @@ const createHomeWithSession = (processId: number): string => {
   return homeRoot;
 };
 
-const runHook = (hookInput: string, homeRoot: string) =>
+const runHook = (hookDetails: string, homeRoot: string) =>
   spawnSync(process.execPath, ["--import", "tsx", hookPath], {
-    input: hookInput,
+    input: hookDetails,
     encoding: "utf8",
     env: { ...process.env, HOME: homeRoot, CLAUDE_CONFIG_DIR: path.join(homeRoot, ".claude") },
   });
 
-const bashCall = (command: string): string => JSON.stringify({ tool_name: "Bash", tool_input: { command } });
+const readBashCall = (command: string): string => JSON.stringify({ tool_name: "Bash", tool_input: { command } });
 
 afterEach(() => {
   for (const standIn of standIns.splice(0)) {
@@ -68,7 +68,7 @@ describe("processKillGuard process boundary", () => {
     const standIn = await startSessionStandIn();
     const homeRoot = createHomeWithSession(Number(standIn.pid));
 
-    const execution = runHook(bashCall('pkill -f "cat" 2>/dev/null; git status --short'), homeRoot);
+    const execution = runHook(readBashCall('pkill -f "cat" 2>/dev/null; git status --short'), homeRoot);
 
     expect(execution.status).toBe(0);
     expect(execution.stderr).toBe("");
@@ -82,7 +82,7 @@ describe("processKillGuard process boundary", () => {
     const standIn = await startSessionStandIn();
     const homeRoot = createHomeWithSession(Number(standIn.pid));
 
-    const execution = runHook(bashCall("pkill -f wrangler"), homeRoot);
+    const execution = runHook(readBashCall("pkill -f wrangler"), homeRoot);
 
     expect(execution.status).toBe(0);
     expect(execution.stdout).toBe("");

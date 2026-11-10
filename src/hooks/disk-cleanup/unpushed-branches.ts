@@ -1,14 +1,14 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { codeRootFolders, repoRootsUnder } from "../code-repos.js";
-import { gitAnswerLines } from "../git-answers.js";
+import { listCodeRootFolders, listRepoRootsUnder } from "../code-repos.js";
+import { readGitAnswerLines } from "../git-answers.js";
 import { readBranchFacts } from "./branch-facts.js";
 import { pushBranch } from "./branch-push.js";
 import { decideBranchPush } from "./branch-push-decision.js";
 import { reportLine } from "./report-line.js";
-import { foldersOwnedBy } from "./session-transcripts.js";
-import { worktreesInUse } from "./worktrees-in-use.js";
+import { listFoldersOwnedBy } from "./session-transcripts.js";
+import { readWorktreesInUse } from "./worktrees-in-use.js";
 
 type BranchCleanupRequest = {
   readonly homeRoot: string;
@@ -47,7 +47,7 @@ const isMainCheckout = (repoFolder: string): boolean => {
 };
 
 const readBranchList = (repoFolder: string): RepoBranchList => {
-  const branchLines = gitAnswerLines({ folder: repoFolder, query: LOCAL_BRANCH_QUERY });
+  const branchLines = readGitAnswerLines({ folder: repoFolder, query: LOCAL_BRANCH_QUERY });
   const branches = branchLines?.map((line) => {
     const [branch, tip, ...checkoutParts] = line.split("\t");
     return { repoFolder, branch, tip, checkoutFolder: checkoutParts.join("\t") };
@@ -65,8 +65,8 @@ const isCheckedOut = (branch: LocalBranch): boolean =>
 // A branch whose commits cannot be listed counts as unpushed, so it is reported as kept rather than skipped unseen.
 const hasUnpushedCommits = (branch: LocalBranch): boolean => {
   const unpushedQuery = ["log", branch.tip, "--not", "--remotes", "--max-count=1", "--format=%H"];
-  const unpushedCommits = gitAnswerLines({ folder: branch.repoFolder, query: unpushedQuery });
-  return unpushedCommits === undefined || unpushedCommits.length > 0;
+  const unpushedCommits = readGitAnswerLines({ folder: branch.repoFolder, query: unpushedQuery });
+  return unpushedCommits == null || unpushedCommits.length > 0;
 };
 
 const pushUnpushedBranch = (request: {
@@ -78,16 +78,21 @@ const pushUnpushedBranch = (request: {
   const target = `${repoFolder} ${branch}`;
   const facts = readBranchFacts({ folder: repoFolder, branch, tip, inUse: request.inUse });
   const decision = decideBranchPush(facts);
-  if (decision._tag === "keep") {
+
+  const isDecision_tagKeep = decision._tag === "keep";
+  if (isDecision_tagKeep) {
     return reportLine({ action: "kept", detail: decision.reason, target });
   }
 
-  if (request.dryRun) {
+  const isDryRun = request.dryRun;
+  if (isDryRun) {
     return reportLine({ action: "would push", detail: `to ${facts.remote}`, target });
   }
 
   const pushStatus = pushBranch({ folder: repoFolder, remote: facts.remote, branch, commit: tip });
-  if (pushStatus._tag === "failed") {
+
+  const isPushStatus_tagFailed = pushStatus._tag === "failed";
+  if (isPushStatus_tagFailed) {
     return reportLine({ action: "kept", detail: `push failed: ${pushStatus.reason}`, target });
   }
 
@@ -98,14 +103,14 @@ const pushUnpushedBranch = (request: {
 // tree or not, and whether the worktree pass kept that work tree, left it alone, or never saw it. Only repos the ended
 // session named are looked at, and a manual pass looks at every repo under the code roots.
 export const pushUnpushedBranches = (request: BranchCleanupRequest): ReadonlyArray<string> => {
-  const roots = codeRootFolders(request);
-  const repoFolders = repoRootsUnder(roots).filter(isMainCheckout);
-  const ownedRepoFolders = foldersOwnedBy({ ...request, folders: repoFolders, roots });
+  const roots = listCodeRootFolders(request);
+  const repoFolders = listRepoRootsUnder(roots).filter(isMainCheckout);
+  const ownedRepoFolders = listFoldersOwnedBy({ ...request, folders: repoFolders, roots });
   const branchLists = ownedRepoFolders.map(readBranchList);
   const unreadableLines = branchLists.filter((branchList) => !branchList.branches).map(reportUnreadableRepo);
   const unpushedBranches = branchLists.flatMap((branchList) => branchList.branches || []).filter(hasUnpushedCommits);
   const worktreeFolders = unpushedBranches.filter(isCheckedOut).map((branch) => branch.checkoutFolder);
-  const usedFolders = worktreesInUse({ ...request, worktreeFolders, roots });
+  const usedFolders = readWorktreesInUse({ ...request, worktreeFolders, roots });
   const branchLines = unpushedBranches.map((branch) => {
     const inUse = isCheckedOut(branch) && usedFolders.has(branch.checkoutFolder);
     return pushUnpushedBranch({ branch, inUse, dryRun: request.dryRun });

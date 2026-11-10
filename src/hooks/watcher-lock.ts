@@ -29,12 +29,16 @@ const createLock = (lockFile: string): boolean => {
 // One watcher of a feature acts at a time; a lock left by a dead watcher is taken over.
 export const acquireWatcherLock = (lockFile: string): boolean => {
   mkdirSync(path.dirname(lockFile), { recursive: true });
-  if (createLock(lockFile)) {
+
+  const hasCreatedLock = createLock(lockFile);
+  if (hasCreatedLock) {
     return true;
   }
 
   const holder = lockHolder(lockFile);
-  if (holder === process.pid) {
+
+  const isOwnPid = holder === process.pid;
+  if (isOwnPid) {
     return true;
   }
 
@@ -53,7 +57,8 @@ export const isWatcherLockHeldByOther = (lockFile: string): boolean => {
 };
 
 export const releaseWatcherLock = (lockFile: string): void => {
-  if (lockHolder(lockFile) === process.pid) {
+  const isLockHeldByThisProcess = lockHolder(lockFile) === process.pid;
+  if (isLockHeldByThisProcess) {
     rmSync(lockFile, { force: true });
   }
 };

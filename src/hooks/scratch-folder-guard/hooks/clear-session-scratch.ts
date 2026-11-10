@@ -1,16 +1,17 @@
 #!/usr/bin/env node
-// SessionEnd hook: hands the ended session to a detached scratch watcher and exits at once, because deleting a large
-// scratch folder takes longer than the agent waits. Fails open.
 
 import { readFileSync } from "node:fs";
 
 import { startDetachedWatcher } from "../../detached-watcher.js";
-import { sessionIdFrom } from "../../session-ids.js";
+import { readSessionIdFrom } from "../../session-ids.js";
 
-const handOverEndedSession = (): void => {
-  const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));
-  const endedSessionId = sessionIdFrom(hookInput);
-  if (!endedSessionId) {
+const runHandOverEndedSession = (): void => {
+  const hookDetails: unknown = JSON.parse(readFileSync(0, "utf8"));
+
+  const endedSessionId = readSessionIdFrom(hookDetails);
+
+  const hasNoEndedSessionId = !endedSessionId;
+  if (hasNoEndedSessionId) {
     return;
   }
 
@@ -22,7 +23,7 @@ const handOverEndedSession = (): void => {
 };
 
 try {
-  handOverEndedSession();
+  runHandOverEndedSession();
 } catch {
   // Never block or delay the agent's exit.
 }

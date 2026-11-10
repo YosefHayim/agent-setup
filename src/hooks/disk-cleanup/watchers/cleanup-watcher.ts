@@ -1,28 +1,22 @@
 #!/usr/bin/env node
-// Detached watcher behind the disk-cleanup hook, and the command for a manual pass:
-//   node cleanup-watcher.js [--session <id>] [--wait] [--caches-only] [--dry-run]
-// --session names the ended session: only the worktrees it created or worked in, and the unpushed branches of the repos
-// it named, are looked at, and it no longer counts as live. Without it every worktree and repo is looked at. --wait
-// first waits for that session to end. --caches-only looks at no worktree or branch, for an agent whose sessions own
-// none. Each pass that is not a dry run adds what it did to the cleanup log.
-// Fails open: a crash leaves every worktree, branch, and cache where it was.
 
 import { writeSync } from "node:fs";
 import os from "node:os";
 import { parseArgs } from "node:util";
-
-import { readConfig } from "../../hook-config.js";
+import { readDiskCleanupWaitLimitMilliseconds } from "../../environment.js";
+import { readFailureText } from "../../failure-text.js";
+import { readSettings } from "../../hook-config.js";
 import { claimIntervalSlot } from "../../interval-stamp.js";
 import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../watcher-lock.js";
 import { cleanUpCaches } from "../cache-cleanup.js";
 import { appendToCleanupLog } from "../cleanup-log.js";
-import { cacheCleanupStampFile, cleanupLockFile } from "../cleanup-state.js";
+import { cacheCleanupStampFile, readCleanupLockFile } from "../cleanup-state.js";
 import { isSessionLive } from "../live-sessions.js";
 import { reportLine } from "../report-line.js";
 import { pushUnpushedBranches } from "../unpushed-branches.js";
 import { cleanUpWorktrees } from "../worktree-cleanup.js";
 
-type WatcherOptions = {
+type WatcherSettings = {
   readonly sessionId: string;
   readonly wait: boolean;
   readonly cachesOnly: boolean;
@@ -34,8 +28,8 @@ const DEFAULT_WAIT_LIMIT_MILLISECONDS = 10 * 60 * 1_000;
 // Sessions end many times a day; the caches only need a look once a day.
 const CACHE_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60;
 
-const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
-  const { values } = parseArgs({
+const decodeWatcherSettings = (argv: ReadonlyArray<string>): WatcherSettings => {
+  const { values: fields } = parseArgs({
     args: [...argv],
     options: {
       session: { type: "string", default: "" },
@@ -46,83 +40,94 @@ const decodeWatcherOptions = (argv: ReadonlyArray<string>): WatcherOptions => {
     strict: true,
   });
   return {
-    sessionId: values.session,
-    wait: values.wait,
-    cachesOnly: values["caches-only"],
-    dryRun: values["dry-run"],
+    sessionId: fields.session,
+    wait: fields.wait,
+    cachesOnly: fields["caches-only"],
+    dryRun: fields["dry-run"],
   };
 };
 
-const waitLimitMilliseconds = (): number =>
-  Number(process.env.AGENT_SETUP_DISK_CLEANUP_WAIT_LIMIT_MILLISECONDS) || DEFAULT_WAIT_LIMIT_MILLISECONDS;
+const waitLimitMilliseconds = (): number => readDiskCleanupWaitLimitMilliseconds() ?? DEFAULT_WAIT_LIMIT_MILLISECONDS;
 
-const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const pause = (milliseconds: number): Promise<void> => new Promise((fulfill) => setTimeout(fulfill, milliseconds));
 
 // SessionEnd runs before the agent exits, and the agent's own folder only frees up once it has. While another
 // watcher holds the lock this one cannot act anyway, so it does not look at the session until the lock frees.
 const waitUntilReady = async (request: { readonly homeRoot: string; readonly sessionId: string }) => {
   const deadline = Date.now() + waitLimitMilliseconds();
   while (Date.now() < deadline) {
-    const isLockFree = !isWatcherLockHeldByOther(cleanupLockFile());
-    if (isLockFree && !isSessionLive(request) && acquireWatcherLock(cleanupLockFile())) {
+    const isLockFree = !isWatcherLockHeldByOther(readCleanupLockFile());
+
+    const isWatcherLockClaimed = isLockFree && !isSessionLive(request) && acquireWatcherLock(readCleanupLockFile());
+    if (isWatcherLockClaimed) {
       return true;
     }
+
     await pause(WAIT_POLL_MILLISECONDS);
   }
   return false;
 };
 
-const isCacheCleanupDue = (options: WatcherOptions): boolean =>
-  options.dryRun ||
+const isCacheCleanupDue = (settings: WatcherSettings): boolean =>
+  settings.dryRun ||
   claimIntervalSlot({ stampFile: cacheCleanupStampFile(), minimumSeconds: CACHE_CLEANUP_INTERVAL_SECONDS });
 
-const claimCleanupTurn = (request: { readonly homeRoot: string; readonly options: WatcherOptions }) => {
-  if (!request.options.wait) {
-    return Promise.resolve(acquireWatcherLock(cleanupLockFile()));
+const claimCleanupTurn = (request: { readonly homeRoot: string; readonly options: WatcherSettings }) => {
+  const isNotWaiting = !request.options.wait;
+  if (isNotWaiting) {
+    return Promise.resolve(acquireWatcherLock(readCleanupLockFile()));
   }
 
   return waitUntilReady({ homeRoot: request.homeRoot, sessionId: request.options.sessionId });
 };
 
-const logGivingUp = (options: WatcherOptions): void => {
-  if (!options.wait || options.dryRun) {
+const logGivingUp = (settings: WatcherSettings): void => {
+  const isWaitSkipped = !settings.wait || settings.dryRun;
+  if (isWaitSkipped) {
     return;
   }
 
-  const target = `session ${options.sessionId}`;
+  const target = `session ${settings.sessionId}`;
   appendToCleanupLog([reportLine({ action: "gave up", detail: "wait limit reached", target })]);
 };
 
 const runWatcher = async (): Promise<void> => {
-  const options = decodeWatcherOptions(process.argv.slice(2));
-  const homeRoot = process.env.HOME || os.homedir();
+  const settings = decodeWatcherSettings(process.argv.slice(2));
+  const homeRoot = os.homedir();
   // The hook starts this watcher in the ended session's folder, which may be one of the worktrees it removes.
   process.chdir(homeRoot);
-  const hasTurn = await claimCleanupTurn({ homeRoot, options });
-  if (!hasTurn) {
-    logGivingUp(options);
+
+  const hasNoTurn = !(await claimCleanupTurn({ homeRoot, options: settings }));
+  if (hasNoTurn) {
+    logGivingUp(settings);
     return;
   }
 
   try {
-    const cleanupRequest = { homeRoot, endedSessionId: options.sessionId, dryRun: options.dryRun };
-    const rootFolders = readConfig().diskCleanupRoots;
-    const worktreeLines = options.cachesOnly ? [] : cleanUpWorktrees({ ...cleanupRequest, rootFolders });
-    const branchLines = options.cachesOnly ? [] : pushUnpushedBranches({ ...cleanupRequest, rootFolders });
-    const cacheLines = isCacheCleanupDue(options) ? cleanUpCaches(cleanupRequest) : [];
+    const cleanupRequest = { homeRoot, endedSessionId: settings.sessionId, dryRun: settings.dryRun };
+    const rootFolders = readSettings().diskCleanupRoots;
+
+    const isCachesOnly = settings.cachesOnly;
+    const worktreeLines = isCachesOnly ? [] : cleanUpWorktrees({ ...cleanupRequest, rootFolders });
+    const branchLines = isCachesOnly ? [] : pushUnpushedBranches({ ...cleanupRequest, rootFolders });
+    const cacheLines = isCacheCleanupDue(settings) ? cleanUpCaches(cleanupRequest) : [];
     const reportLines = [...worktreeLines, ...branchLines, ...cacheLines];
     writeSync(1, reportLines.map((line) => `${line}\n`).join(""));
-    if (!options.dryRun) {
+
+    const isNotDryRun = !settings.dryRun;
+    if (isNotDryRun) {
       appendToCleanupLog(reportLines);
     }
   } finally {
-    releaseWatcherLock(cleanupLockFile());
+    releaseWatcherLock(readCleanupLockFile());
   }
 };
 
 runWatcher().catch((failure: unknown) => {
-  if (readConfig().debugLogs) {
-    writeSync(2, `disk-cleanup error: ${failure instanceof Error ? failure.stack : String(failure)}\n`);
+  const isDebugLogging = readSettings().debugLogs;
+  if (isDebugLogging) {
+    writeSync(2, `disk-cleanup error: ${readFailureText(failure)}\n`);
   }
+
   process.exit(0);
 });

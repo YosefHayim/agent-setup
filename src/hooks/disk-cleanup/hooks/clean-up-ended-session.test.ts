@@ -24,21 +24,25 @@ const endedSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const workspaces: Array<string> = [];
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
-const isolatedGitEnvironment = (): NodeJS.ProcessEnv => {
+const readIsolatedGitEnvironment = (): NodeJS.ProcessEnv => {
   const variables = Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"));
   return { ...Object.fromEntries(variables), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 };
 
-const git = (request: { readonly folder: string; readonly command: ReadonlyArray<string> }): string => {
+const readGit = (request: { readonly folder: string; readonly command: ReadonlyArray<string> }): string => {
   const identity = ["-c", "user.name=Cleanup Test", "-c", "user.email=cleanup@example.test"];
+
   const execution = spawnSync("git", [...identity, "-c", "init.defaultBranch=main", ...request.command], {
     cwd: request.folder,
     encoding: "utf8",
-    env: isolatedGitEnvironment(),
+    env: readIsolatedGitEnvironment(),
   });
-  if (execution.status !== 0) {
+
+  const hasExecutionFailed = execution.status !== 0;
+  if (hasExecutionFailed) {
     throw new Error(`git ${request.command.join(" ")} failed: ${execution.stderr}`);
   }
+
   return execution.stdout.trim();
 };
 
@@ -52,13 +56,13 @@ const createFeatureWorktree = () => {
   const repo = path.join(homeRoot, "Desktop", "Code", "app");
   const feature = path.join(repo, ".worktrees", "feature");
   mkdirSync(remote, { recursive: true });
-  git({ folder: remote, command: ["init", "--quiet", "--bare"] });
-  git({ folder: homeRoot, command: ["clone", "--quiet", remote, repo] });
-  git({ folder: repo, command: ["commit", "--quiet", "--allow-empty", "--message", "start"] });
-  git({ folder: repo, command: ["push", "--quiet", "origin", "main"] });
-  git({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
-  git({ folder: repo, command: ["worktree", "add", "--quiet", "-b", "feature", feature] });
-  git({ folder: feature, command: ["commit", "--quiet", "--allow-empty", "--message", "feature work"] });
+  readGit({ folder: remote, command: ["init", "--quiet", "--bare"] });
+  readGit({ folder: homeRoot, command: ["clone", "--quiet", remote, repo] });
+  readGit({ folder: repo, command: ["commit", "--quiet", "--allow-empty", "--message", "start"] });
+  readGit({ folder: repo, command: ["push", "--quiet", "origin", "main"] });
+  readGit({ folder: repo, command: ["remote", "set-head", "origin", "main"] });
+  readGit({ folder: repo, command: ["worktree", "add", "--quiet", "-b", "feature", feature] });
+  readGit({ folder: feature, command: ["commit", "--quiet", "--allow-empty", "--message", "feature work"] });
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1_000);
   utimesSync(path.join(feature, ".git"), twoHoursAgo, twoHoursAgo);
   const projectFolder = path.join(homeRoot, ".claude", "projects", "-app");
@@ -120,7 +124,7 @@ describe("cleanUpEndedSession process boundary", { timeout: 30_000 }, () => {
 
     expect(execution.status).toBe(0);
     expect(existsSync(feature)).toBe(false);
-    expect(git({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
+    expect(readGit({ folder: remote, command: ["log", "--format=%s", "feature"] })).toContain("feature work");
   });
 
   it("only cleans the caches after a session whose ID is not a UUID, as Grok's are, since it owns no worktree", async () => {

@@ -1,9 +1,7 @@
-// The git repos a session can be re-homed into, plus the matcher that maps prompt words onto them.
-
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { codeRootFolders, repoRootsUnder } from "../code-repos.js";
+import { listCodeRootFolders, listRepoRootsUnder } from "../code-repos.js";
 import { escapeForPattern } from "../pattern-escape.js";
 
 export type Repo = {
@@ -17,31 +15,36 @@ export type Repo = {
 // Short names such as "cli" or "sdk" would match ordinary prose, so they never count as prompt keywords.
 const MIN_KEYWORD_LENGTH = 4;
 
-const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+const isPlainObject = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 
-const packageName = (repoRoot: string): string => {
+const readPackageName = (repoRoot: string): string => {
   try {
     const manifest: unknown = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-    return isRecord(manifest) && typeof manifest.name === "string" ? manifest.name : "";
+
+    const manifestName = isPlainObject(manifest) ? manifest.name : undefined;
+    const hasManifestName = typeof manifestName === "string";
+    return hasManifestName ? manifestName : "";
   } catch {
     return "";
   }
 };
 
 // e.g. "url = https://github.com/VybeKiit/vybekiit.git" → "vybekiit"
-const originRepoName = (repoRoot: string): string => {
+const readOriginRepoName = (repoRoot: string): string => {
   try {
-    const gitConfig = readFileSync(path.join(repoRoot, ".git", "config"), "utf8");
-    const originUrl = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/u.exec(gitConfig)?.[1];
-    return originUrl ? path.basename(originUrl).replace(/\.git$/u, "") : "";
+    const gitSettings = readFileSync(path.join(repoRoot, ".git", "config"), "utf8");
+    const originUrl = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/u.exec(gitSettings)?.[1];
+
+    const hasOriginUrl = originUrl;
+    return hasOriginUrl ? path.basename(originUrl).replace(/\.git$/u, "") : "";
   } catch {
     return "";
   }
 };
 
 // e.g. "@vybekiit/agent-kit" → ["vybekiit", "agent-kit"]
-const keywordsFor = (names: ReadonlyArray<string>): ReadonlyArray<string> => [
+const listKeywordsFor = (names: ReadonlyArray<string>): ReadonlyArray<string> => [
   ...new Set(
     names
       .flatMap((name) => name.toLowerCase().replace(/^@/u, "").split("/"))
@@ -49,28 +52,27 @@ const keywordsFor = (names: ReadonlyArray<string>): ReadonlyArray<string> => [
   ),
 ];
 
-const checkedOutRepo = (repoRoot: string): Repo => {
+const readCheckedOutRepo = (repoRoot: string): Repo => {
   const name = path.basename(repoRoot);
   return {
     name,
     root: repoRoot,
-    keywords: keywordsFor([name, packageName(repoRoot), originRepoName(repoRoot)]),
+    keywords: listKeywordsFor([name, readPackageName(repoRoot), readOriginRepoName(repoRoot)]),
     checkedOut: true,
   };
 };
 
 // Two checkouts named "cli" become "Desktop/Code/genshot-org/cli" and "Desktop/Code/other-org/cli", so a match
 // never lands on the wrong one.
-const withUniqueNames = (request: { readonly homeRoot: string; readonly repos: ReadonlyArray<Repo> }) =>
-  request.repos.map((repo) =>
-    request.repos.some((other) => other !== repo && other.name === repo.name)
-      ? { ...repo, name: path.relative(request.homeRoot, repo.root) }
-      : repo,
-  );
+const listWithUniqueNames = (request: { readonly homeRoot: string; readonly repos: ReadonlyArray<Repo> }) =>
+  request.repos.map((repo) => {
+    const hasOtherRepoWithSameName = request.repos.some((other) => other !== repo && other.name === repo.name);
+    return hasOtherRepoWithSameName ? { ...repo, name: path.relative(request.homeRoot, repo.root) } : repo;
+  });
 
 // A keyword several repos share (genshot, genshot-org/cli as @genshot/cli, …) points at the repo named exactly
 // that, or at none of them.
-const withoutSharedKeywords = (repos: ReadonlyArray<Repo>): ReadonlyArray<Repo> =>
+const listWithoutSharedKeywords = (repos: ReadonlyArray<Repo>): ReadonlyArray<Repo> =>
   repos.map((repo) => ({
     ...repo,
     keywords: repo.keywords.filter(
@@ -85,14 +87,14 @@ export const discoverRepos = (request: {
   readonly rootFolders: ReadonlyArray<string>;
   readonly deletedRepoNames: ReadonlyArray<string>;
 }): ReadonlyArray<Repo> => {
-  const roots = codeRootFolders(request);
-  const repoRoots = repoRootsUnder(roots);
-  const checkedOut = withUniqueNames({ homeRoot: request.homeRoot, repos: repoRoots.map(checkedOutRepo) });
+  const roots = listCodeRootFolders(request);
+  const repoRoots = listRepoRootsUnder(roots);
+  const checkedOut = listWithUniqueNames({ homeRoot: request.homeRoot, repos: repoRoots.map(readCheckedOutRepo) });
   const firstRoot = roots.find(existsSync) || request.homeRoot;
   const deleted = request.deletedRepoNames
     .filter((name) => !checkedOut.some((repo) => repo.name === name))
-    .map((name) => ({ name, root: path.join(firstRoot, name), keywords: keywordsFor([name]), checkedOut: false }));
-  return withoutSharedKeywords([...checkedOut, ...deleted]);
+    .map((name) => ({ name, root: path.join(firstRoot, name), keywords: listKeywordsFor([name]), checkedOut: false }));
+  return listWithoutSharedKeywords([...checkedOut, ...deleted]);
 };
 
 export const createKeywordMatcher = (repos: ReadonlyArray<Repo>): ((prompt: string) => ReadonlySet<string>) => {
@@ -108,13 +110,13 @@ export const createKeywordMatcher = (repos: ReadonlyArray<Repo>): ((prompt: stri
   };
 };
 
-export const repoContaining = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) =>
+export const readRepoContaining = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) =>
   [...request.repos]
     .sort((left, right) => right.root.length - left.root.length)
     .find((repo) => request.folder === repo.root || request.folder.startsWith(`${repo.root}/`));
 
 // A session started outside every repo can still name one in its folder, e.g. /private/tmp/vybekiit-buyer-eval-3.
-export const repoNamedByFolder = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) => {
+export const readRepoNamedByFolder = (request: { readonly repos: ReadonlyArray<Repo>; readonly folder: string }) => {
   const segments = request.folder.toLowerCase().split("/");
   return request.repos.find((repo) =>
     segments.some(

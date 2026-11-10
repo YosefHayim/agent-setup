@@ -18,7 +18,7 @@ const createHomeRoot = (): string => {
   return homeRoot;
 };
 
-const claudeSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
+const readClaudeSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
   path.join(request.homeRoot, "claude-scratch", `claude-${process.getuid?.()}`, "-Users-me-repo", request.sessionId);
 
 const writeScratchFile = (file: string) => {
@@ -27,14 +27,14 @@ const writeScratchFile = (file: string) => {
 };
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
-const isolatedGitEnvironment = (): NodeJS.ProcessEnv => {
+const readIsolatedGitEnvironment = (): NodeJS.ProcessEnv => {
   const variables = Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"));
   return { ...Object.fromEntries(variables), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 };
 
 const createRepositoryWithUncommittedWork = (workTree: string) => {
   mkdirSync(workTree, { recursive: true });
-  const initialization = spawnSync("git", ["init", "--quiet"], { cwd: workTree, env: isolatedGitEnvironment() });
+  const initialization = spawnSync("git", ["init", "--quiet"], { cwd: workTree, env: readIsolatedGitEnvironment() });
   writeFileSync(path.join(workTree, "feature.ts"), "export const feature = 1;\n");
   return initialization.status;
 };
@@ -60,8 +60,8 @@ afterEach(() => {
 describe("clearScratch process boundary", () => {
   it("empties the session's scratchpad and leaves its task output and other sessions alone", () => {
     const homeRoot = createHomeRoot();
-    const sessionFolder = claudeSessionFolder({ homeRoot, sessionId });
-    const otherSessionFolder = claudeSessionFolder({ homeRoot, sessionId: otherSessionId });
+    const sessionFolder = readClaudeSessionFolder({ homeRoot, sessionId });
+    const otherSessionFolder = readClaudeSessionFolder({ homeRoot, sessionId: otherSessionId });
     writeScratchFile(path.join(sessionFolder, "scratchpad", "probe.sh"));
     writeScratchFile(path.join(sessionFolder, "scratchpad", "runs", "e2e.log"));
     writeScratchFile(path.join(sessionFolder, "tasks", "b1.output"));
@@ -92,7 +92,7 @@ describe("clearScratch process boundary", () => {
 
   it("keeps a git work tree with uncommitted work, names it, and deletes the throwaway files around it", () => {
     const homeRoot = createHomeRoot();
-    const scratchpad = path.join(claudeSessionFolder({ homeRoot, sessionId }), "scratchpad");
+    const scratchpad = path.join(readClaudeSessionFolder({ homeRoot, sessionId }), "scratchpad");
     const workTree = path.join(scratchpad, "checks", "feature-clone");
     writeScratchFile(path.join(scratchpad, "probe.sh"));
     writeScratchFile(path.join(scratchpad, "checks", "run.log"));
@@ -110,7 +110,7 @@ describe("clearScratch process boundary", () => {
 
   it("leaves a scratchpad that is itself a git work tree with uncommitted work, and does not call it cleared", () => {
     const homeRoot = createHomeRoot();
-    const scratchpad = path.join(claudeSessionFolder({ homeRoot, sessionId }), "scratchpad");
+    const scratchpad = path.join(readClaudeSessionFolder({ homeRoot, sessionId }), "scratchpad");
     const initializationStatus = createRepositoryWithUncommittedWork(scratchpad);
 
     const execution = runCommand({ homeRoot, sessionArgument: sessionId });
@@ -124,7 +124,7 @@ describe("clearScratch process boundary", () => {
 
   it("refuses an argument that is not a session ID and deletes nothing", () => {
     const homeRoot = createHomeRoot();
-    const scratchFile = path.join(claudeSessionFolder({ homeRoot, sessionId }), "scratchpad", "probe.sh");
+    const scratchFile = path.join(readClaudeSessionFolder({ homeRoot, sessionId }), "scratchpad", "probe.sh");
     writeScratchFile(scratchFile);
 
     const execution = runCommand({ homeRoot, sessionArgument: path.dirname(scratchFile) });

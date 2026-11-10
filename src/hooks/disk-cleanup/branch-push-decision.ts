@@ -1,4 +1,3 @@
-// Facts about a local branch with commits no remote holds.
 export type BranchFacts = {
   // It is checked out in a folder that still exists, and a live session or a running process uses that folder.
   readonly inUse: boolean;
@@ -29,7 +28,8 @@ const keep = (reason: BranchKeepReason): BranchPushDecision => ({ _tag: "keep", 
 // A branch's unpushed commits go to a branch of the same name. The default branch stays, and so does a branch a live
 // session may still be committing to, or one with no feature branch of its own to go to.
 export const decideBranchPush = (facts: BranchFacts): BranchPushDecision => {
-  if (facts.inUse) {
+  const isInUse = facts.inUse;
+  if (isInUse) {
     return keep("in-use");
   }
 
@@ -37,15 +37,18 @@ export const decideBranchPush = (facts: BranchFacts): BranchPushDecision => {
     return keep("default-branch-work");
   }
 
-  if (!facts.remote) {
+  const isFactsRemoteMissing = !facts.remote;
+  if (isFactsRemoteMissing) {
     return keep("no-remote");
   }
 
-  if (!facts.knowsDefaultBranch) {
+  const isFactsKnowsDefaultBranchMissing = !facts.knowsDefaultBranch;
+  if (isFactsKnowsDefaultBranchMissing) {
     return keep("unknown-default-branch");
   }
 
-  if (!facts.readable) {
+  const isFactsReadableMissing = !facts.readable;
+  if (isFactsReadableMissing) {
     return keep("unreadable");
   }
 

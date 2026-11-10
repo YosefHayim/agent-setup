@@ -1,7 +1,3 @@
-// Claude Code keeps each session at ~/.claude/projects/<launch folder, every [^A-Za-z0-9-] → "-">/<session>.jsonl,
-// with an optional <session>/ folder of subagent transcripts and saved tool output beside it. `/resume` lists the
-// current folder's sessions, and `claude --resume <id>` scans every folder but refuses when two copies exist.
-
 import {
   existsSync,
   mkdirSync,
@@ -15,10 +11,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import { unfinishedClaudeJobStates } from "../claude-jobs.js";
-import { claudeConfigRoots, liveClaudeSessionIds } from "../claude-live-sessions.js";
-import { claudeScratchRoots } from "../claude-scratch-roots.js";
-import { appendJsonLine, decodeJsonLine } from "../json-lines.js";
+import { listUnfinishedClaudeJobStatuses } from "../claude-jobs.js";
+import { listClaudeSettingsRoots, readLiveClaudeSessionIds } from "../claude-live-sessions.js";
+import { listClaudeScratchRoots } from "../claude-scratch-roots.js";
+import { readClaudeConfigFolder } from "../environment.js";
+import { appendLine, decodeLine } from "../json-lines.js";
 import { readTranscriptHead, readTranscriptTail } from "../transcript-reader.js";
 
 export type ClaudeSession = {
@@ -32,48 +29,52 @@ export type ClaudeSession = {
 // e.g. "5cc2fa97-8a4b-4379-b0f0-4141d18275da.jsonl"
 const TRANSCRIPT_NAME_PATTERN = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/u;
 
-const projectsRoot = (homeRoot: string): string => {
-  const configRoot = process.env.CLAUDE_CONFIG_DIR || path.join(homeRoot, ".claude");
-  return path.join(configRoot, "projects");
+const readProjectsRoot = (homeRoot: string): string => {
+  const settingsRoot = readClaudeConfigFolder() ?? path.join(homeRoot, ".claude");
+  return path.join(settingsRoot, "projects");
 };
 
 // Matches Claude Code's own folder naming, e.g. "/Users/me/Desktop/Code/vybekiit" → "-Users-me-Desktop-Code-vybekiit".
-const projectFolderFor = (request: { readonly homeRoot: string; readonly folder: string }): string =>
-  path.join(projectsRoot(request.homeRoot), request.folder.replace(/[^A-Za-z0-9-]/gu, "-"));
+const readProjectFolder = (request: { readonly homeRoot: string; readonly folder: string }): string =>
+  path.join(readProjectsRoot(request.homeRoot), request.folder.replace(/[^A-Za-z0-9-]/gu, "-"));
 
-const homeFolderOf = (transcriptFile: string): string => {
+const readHomeFolder = (transcriptFile: string): string => {
   const relocatedCwd = readTranscriptTail(transcriptFile)
-    .map(decodeJsonLine)
+    .map(decodeLine)
     .filter((line) => line.type === "relocated" && typeof line.relocatedCwd === "string")
     .map((line) => String(line.relocatedCwd))
     .at(-1);
   const startCwd = readTranscriptHead(transcriptFile)
-    .map(decodeJsonLine)
+    .map(decodeLine)
     .map((line) => line.cwd)
     .find((cwd): cwd is string => typeof cwd === "string");
   return relocatedCwd || startCwd || "";
 };
 
-const sessionsInFolder = (projectFolder: string): ReadonlyArray<ClaudeSession> =>
+const listSessionsInFolder = (projectFolder: string): ReadonlyArray<ClaudeSession> =>
   readdirSync(projectFolder).flatMap((name) => {
     const sessionId = TRANSCRIPT_NAME_PATTERN.exec(name)?.[1];
-    if (!sessionId) {
+
+    const hasNoSessionId = !sessionId;
+    if (hasNoSessionId) {
       return [];
     }
 
     const transcriptFile = path.join(projectFolder, name);
-    return [{ sessionId, transcriptFile, projectFolder, homeFolder: homeFolderOf(transcriptFile) }];
+    return [{ sessionId, transcriptFile, projectFolder, homeFolder: readHomeFolder(transcriptFile) }];
   });
 
 export const listClaudeSessions = (homeRoot: string): ReadonlyArray<ClaudeSession> => {
-  const root = projectsRoot(homeRoot);
-  if (!existsSync(root)) {
+  const root = readProjectsRoot(homeRoot);
+
+  const isRootMissing = !existsSync(root);
+  if (isRootMissing) {
     return [];
   }
 
   const sessions = readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => sessionsInFolder(path.join(root, entry.name)));
+    .filter((line) => line.isDirectory())
+    .flatMap((child) => listSessionsInFolder(path.join(root, child.name)));
   const copies = new Map<string, number>();
   for (const session of sessions) {
     copies.set(session.sessionId, (copies.get(session.sessionId) || 0) + 1);
@@ -87,29 +88,34 @@ export const findClaudeSession = (request: {
   readonly homeRoot: string;
   readonly sessionId: string;
 }): ClaudeSession | undefined => {
-  const root = projectsRoot(request.homeRoot);
-  const projectFolders = (existsSync(root) ? readdirSync(root) : [])
+  const root = readProjectsRoot(request.homeRoot);
+
+  const isRootPresent = existsSync(root);
+  const projectFolders = (isRootPresent ? readdirSync(root) : [])
     .map((name) => path.join(root, name))
     .filter((folder) => existsSync(path.join(folder, `${request.sessionId}.jsonl`)));
+
   const [projectFolder] = projectFolders;
-  if (!projectFolder || projectFolders.length > 1) {
+
+  const isProjectFolderAmbiguous = !projectFolder || projectFolders.length > 1;
+  if (isProjectFolderAmbiguous) {
     return undefined;
   }
 
   const transcriptFile = path.join(projectFolder, `${request.sessionId}.jsonl`);
-  return { sessionId: request.sessionId, transcriptFile, projectFolder, homeFolder: homeFolderOf(transcriptFile) };
+  return { sessionId: request.sessionId, transcriptFile, projectFolder, homeFolder: readHomeFolder(transcriptFile) };
 };
 
 // A running Claude process holds its session, and an unfinished background job's state.json points at its transcript
 // by absolute path, so moving either would break a live owner. Each Claude account keeps both under its own config root.
-export const claudeSessionIsLive = (request: {
+export const isClaudeSessionLive = (request: {
   readonly homeRoot: string;
   readonly session: ClaudeSession;
   readonly quietSeconds: number;
 }): boolean => {
-  const heldByProcess = liveClaudeSessionIds(request.homeRoot).has(request.session.sessionId);
-  const ownedByJob = unfinishedClaudeJobStates(request.homeRoot).some(
-    (jobState) => jobState.sessionId === request.session.sessionId,
+  const heldByProcess = readLiveClaudeSessionIds(request.homeRoot).has(request.session.sessionId);
+  const ownedByJob = listUnfinishedClaudeJobStatuses(request.homeRoot).some(
+    (jobStatus) => jobStatus.sessionId === request.session.sessionId,
   );
   const recentlyWritten = Date.now() - statSync(request.session.transcriptFile).mtimeMs < request.quietSeconds * 1_000;
   return heldByProcess || ownedByJob || recentlyWritten;
@@ -126,11 +132,14 @@ export const moveClaudeSession = (request: {
   readonly session: ClaudeSession;
   readonly targetFolder: string;
 }): ClaudeMove => {
-  const targetProjectFolder = projectFolderFor({ homeRoot: request.homeRoot, folder: request.targetFolder });
+  const targetProjectFolder = readProjectFolder({ homeRoot: request.homeRoot, folder: request.targetFolder });
   const targetTranscript = path.join(targetProjectFolder, path.basename(request.session.transcriptFile));
-  const sourceSessionFolder = path.join(request.session.projectFolder, request.session.sessionId);
+  const originSessionFolder = path.join(request.session.projectFolder, request.session.sessionId);
+
   const targetSessionFolder = path.join(targetProjectFolder, request.session.sessionId);
-  if (existsSync(targetTranscript) || existsSync(targetSessionFolder)) {
+
+  const hasTargetSession = existsSync(targetTranscript) || existsSync(targetSessionFolder);
+  if (hasTargetSession) {
     return { _tag: "conflict", existingFile: targetTranscript };
   }
 
@@ -138,23 +147,27 @@ export const moveClaudeSession = (request: {
   renameSync(request.session.transcriptFile, targetTranscript);
   const relocated = { type: "relocated", sessionId: request.session.sessionId, relocatedCwd: request.targetFolder };
   try {
-    if (existsSync(sourceSessionFolder)) {
-      renameSync(sourceSessionFolder, targetSessionFolder);
+    const hasOriginSessionFolder = existsSync(originSessionFolder);
+    if (hasOriginSessionFolder) {
+      renameSync(originSessionFolder, targetSessionFolder);
     }
-    appendJsonLine({ file: targetTranscript, line: relocated });
+
+    appendLine({ file: targetTranscript, line: relocated });
   } catch (moveError) {
     // A half-done move would split the transcript from its subagents; put everything back in the old folder.
-    if (existsSync(targetSessionFolder) && !existsSync(sourceSessionFolder)) {
-      renameSync(targetSessionFolder, sourceSessionFolder);
+    const isTargetOnlySession = existsSync(targetSessionFolder) && !existsSync(originSessionFolder);
+    if (isTargetOnlySession) {
+      renameSync(targetSessionFolder, originSessionFolder);
     }
+
     renameSync(targetTranscript, request.session.transcriptFile);
     throw moveError;
   }
   return { _tag: "moved", transcriptFile: targetTranscript };
 };
 
-const scratchFoldersFor = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
-  claudeScratchRoots(request.homeRoot).flatMap((root) => {
+const listScratchFolders = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
+  listClaudeScratchRoots(request.homeRoot).flatMap((root) => {
     try {
       return readdirSync(root).map((projectName) => path.join(root, projectName, request.sessionId));
     } catch {
@@ -169,25 +182,28 @@ const removeHistoryLines = (request: { readonly historyFile: string; readonly se
     const historyBefore = statSync(request.historyFile);
     const keptLines = readFileSync(request.historyFile, "utf8")
       .split("\n")
-      .filter((line) => !line.trim() || !request.sessionIds.has(String(decodeJsonLine(line).sessionId)));
+      .filter((line) => !line.trim() || !request.sessionIds.has(String(decodeLine(line).sessionId)));
     const rewrittenFile = `${request.historyFile}.rehome-${process.pid}`;
     rmSync(rewrittenFile, { force: true });
     writeFileSync(rewrittenFile, keptLines.join("\n"), { mode: historyBefore.mode & 0o777 });
-    if (statSync(request.historyFile).size === historyBefore.size) {
+
+    const isHistoryUnchanged = statSync(request.historyFile).size === historyBefore.size;
+    if (isHistoryUnchanged) {
       renameSync(rewrittenFile, request.historyFile);
       return;
     }
+
     rmSync(rewrittenFile, { force: true });
   }
 };
 
 // An account whose projects folder is this one, e.g. ~/.claude-work/projects linked to ~/.claude/projects, keeps files
 // for these same sessions. Any other .claude-* folder, a backup for one, holds sessions of its own and is left alone.
-const accountRootsSharingProjects = (homeRoot: string): ReadonlyArray<string> => {
-  const configuredProjects = projectsRoot(homeRoot);
+const listAccountRootsSharingProjects = (homeRoot: string): ReadonlyArray<string> => {
+  const configuredProjects = readProjectsRoot(homeRoot);
   const sharedProjects = realpathSync(configuredProjects);
-  return claudeConfigRoots(homeRoot).filter((configRoot) => {
-    const accountProjects = path.join(configRoot, "projects");
+  return listClaudeSettingsRoots(homeRoot).filter((settingsRoot) => {
+    const accountProjects = path.join(settingsRoot, "projects");
     return existsSync(accountProjects) && realpathSync(accountProjects) === sharedProjects;
   });
 };
@@ -197,31 +213,34 @@ export const deleteClaudeSessions = (request: {
   readonly homeRoot: string;
   readonly sessions: ReadonlyArray<ClaudeSession>;
 }): void => {
-  const configRoots = accountRootsSharingProjects(request.homeRoot);
+  const settingsRoots = listAccountRootsSharingProjects(request.homeRoot);
   for (const session of request.sessions) {
-    const accountFolders = configRoots.flatMap((configRoot) => [
-      path.join(configRoot, "file-history", session.sessionId),
-      path.join(configRoot, "session-env", session.sessionId),
+    const accountFolders = settingsRoots.flatMap((settingsRoot) => [
+      path.join(settingsRoot, "file-history", session.sessionId),
+      path.join(settingsRoot, "session-env", session.sessionId),
     ]);
     const sessionFolders = [
       path.join(session.projectFolder, session.sessionId),
       ...accountFolders,
-      ...scratchFoldersFor({ homeRoot: request.homeRoot, sessionId: session.sessionId }),
+      ...listScratchFolders({ homeRoot: request.homeRoot, sessionId: session.sessionId }),
     ];
     for (const removable of [session.transcriptFile, ...sessionFolders]) {
       rmSync(removable, { recursive: true, force: true });
     }
   }
   const sessionIds = new Set(request.sessions.map((session) => session.sessionId));
-  for (const configRoot of configRoots) {
-    removeHistoryLines({ historyFile: path.join(configRoot, "history.jsonl"), sessionIds });
+  for (const claudeFolder of settingsRoots) {
+    removeHistoryLines({ historyFile: path.join(claudeFolder, "history.jsonl"), sessionIds });
   }
 };
 
 // A deleted repo's project folder also holds its auto-memory; it goes once no session is left in it.
 export const removeEmptyProjectFolder = (request: { readonly homeRoot: string; readonly folder: string }): boolean => {
-  const projectFolder = projectFolderFor(request);
-  if (!existsSync(projectFolder) || readdirSync(projectFolder).some((name) => TRANSCRIPT_NAME_PATTERN.test(name))) {
+  const projectFolder = readProjectFolder(request);
+
+  const hasNoTranscriptInProject =
+    !existsSync(projectFolder) || readdirSync(projectFolder).some((name) => TRANSCRIPT_NAME_PATTERN.test(name));
+  if (hasNoTranscriptInProject) {
     return false;
   }
 

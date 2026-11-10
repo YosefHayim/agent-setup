@@ -28,10 +28,10 @@ const createHomeRoot = (): string => {
   return homeRoot;
 };
 
-const claudeSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
+const readClaudeSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }) =>
   path.join(request.homeRoot, "claude-scratch", `claude-${process.getuid?.()}`, "-Users-me-repo", request.sessionId);
 
-const codexScratchFolder = (request: { readonly homeRoot: string; readonly name: string }) =>
+const readCodexScratchFolder = (request: { readonly homeRoot: string; readonly name: string }) =>
   path.join(request.homeRoot, ".codex", "scratchpads", request.name);
 
 const writeScratchFile = (file: string) => {
@@ -40,7 +40,7 @@ const writeScratchFile = (file: string) => {
 };
 
 const createSessionFolder = (request: { readonly homeRoot: string; readonly sessionId: string }): string => {
-  const sessionFolder = claudeSessionFolder(request);
+  const sessionFolder = readClaudeSessionFolder(request);
   writeScratchFile(path.join(sessionFolder, "scratchpad", "notes.txt"));
   writeScratchFile(path.join(sessionFolder, "tasks", "b1.output"));
   return sessionFolder;
@@ -49,9 +49,9 @@ const createSessionFolder = (request: { readonly homeRoot: string; readonly sess
 // Sets when the folder and everything in it last changed, the way a session that stopped that long ago left it.
 const leaveUntouchedFor = (request: { readonly folder: string; readonly days: number }) => {
   const lastChange = new Date(Date.now() - request.days * DAY_MILLISECONDS);
-  const entryNames = readdirSync(request.folder, { recursive: true, encoding: "utf8" });
-  for (const entry of [request.folder, ...entryNames.map((name) => path.join(request.folder, name))]) {
-    utimesSync(entry, lastChange, lastChange);
+  const childNames = readdirSync(request.folder, { recursive: true, encoding: "utf8" });
+  for (const line of [request.folder, ...childNames.map((name) => path.join(request.folder, name))]) {
+    utimesSync(line, lastChange, lastChange);
   }
 };
 
@@ -85,20 +85,20 @@ const writeSubagent = (request: {
 };
 
 // A folder that links to itself cannot be listed even by root, which ignores file modes.
-const linkToItself = (folder: string) => {
+const runLinkToItself = (folder: string) => {
   mkdirSync(path.dirname(folder), { recursive: true });
   symlinkSync(folder, folder);
 };
 
 // Inside a git hook these tests inherit GIT_DIR, which would aim every command at the repository being committed.
-const isolatedGitEnvironment = (): NodeJS.ProcessEnv => {
+const readIsolatedGitEnvironment = (): NodeJS.ProcessEnv => {
   const variables = Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"));
   return { ...Object.fromEntries(variables), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 };
 
 const createRepositoryWithUncommittedWork = (workTree: string) => {
   mkdirSync(workTree, { recursive: true });
-  const initialization = spawnSync("git", ["init", "--quiet"], { cwd: workTree, env: isolatedGitEnvironment() });
+  const initialization = spawnSync("git", ["init", "--quiet"], { cwd: workTree, env: readIsolatedGitEnvironment() });
   writeFileSync(path.join(workTree, "feature.ts"), "export const feature = 1;\n");
   return initialization.status;
 };
@@ -116,14 +116,14 @@ const createHalfDeletedClone = (request: { readonly upstream: string; readonly c
     ["clone", "--quiet", ".", request.clone],
   ];
   const stepStatuses = gitSteps.map((step) => {
-    const execution = spawnSync("git", step, { cwd: request.upstream, env: isolatedGitEnvironment() });
+    const execution = spawnSync("git", step, { cwd: request.upstream, env: readIsolatedGitEnvironment() });
     return execution.status;
   });
   rmSync(path.join(request.clone, "README.md"));
   return stepStatuses;
 };
 
-const sessionEnvironment = (homeRoot: string): NodeJS.ProcessEnv => ({
+const readSessionEnvironment = (homeRoot: string): NodeJS.ProcessEnv => ({
   ...process.env,
   HOME: homeRoot,
   CLAUDE_CONFIG_DIR: path.join(homeRoot, ".claude"),
@@ -134,7 +134,7 @@ const sessionEnvironment = (homeRoot: string): NodeJS.ProcessEnv => ({
 const runWatcher = (request: { readonly homeRoot: string; readonly watcherArguments: ReadonlyArray<string> }) =>
   spawnSync(process.execPath, ["--import", "tsx", watcherPath, ...request.watcherArguments], {
     encoding: "utf8",
-    env: sessionEnvironment(request.homeRoot),
+    env: readSessionEnvironment(request.homeRoot),
   });
 
 afterEach(() => {
@@ -181,7 +181,7 @@ describe("scratchWatcher process boundary", () => {
   it("keeps the ended session's folder while its subagent folders cannot be listed", () => {
     const homeRoot = createHomeRoot();
     const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
-    linkToItself(path.join(homeRoot, ".claude", "projects"));
+    runLinkToItself(path.join(homeRoot, ".claude", "projects"));
 
     const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
 
@@ -217,7 +217,7 @@ describe("scratchWatcher process boundary", () => {
     const endedFolder = createSessionFolder({ homeRoot, sessionId: endedSessionId });
     const idleFolder = createSessionFolder({ homeRoot, sessionId: otherSessionId });
     leaveUntouchedFor({ folder: idleFolder, days: 30 });
-    linkToItself(path.join(homeRoot, ".claude", "sessions"));
+    runLinkToItself(path.join(homeRoot, ".claude", "sessions"));
 
     const execution = runWatcher({ homeRoot, watcherArguments: [endedSessionId] });
 
@@ -241,8 +241,8 @@ describe("scratchWatcher process boundary", () => {
 
   it("removes a Codex scratch folder after a quiet week and keeps a newer one", () => {
     const homeRoot = createHomeRoot();
-    const oldThreadFolder = codexScratchFolder({ homeRoot, name: threadId });
-    const recentNamedFolder = codexScratchFolder({ homeRoot, name: "release-check" });
+    const oldThreadFolder = readCodexScratchFolder({ homeRoot, name: threadId });
+    const recentNamedFolder = readCodexScratchFolder({ homeRoot, name: "release-check" });
     writeScratchFile(path.join(oldThreadFolder, "runs", "probe.log"));
     writeScratchFile(path.join(recentNamedFolder, "probe.log"));
     leaveUntouchedFor({ folder: oldThreadFolder, days: 8 });
@@ -257,7 +257,7 @@ describe("scratchWatcher process boundary", () => {
 
   it("does not remove an ended Codex thread's folder, because a thread can be picked up again", () => {
     const homeRoot = createHomeRoot();
-    const threadFolder = codexScratchFolder({ homeRoot, name: threadId });
+    const threadFolder = readCodexScratchFolder({ homeRoot, name: threadId });
     writeScratchFile(path.join(threadFolder, "probe.log"));
 
     const execution = runWatcher({ homeRoot, watcherArguments: [threadId] });

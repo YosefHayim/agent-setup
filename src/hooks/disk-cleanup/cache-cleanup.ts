@@ -1,11 +1,11 @@
 import path from "node:path";
 
-import { oldCodexReleases } from "./codex-releases.js";
-import { folderPaths } from "./folder-paths.js";
-import { isUsedByRunningProcess, type RunningProcesses, runningProcesses } from "./running-processes.js";
-import { childEntries, deleteEntries, isStale } from "./stale-entries.js";
+import { listOldCodexReleases } from "./codex-releases.js";
+import { readFolderPaths } from "./folder-paths.js";
+import { isUsedByRunningProcess, type RunningProcesses, readRunningProcesses } from "./running-processes.js";
+import { deleteLines, isStale, listChildNames } from "./stale-entries.js";
 import { runToolPrunes } from "./tool-prunes.js";
-import { abandonedXcodeBuildFolders } from "./xcode-build-folders.js";
+import { listAbandonedXcodeBuildFolders } from "./xcode-build-folders.js";
 
 const isActRunning = (processes: RunningProcesses): boolean =>
   processes.commandLines.some((commandLine) => {
@@ -14,33 +14,35 @@ const isActRunning = (processes: RunningProcesses): boolean =>
   });
 
 // npx keeps each package it ran under ~/.npm/_npx/<hash>; act keeps action clones and its cache server's files.
-const staleToolCaches = (request: { readonly homeRoot: string; readonly processes: RunningProcesses }) => {
-  const npxEntries = childEntries(path.join(request.homeRoot, ".npm", "_npx"));
+const listStaleToolCaches = (request: { readonly homeRoot: string; readonly processes: RunningProcesses }) => {
+  const npxLines = listChildNames(path.join(request.homeRoot, ".npm", "_npx"));
   const actFolders = [path.join(request.homeRoot, ".cache", "act"), path.join(request.homeRoot, ".cache", "actcache")];
-  const actEntries = isActRunning(request.processes) ? [] : actFolders.flatMap(childEntries);
-  return [...npxEntries, ...actEntries].filter(isStale);
+  const actLines = isActRunning(request.processes) ? [] : actFolders.flatMap(listChildNames);
+  return [...npxLines, ...actLines].filter(isStale);
 };
 
 // Without a process list nothing can be called unused, so only the tools' own prunes run.
-const unusedCacheEntries = (homeRoot: string): ReadonlyArray<string> => {
-  const processes = runningProcesses();
-  if (!processes) {
+const listUnusedCacheLines = (homeRoot: string): ReadonlyArray<string> => {
+  const processes = readRunningProcesses();
+
+  const hasNoProcesses = !processes;
+  if (hasNoProcesses) {
     return [];
   }
 
   const candidates = [
-    ...abandonedXcodeBuildFolders(homeRoot),
-    ...oldCodexReleases(homeRoot),
-    ...staleToolCaches({ homeRoot, processes }),
+    ...listAbandonedXcodeBuildFolders(homeRoot),
+    ...listOldCodexReleases(homeRoot),
+    ...listStaleToolCaches({ homeRoot, processes }),
   ];
   return candidates.filter((folder) => {
-    const { paths } = folderPaths({ folder, roots: [] });
+    const { paths } = readFolderPaths({ folder, roots: [] });
     return !isUsedByRunningProcess({ paths, processes });
   });
 };
 
 export const cleanUpCaches = (request: { readonly homeRoot: string; readonly dryRun: boolean }) => {
-  const unusedEntries = unusedCacheEntries(request.homeRoot);
-  const deletionLines = deleteEntries({ entries: unusedEntries, dryRun: request.dryRun });
+  const unusedLines = listUnusedCacheLines(request.homeRoot);
+  const deletionLines = deleteLines({ entries: unusedLines, dryRun: request.dryRun });
   return [...deletionLines, ...runToolPrunes(request)];
 };

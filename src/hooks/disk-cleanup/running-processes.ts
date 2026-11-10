@@ -13,7 +13,7 @@ const PROCESS_LIST_BYTES = 64 * 1024 * 1024;
 const OPEN_FILE_QUERY = ["-n", "-P", "-b", "-w", "-Fn"];
 
 // A hook's PATH can lack /usr/sbin, where macOS keeps lsof.
-const systemToolCall = (request: { readonly tool: string; readonly toolArguments: ReadonlyArray<string> }) =>
+const readSystemToolCall = (request: { readonly tool: string; readonly toolArguments: ReadonlyArray<string> }) =>
   spawnSync(request.tool, request.toolArguments, {
     encoding: "utf8",
     env: { ...process.env, PATH: `${process.env.PATH || ""}:/usr/sbin:/usr/bin:/bin` },
@@ -23,8 +23,10 @@ const systemToolCall = (request: { readonly tool: string; readonly toolArguments
 // lsof -Fn prints every file each process holds, working folders included, as "n<path>". A listing that failed or
 // was cut short could miss one, so it is no answer at all.
 export const listOpenPaths = (): ReadonlyArray<string> | undefined => {
-  const lsof = systemToolCall({ tool: "lsof", toolArguments: OPEN_FILE_QUERY });
-  if (lsof.error || lsof.status !== 0) {
+  const lsof = readSystemToolCall({ tool: "lsof", toolArguments: OPEN_FILE_QUERY });
+
+  const hasLsofFailed = lsof.error || lsof.status !== 0;
+  if (hasLsofFailed) {
     return undefined;
   }
 
@@ -35,10 +37,13 @@ export const listOpenPaths = (): ReadonlyArray<string> | undefined => {
 };
 
 // Without lsof or ps nothing can be ruled out, so the caller treats every folder as in use.
-export const runningProcesses = (): RunningProcesses | undefined => {
+export const readRunningProcesses = (): RunningProcesses | undefined => {
   const openPaths = listOpenPaths();
-  const ps = systemToolCall({ tool: "ps", toolArguments: ["-axo", "command="] });
-  if (!openPaths || ps.error || ps.status !== 0) {
+
+  const ps = readSystemToolCall({ tool: "ps", toolArguments: ["-axo", "command="] });
+
+  const isListingFailed = !openPaths || ps.error || ps.status !== 0;
+  if (isListingFailed) {
     return undefined;
   }
 

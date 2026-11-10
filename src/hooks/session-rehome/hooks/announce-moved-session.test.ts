@@ -10,7 +10,7 @@ const packageRoot = path.resolve(path.dirname(hookPath), "../../../..");
 const sessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
 const workspaces: Array<string> = [];
 
-const movedEntry = (agent: string) => ({
+const readMovedLine = (agent: string) => ({
   agent,
   sessionId,
   decision: "moved",
@@ -23,17 +23,17 @@ const movedEntry = (agent: string) => ({
   notifiedAt: "",
 });
 
-const createStateFolder = (ledgerEntries: ReadonlyArray<object>) => {
-  const stateFolder = mkdtempSync(path.join(packageRoot, "scratch-rehome-notice-"));
-  workspaces.push(stateFolder);
-  mkdirSync(stateFolder, { recursive: true });
+const createStorageFolder = (ledgerLines: ReadonlyArray<object>) => {
+  const storageFolder = mkdtempSync(path.join(packageRoot, "scratch-rehome-notice-"));
+  workspaces.push(storageFolder);
+  mkdirSync(storageFolder, { recursive: true });
   // A fresh sweep stamp keeps the hook from starting a background sweep during the test.
-  writeFileSync(path.join(stateFolder, "last-sweep"), "");
+  writeFileSync(path.join(storageFolder, "last-sweep"), "");
   writeFileSync(
-    path.join(stateFolder, "ledger.jsonl"),
-    ledgerEntries.map((entry) => `${JSON.stringify(entry)}\n`).join(""),
+    path.join(storageFolder, "ledger.jsonl"),
+    ledgerLines.map((line) => `${JSON.stringify(line)}\n`).join(""),
   );
-  return stateFolder;
+  return storageFolder;
 };
 
 const runHook = (request: {
@@ -62,9 +62,14 @@ afterEach(() => {
 
 describe("announceMovedSession process boundary", () => {
   it("tells Claude Code and the user where a session went when it is resumed from its old folder", () => {
-    const stateFolder = createStateFolder([movedEntry("claude-code")]);
+    const storageFolder = createStorageFolder([readMovedLine("claude-code")]);
 
-    const execution = runHook({ stateFolder, agent: "claude-code", cwd: "/Users/me/Desktop/Code", source: "resume" });
+    const execution = runHook({
+      stateFolder: storageFolder,
+      agent: "claude-code",
+      cwd: "/Users/me/Desktop/Code",
+      source: "resume",
+    });
 
     const notice = JSON.parse(execution.stdout);
     expect(notice.systemMessage).toContain("Session moved to vybekiit");
@@ -73,15 +78,20 @@ describe("announceMovedSession process boundary", () => {
   });
 
   it("stays quiet when the session is resumed from its new home or started fresh", () => {
-    const stateFolder = createStateFolder([movedEntry("claude-code")]);
+    const storageFolder = createStorageFolder([readMovedLine("claude-code")]);
 
     const fromNewHome = runHook({
-      stateFolder,
+      stateFolder: storageFolder,
       agent: "claude-code",
       cwd: "/Users/me/Desktop/Code/vybekiit",
       source: "resume",
     });
-    const freshStart = runHook({ stateFolder, agent: "claude-code", cwd: "/Users/me/Desktop/Code", source: "startup" });
+    const freshStart = runHook({
+      stateFolder: storageFolder,
+      agent: "claude-code",
+      cwd: "/Users/me/Desktop/Code",
+      source: "startup",
+    });
 
     expect(fromNewHome.stdout).toBe("");
     expect(freshStart.stdout).toBe("");
@@ -89,36 +99,51 @@ describe("announceMovedSession process boundary", () => {
 
   it("still names the move after the session was later kept in its new home", () => {
     const keptLater = {
-      ...movedEntry("claude-code"),
+      ...readMovedLine("claude-code"),
       decision: "stayed",
       fromFolder: "/Users/me/Desktop/Code/vybekiit",
     };
-    const stateFolder = createStateFolder([movedEntry("claude-code"), keptLater]);
+    const storageFolder = createStorageFolder([readMovedLine("claude-code"), keptLater]);
 
-    const execution = runHook({ stateFolder, agent: "claude-code", cwd: "/Users/me/Desktop/Code", source: "resume" });
+    const execution = runHook({
+      stateFolder: storageFolder,
+      agent: "claude-code",
+      cwd: "/Users/me/Desktop/Code",
+      source: "resume",
+    });
 
     expect(JSON.parse(execution.stdout).systemMessage).toContain("(from ~/Desktop/Code)");
   });
 
   it("tells Codex about each move once", () => {
-    const stateFolder = createStateFolder([movedEntry("codex")]);
+    const storageFolder = createStorageFolder([readMovedLine("codex")]);
 
-    const first = runHook({ stateFolder, agent: "codex", cwd: "/Users/me/Desktop/Code/vybekiit", source: "resume" });
-    const second = runHook({ stateFolder, agent: "codex", cwd: "/Users/me/Desktop/Code/vybekiit", source: "resume" });
+    const first = runHook({
+      stateFolder: storageFolder,
+      agent: "codex",
+      cwd: "/Users/me/Desktop/Code/vybekiit",
+      source: "resume",
+    });
+    const second = runHook({
+      stateFolder: storageFolder,
+      agent: "codex",
+      cwd: "/Users/me/Desktop/Code/vybekiit",
+      source: "resume",
+    });
 
     expect(JSON.parse(first.stdout).systemMessage).toContain("`codex resume` lists it there");
     expect(second.stdout).toBe("");
-    expect(readFileSync(path.join(stateFolder, "ledger.jsonl"), "utf8")).toContain('"notifiedAt":"20');
+    expect(readFileSync(path.join(storageFolder, "ledger.jsonl"), "utf8")).toContain('"notifiedAt":"20');
   });
 
   it("fails open on malformed input", () => {
-    const stateFolder = createStateFolder([]);
+    const storageFolder = createStorageFolder([]);
 
     const execution = spawnSync(process.execPath, ["--import", "tsx", hookPath], {
       cwd: packageRoot,
       input: "{",
       encoding: "utf8",
-      env: { ...process.env, AGENT_SETUP_AGENT_ID: "codex", AGENT_SETUP_REHOME_STATE_DIR: stateFolder },
+      env: { ...process.env, AGENT_SETUP_AGENT_ID: "codex", AGENT_SETUP_REHOME_STATE_DIR: storageFolder },
     });
 
     expect(execution.status).toBe(0);
