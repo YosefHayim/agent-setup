@@ -36,14 +36,27 @@ export const updateCommand = Command.make(
         yield* Effect.tryPromise({ try: () => TerminalUI.intro("update"), catch: (error) => error });
       }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-      const updateSummary = yield* update({
-        destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
-        host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
-        features: args.featureIds.length === 0 ? { _tag: "preserve" } : { _tag: "refresh", ids: args.featureIds },
-        agents: { _tag: "detected", evidence: host.agentEvidence },
-        interaction: { _tag: "scripted" },
-        configuration: { _tag: "automatic" },
+      const destination = destinationForScope({
+        scope: args.scope,
+        homeRoot: host.homeRoot,
+        projectRoot: host.projectRoot,
+      });
+      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+      const updateSummary = yield* Effect.tryPromise({
+        try: (signal) =>
+          update(
+            {
+              destination,
+              host: { homeRoot: host.homeRoot },
+              preparedPackage,
+              features: args.featureIds.length === 0 ? { _tag: "preserve" } : { _tag: "refresh", ids: args.featureIds },
+              agents: { _tag: "detected", evidence: host.agentEvidence },
+              interaction: { _tag: "scripted" },
+              configuration: { _tag: "automatic" },
+            },
+            signal,
+          ),
+        catch: (error) => error,
       });
       if (args.format === "json") {
         yield* Effect.tryPromise({ try: () => TerminalUI.showDocument(updateSummary), catch: (error) => error });

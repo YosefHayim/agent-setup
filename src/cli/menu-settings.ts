@@ -8,7 +8,7 @@ import {
   settingValueFromText,
   withSettingValue,
 } from "../config/config-schema.js";
-import { readConfig, resolveConfigTarget, saveConfig } from "../config/scope-config.js";
+import { locateConfigTarget, readConfig, saveConfig } from "../config/scope-config.js";
 import type { Scope } from "../install/receipt.js";
 import { createCliUsageError } from "./cli-options.js";
 import { formatSettingValue, showConfig } from "./config-command.js";
@@ -107,7 +107,7 @@ const runConfigShow = Effect.gen(function* () {
 const runConfigSet = Effect.gen(function* () {
   const scope = yield* pickScope("Config set");
   const setting = yield* pickSetting("Setting to change");
-  const current = yield* readConfig(scope);
+  const current = yield* Effect.tryPromise({ try: () => readConfig(scope), catch: (error) => error });
   const currentValue = formatSettingValue({ config: current.config, setting });
   const text = yield* promptSettingValue({ setting, current: currentValue });
   const nextConfig = yield* Effect.try({
@@ -129,7 +129,10 @@ const runConfigSet = Effect.gen(function* () {
       { label: "Path", detail: current.configPath },
     ],
     confirmMessage: "Apply this config change?",
-    apply: saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }).pipe(
+    apply: Effect.tryPromise({
+      try: (signal) => saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
+      catch: (error) => error,
+    }).pipe(
       Effect.flatMap((owner) =>
         Effect.tryPromise({
           try: () => TerminalUI.success(`${setting.label} → ${nextValue} (${owner})`),
@@ -144,7 +147,7 @@ const runConfigReset = Effect.gen(function* () {
   const scope = yield* pickScope("Config reset");
   if ((yield* pickAllOrOne({ message: "Reset", initial: "one" })) === "all") {
     // A full reset never reads the old file, so it also repairs a config.json that no longer decodes.
-    const target = yield* resolveConfigTarget(scope);
+    const target = yield* Effect.tryPromise({ try: () => locateConfigTarget(scope), catch: (error) => error });
     yield* applyIfApproved({
       title: "Config reset plan",
       steps: [
@@ -155,7 +158,10 @@ const runConfigReset = Effect.gen(function* () {
         { label: "Path", detail: target.configPath },
       ],
       confirmMessage: "Apply this config reset?",
-      apply: saveConfig({ target, configuration: { _tag: "reset" } }).pipe(
+      apply: Effect.tryPromise({
+        try: (signal) => saveConfig({ target, configuration: { _tag: "reset" } }, signal),
+        catch: (error) => error,
+      }).pipe(
         Effect.zipRight(
           Effect.tryPromise({ try: () => TerminalUI.success(`All ${scope} settings reset.`), catch: (error) => error }),
         ),
@@ -164,7 +170,7 @@ const runConfigReset = Effect.gen(function* () {
     return;
   }
 
-  const current = yield* readConfig(scope);
+  const current = yield* Effect.tryPromise({ try: () => readConfig(scope), catch: (error) => error });
   const setting = yield* pickSetting("Setting to reset");
   const nextConfig = yield* Effect.try({
     try: () => withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
@@ -182,7 +188,10 @@ const runConfigReset = Effect.gen(function* () {
       { label: "Path", detail: current.configPath },
     ],
     confirmMessage: "Apply this config reset?",
-    apply: saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }).pipe(
+    apply: Effect.tryPromise({
+      try: (signal) => saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
+      catch: (error) => error,
+    }).pipe(
       Effect.zipRight(
         Effect.tryPromise({
           try: () => TerminalUI.success(`${setting.name} reset to ${nextValue}`),

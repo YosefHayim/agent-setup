@@ -19,6 +19,9 @@ const installEffect = (request: unknown) =>
 const uninstallEffect = (request: unknown) =>
   Effect.tryPromise({ try: (signal) => uninstall(request, signal), catch: (error) => error });
 
+const updateEffect = (request: unknown) =>
+  Effect.tryPromise({ try: (signal) => update(request, signal), catch: (error) => error });
+
 const packageFiles = {
   "hooks/scratch-folder-guard/hooks/scratch-folder-guard.js": "export {};\n",
   "hooks/scratch-folder-guard/hooks/ask-scratch-cleanup.js": "export {};\n",
@@ -195,8 +198,8 @@ describe("hook settings", () => {
     await appendForeignStop(root, codexHooksPath);
 
     await runInstaller(installEffect(request));
-    await runInstaller(update({ ...request, features: { _tag: "preserve" } }));
-    await runInstaller(update({ ...request, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } }));
+    await runInstaller(updateEffect({ ...request, features: { _tag: "preserve" } }));
+    await runInstaller(updateEffect({ ...request, features: { _tag: "refresh", ids: ["scratch-folder-guard"] } }));
 
     for (const hookFile of [claudeSettingsPath, codexHooksPath]) {
       const settings = await readFileContents(root, hookFile);

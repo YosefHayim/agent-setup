@@ -1,49 +1,57 @@
-import { FileSystem, Path } from "@effect/platform";
-import { NodeContext } from "@effect/platform-node";
-import { expect, layer } from "@effect/vitest";
-import { Effect } from "effect";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import { managedConfigPath } from "./config-file.js";
 import { defaultConfig } from "./config-schema.js";
 import { readConfigAt } from "./scope-config.js";
 
-const writeConfig = (request: { readonly root: string; readonly config: object }) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const configPath = path.join(request.root, managedConfigPath);
-    yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
-    yield* fileSystem.writeFileString(configPath, `${JSON.stringify(request.config)}\n`);
-  });
+const temporaryDirectories: string[] = [];
 
-const makeRoots = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const homeRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-config-settings-home-" });
-  const projectRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agent-setup-config-settings-project-" });
-  return { homeRoot, projectRoot };
+afterEach(async () => {
+  const directoriesToRemove = temporaryDirectories.splice(0);
+  await Promise.all(directoriesToRemove.map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-layer(NodeContext.layer)("readConfigAt", (it) => {
-  it.scoped("reads the root's own config.json before the global one", () =>
-    Effect.gen(function* () {
-      const { homeRoot, projectRoot } = yield* makeRoots;
-      yield* writeConfig({ root: homeRoot, config: { debugLogs: true } });
-      yield* writeConfig({ root: projectRoot, config: { sessionRehomeRoots: ["vendor"] } });
+const makeTemporaryDirectory = async (prefix: string): Promise<string> => {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
 
-      const config = yield* readConfigAt({ root: projectRoot, homeRoot });
+  return directory;
+};
 
-      expect(config).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
-    }),
-  );
+const makeRoots = async (): Promise<{ homeRoot: string; projectRoot: string }> => {
+  const homeRoot = await makeTemporaryDirectory("agent-setup-config-settings-home-");
+  const projectRoot = await makeTemporaryDirectory("agent-setup-config-settings-project-");
 
-  it.scoped("falls back to the global config.json, then to defaults", () =>
-    Effect.gen(function* () {
-      const { homeRoot, projectRoot } = yield* makeRoots;
+  return { homeRoot, projectRoot };
+};
 
-      expect(yield* readConfigAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
+const writeConfig = async (request: { readonly root: string; readonly config: object }): Promise<void> => {
+  const configPath = join(request.root, managedConfigPath);
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(request.config)}\n`);
+};
 
-      yield* writeConfig({ root: homeRoot, config: { debugLogs: true } });
-      expect((yield* readConfigAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);
-    }),
-  );
+describe("readConfigAt", () => {
+  it("reads the root's own config.json before the global one", async () => {
+    const { homeRoot, projectRoot } = await makeRoots();
+    await writeConfig({ root: homeRoot, config: { debugLogs: true } });
+    await writeConfig({ root: projectRoot, config: { sessionRehomeRoots: ["vendor"] } });
+
+    const configAtProjectRoot = await readConfigAt({ root: projectRoot, homeRoot });
+
+    expect(configAtProjectRoot).toEqual({ ...defaultConfig, sessionRehomeRoots: ["vendor"] });
+  });
+
+  it("falls back to the global config.json, then to defaults", async () => {
+    const { homeRoot, projectRoot } = await makeRoots();
+
+    expect(await readConfigAt({ root: projectRoot, homeRoot })).toEqual(defaultConfig);
+
+    await writeConfig({ root: homeRoot, config: { debugLogs: true } });
+    expect((await readConfigAt({ root: projectRoot, homeRoot })).debugLogs).toBe(true);
+  });
 });
