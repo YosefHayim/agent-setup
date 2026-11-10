@@ -218,13 +218,14 @@ describe("planInstructionFile", () => {
 
   it.each(
     agentCatalog.flatMap((agent) => {
-      const isInstructionFileTarget = agent.target._tag === "instructionFile";
+      const target = agent.target;
+      const isInstructionFileTarget = target._tag === "instructionFile";
       if (isInstructionFileTarget) {
-        return [{ agentId: agent.id, path: agent.target.path }];
+        return [{ agentId: agent.id, path: target.path }];
       }
 
-      const isInstructionLinkTarget = agent.target._tag === "instructionLink";
-      return isInstructionLinkTarget ? [{ agentId: agent.id, path: agent.target.instructionPath }] : [];
+      const isInstructionLinkTarget = target._tag === "instructionLink";
+      return isInstructionLinkTarget ? [{ agentId: agent.id, path: target.instructionPath }] : [];
     }),
   )("plans catalog instruction consumer $agentId at $path", ({ agentId, path }) => {
     expect(findRejectionMessage(request({ agentIds: [agentId], path }))).toBe(false);

@@ -75,12 +75,13 @@ describe("planSkillDirectory", () => {
 
   it("copies every catalog allowlist exactly without accepting sibling prefixes", () => {
     const skills = featureCatalog.flatMap((feature) => {
-      const isInstalledSkillNone = feature.installedSkill._tag === "none";
+      const installedSkill = feature.installedSkill;
+      const isInstalledSkillNone = installedSkill._tag === "none";
       if (isInstalledSkillNone) {
         return [];
       }
 
-      const originSnapshot = feature.installedSkill.shippedPaths.flatMap((shippedPath, index) => {
+      const authoredSnapshot = installedSkill.shippedPaths.flatMap((shippedPath, index) => {
         const hasFileExtension = /\.[^/]+$/.test(shippedPath);
         const preparedPath = hasFileExtension ? shippedPath : `${shippedPath}/nested/allowed.txt`;
 
@@ -90,7 +91,7 @@ describe("planSkillDirectory", () => {
         ];
       });
 
-      return [{ installedSkill: feature.installedSkill, sourceFiles: originSnapshot }];
+      return [{ installedSkill, sourceFiles: authoredSnapshot }];
     });
     const expectedPaths = skills.flatMap((skill) =>
       skill.sourceFiles
@@ -132,9 +133,9 @@ describe("planSkillDirectory", () => {
       sourceFiles: createOriginFiles().filter((file) => !file.path.startsWith("references/")),
     };
     const missingPrevious = request();
-    missingPrevious.createPreviousFiles = createPreviousFiles().filter((file) => file.path !== guidePath);
+    missingPrevious.previousFiles = createPreviousFiles().filter((file) => file.path !== guidePath);
     const extraPrevious = request();
-    extraPrevious.createPreviousFiles = [
+    extraPrevious.previousFiles = [
       ...createPreviousFiles(),
       { path: ".claude/skills/write-readme/undeclared.md", previous: { _tag: "missing" } },
     ];
@@ -153,7 +154,7 @@ describe("planSkillDirectory", () => {
         return isSkillMarkdown ? { path: "SKILL.md/evil", bytes: stringEncoder.encode("not a directory\n") } : file;
       }),
     };
-    invalidRequest.createPreviousFiles = createPreviousFiles().map((file) => {
+    invalidRequest.previousFiles = createPreviousFiles().map((file) => {
       const isSkillPath = file.path === skillPath;
       return isSkillPath ? { path: ".claude/skills/write-readme/SKILL.md/evil", previous: missingPrevious } : file;
     });
@@ -177,7 +178,7 @@ describe("planSkillDirectory", () => {
       installedSkill: skillDefinition,
       sourceFiles: [...createOriginFiles(), { path: parentPath, bytes: stringEncoder.encode("parent file\n") }],
     };
-    invalidRequest.createPreviousFiles = [
+    invalidRequest.previousFiles = [
       ...createPreviousFiles(),
       { path: `.claude/skills/write-readme/${parentPath}`, previous: missingPrevious },
     ];
@@ -194,7 +195,7 @@ describe("planSkillDirectory", () => {
         { path: "references", bytes: stringEncoder.encode("not a directory\n") },
       ],
     };
-    invalidRequest.createPreviousFiles = [
+    invalidRequest.previousFiles = [
       { path: skillPath, previous: { _tag: "priorFile", bytes: priorSkillBytes } },
       { path: ".claude/skills/write-readme/references", previous: missingPrevious },
     ];

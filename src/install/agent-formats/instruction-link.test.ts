@@ -268,17 +268,19 @@ describe("planInstructionLink", () => {
   it("rejects non-string-array Continue restoration history during update planning", () => {
     const installed = write({ agent: continueAgent });
 
-    const isInstalledFileOwnershipTagNotDocumentFields = installed.file.ownership._tag !== "jsonValues";
-    if (isInstalledFileOwnershipTagNotDocumentFields) {
+    const installedOwnership = installed.file.ownership;
+    const isNotJsonValuesOwnership = installedOwnership._tag !== "jsonValues";
+
+    if (isNotJsonValuesOwnership) {
       throw new Error("Expected Continue JSON ownership.");
     }
 
     const invalidHistory = {
       ...installed.file,
       ownership: {
-        ...installed.file.ownership,
-        fields: installed.file.ownership.fields.map((field) => ({
-          ...field,
+        ...installedOwnership,
+        values: installedOwnership.values.map((ownedValue) => ({
+          ...ownedValue,
           previous: { _tag: "value", value: { unexpected: true } },
         })),
       },
