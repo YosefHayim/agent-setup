@@ -1,7 +1,4 @@
-/** Per-agent files: skill directories, rule files, shared instruction files, and native instruction links. */
-
-import { Path } from "@effect/platform";
-import { Effect, Either } from "effect";
+import { join } from "node:path";
 
 import type { AgentDefinition } from "../catalog/agent-catalog.js";
 import { instructionPath, planInstructionFile } from "./agent-formats/instruction-file.js";
@@ -17,238 +14,257 @@ import {
   readFileSnapshot,
 } from "./host-files.js";
 import { createInstallError, type InstallRequest, wrapAsInstallError } from "./install-request.js";
+import type { PreviousFileValue } from "./ownership.js";
 import type { PreparedSkill } from "./package-files.js";
+import type { FileChange } from "./plan.js";
 import type { Receipt } from "./receipt.js";
 
-type AgentWritesRequest = {
+interface AgentWritesRequest {
   request: InstallRequest;
   selectedAgents: ReadonlyArray<AgentDefinition>;
   preparedSkills: ReadonlyArray<PreparedSkill>;
   previousReceipt: Receipt | undefined;
+}
+
+interface FormatWritesRequest extends AgentWritesRequest {
+  agent: AgentDefinition;
+}
+
+interface InspectedFile {
+  path: string;
+  snapshot: FileSnapshot;
+  previous: PreviousFileValue;
+}
+
+interface PlannedFile {
+  readonly _tag: string;
+}
+
+// Planners and checks throw plain errors; each one becomes an InstallError.
+const tryAsInstallError = <Planned>(action: () => Planned): Planned => {
+  try {
+    return action();
+  } catch (error) {
+    throw wrapAsInstallError(error);
+  }
 };
 
-type FormatWritesRequest = AgentWritesRequest & { agent: AgentDefinition };
-
-type InspectedFile = { path: string; snapshot: FileSnapshot };
-
 // Reads every destination once and resolves the prior state its receipt keeps; desired bytes allow adoption.
-const inspectWholeFiles = (input: FormatWritesRequest, desired: ReadonlyMap<string, Uint8Array | undefined>) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
+const readWholeFiles = async ({
+  root,
+  previousReceipt,
+  desiredFiles,
+}: {
+  root: string;
+  previousReceipt: Receipt | undefined;
+  desiredFiles: ReadonlyMap<string, Uint8Array | undefined>;
+}): Promise<InspectedFile[]> =>
+  Promise.all(
+    [...desiredFiles].map(async ([filePath, desiredBytes]) => {
+      const snapshot = await readFileSnapshot(join(root, filePath));
+      const previous = tryAsInstallError(() =>
+        previousWholeFile({ receipt: previousReceipt, filePath, snapshot, desiredBytes }),
+      );
 
-    return yield* Effect.forEach([...desired], ([filePath, desiredBytes]) =>
-      Effect.gen(function* () {
-        const snapshot = yield* Effect.tryPromise({
-          try: () => readFileSnapshot(path.join(input.request.destination.root, filePath)),
-          catch: (error) => error,
-        });
-        const previous = yield* Either.try({
-          try: () =>
-            previousWholeFile({
-              receipt: input.previousReceipt,
-              filePath,
-              snapshot,
-              desiredBytes,
-            }),
-          catch: wrapAsInstallError,
-        });
-
-        return { path: filePath, snapshot, previous };
-      }),
-    );
-  });
-
-const withExpectedCurrent = (
-  writes: ReadonlyArray<{ readonly file: { readonly path: string } }>,
-  inspected: ReadonlyArray<InspectedFile>,
-) =>
-  Either.all(
-    writes.map((write) => {
-      const file = inspected.find((candidate) => candidate.path === write.file.path);
-
-      return file === undefined
-        ? Either.left(createInstallError(`Missing inspected state for ${write.file.path}.`))
-        : Either.try({
-            try: () => checkFileChange({ ...write, expectedCurrent: expectedCurrent(file.snapshot) }),
-            catch: wrapAsInstallError,
-          });
+      return { path: filePath, snapshot, previous };
     }),
   );
 
-const createSkillDirectoryWrites = (input: FormatWritesRequest) =>
-  Effect.gen(function* () {
-    if (input.agent.target._tag !== "skillDirectory") {
-      return [];
+const checkPlannedWrites = (
+  writes: ReadonlyArray<{ file: { path: string } }>,
+  inspectedFiles: ReadonlyArray<InspectedFile>,
+): FileChange[] =>
+  writes.map((write) => {
+    const inspectedFile = inspectedFiles.find((candidate) => candidate.path === write.file.path);
+    const isInspectedFileMissing = inspectedFile == null;
+    if (isInspectedFileMissing) {
+      throw createInstallError(`Missing inspected state for ${write.file.path}.`);
     }
 
-    const target = input.agent.target;
-    const files = yield* inspectWholeFiles(
-      input,
-      new Map(
-        input.preparedSkills.flatMap((skill) =>
-          skill.sourceFiles.map((file): [string, Uint8Array] => [
-            `${target.path}/${skill.installedSkill.id}/${file.path}`,
-            file.bytes,
-          ]),
-        ),
-      ),
+    return tryAsInstallError(() =>
+      checkFileChange({ ...write, expectedCurrent: expectedCurrent(inspectedFile.snapshot) }),
     );
-    const plan = yield* Effect.try({
-      try: () =>
-        planSkillDirectory({
-          agent: input.agent,
-          skills: input.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
-          previousFiles: files.map(({ path, previous }) => ({ path, previous })),
-        }),
-      catch: wrapAsInstallError,
-    });
-
-    return yield* withExpectedCurrent(plan.writes, files);
   });
 
-const createRuleFileWrites = (input: FormatWritesRequest) =>
-  Effect.gen(function* () {
-    if (input.agent.target._tag !== "ruleFile") {
-      return [];
-    }
+const createSkillDirectoryWrites = async (formatRequest: FormatWritesRequest): Promise<FileChange[]> => {
+  const target = formatRequest.agent.target;
+  const isNotSkillDirectory = target._tag !== "skillDirectory";
+  if (isNotSkillDirectory) {
+    return [];
+  }
 
-    const target = input.agent.target;
-    const files = yield* inspectWholeFiles(
-      input,
-      new Map(
-        input.preparedSkills.map((skill) => [
-          `${target.directory}/${skill.installedSkill.id}${target.extension}`,
-          undefined,
-        ]),
-      ),
-    );
-    const plan = yield* Effect.try({
-      try: () =>
-        planRuleFiles({
-          agent: input.agent,
-          skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
-          previousFiles: files.map(({ path, previous }) => ({ path, previous })),
-        }),
-      catch: wrapAsInstallError,
-    });
-
-    return yield* withExpectedCurrent(plan.writes, files);
+  const desiredFiles = new Map(
+    formatRequest.preparedSkills.flatMap((skill) =>
+      skill.sourceFiles.map((file): [string, Uint8Array] => [
+        `${target.path}/${skill.installedSkill.id}/${file.path}`,
+        file.bytes,
+      ]),
+    ),
+  );
+  const inspectedFiles = await readWholeFiles({
+    root: formatRequest.request.destination.root,
+    previousReceipt: formatRequest.previousReceipt,
+    desiredFiles,
   });
 
-type FormatPlan = Either.Either<{ readonly _tag: string }, unknown>;
+  const plan = tryAsInstallError(() =>
+    planSkillDirectory({
+      agent: formatRequest.agent,
+      skills: formatRequest.preparedSkills.map(({ installedSkill, sourceFiles }) => ({ installedSkill, sourceFiles })),
+      previousFiles: inspectedFiles.map(({ path, previous }) => ({ path, previous })),
+    }),
+  );
+
+  return checkPlannedWrites(plan.writes, inspectedFiles);
+};
+
+const createRuleFileWrites = async (formatRequest: FormatWritesRequest): Promise<FileChange[]> => {
+  const target = formatRequest.agent.target;
+  const isNotRuleFile = target._tag !== "ruleFile";
+  if (isNotRuleFile) {
+    return [];
+  }
+
+  const desiredFiles = new Map<string, Uint8Array | undefined>(
+    formatRequest.preparedSkills.map((skill) => [
+      `${target.directory}/${skill.installedSkill.id}${target.extension}`,
+      undefined,
+    ]),
+  );
+  const inspectedFiles = await readWholeFiles({
+    root: formatRequest.request.destination.root,
+    previousReceipt: formatRequest.previousReceipt,
+    desiredFiles,
+  });
+
+  const plan = tryAsInstallError(() =>
+    planRuleFiles({
+      agent: formatRequest.agent,
+      skills: formatRequest.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
+      previousFiles: inspectedFiles.map(({ path, previous }) => ({ path, previous })),
+    }),
+  );
+
+  return checkPlannedWrites(plan.writes, inspectedFiles);
+};
 
 // Instruction files and native links are shared or merged into user files, so each keeps a receipt kind.
-const createSharedFileWrite = (input: {
+const createSharedFileWrites = async ({
+  root,
+  previousReceipt,
+  filePath,
+  kind,
+  planFile,
+}: {
   root: string;
   previousReceipt: Receipt | undefined;
   filePath: string;
   kind: "instruction" | "instructionLink";
-  plan: (files: { currentFile: FileSnapshot; previousFile: unknown }) => FormatPlan;
-}) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const snapshot = yield* Effect.tryPromise({
-      try: () => readFileSnapshot(path.join(input.root, input.filePath)),
-      catch: (error) => error,
-    });
-    const previousFile = previousReceiptFile(input.previousReceipt, input.filePath);
-    if (previousFile !== undefined && previousFile.kind._tag !== input.kind) {
-      const label = input.kind === "instruction" ? "instruction" : "native config";
+  planFile: (files: { currentFile: FileSnapshot; previousFile: unknown }) => PlannedFile;
+}): Promise<FileChange[]> => {
+  const currentFile = await readFileSnapshot(join(root, filePath));
+  const previousFile = previousReceiptFile(previousReceipt, filePath);
+  const isPreviousFileOtherKind = previousFile != null && previousFile.kind._tag !== kind;
+  if (isPreviousFileOtherKind) {
+    const label = kind === "instruction" ? "instruction" : "native config";
 
-      return yield* Effect.fail(
-        createInstallError(`Receipted ${label} path ${input.filePath} has an incompatible file kind.`),
-      );
-    }
+    throw createInstallError(`Receipted ${label} path ${filePath} has an incompatible file kind.`);
+  }
 
-    const plan = yield* Either.mapLeft(
-      input.plan({
-        currentFile: snapshot,
-        previousFile: previousFile === undefined ? { _tag: "missing" } : { _tag: "owned", file: previousFile },
-      }),
-      wrapAsInstallError,
-    );
-    if (plan._tag === "none") {
-      return [];
-    }
+  const isPreviousFileMissing = previousFile == null;
+  const previousFileState = isPreviousFileMissing ? { _tag: "missing" } : { _tag: "owned", file: previousFile };
+  const plannedFile = tryAsInstallError(() => planFile({ currentFile, previousFile: previousFileState }));
 
-    return [
-      yield* Either.try({
-        try: () => checkFileChange({ ...plan, expectedCurrent: expectedCurrent(snapshot) }),
-        catch: wrapAsInstallError,
-      }),
-    ];
-  });
+  const isNothingPlanned = plannedFile._tag === "none";
+  if (isNothingPlanned) {
+    return [];
+  }
 
-const createInstructionWrites = (input: AgentWritesRequest) =>
-  Effect.gen(function* () {
-    if (input.preparedSkills.length === 0) {
-      return [];
-    }
+  return [tryAsInstallError(() => checkFileChange({ ...plannedFile, expectedCurrent: expectedCurrent(currentFile) }))];
+};
 
-    const instructionPaths = [...new Set(input.selectedAgents.flatMap((agent) => instructionPath(agent) || []))];
-    const writes = yield* Effect.forEach(instructionPaths, (filePath) =>
-      createSharedFileWrite({
-        root: input.request.destination.root,
-        previousReceipt: input.previousReceipt,
+const createInstructionWrites = async (writesRequest: AgentWritesRequest): Promise<FileChange[]> => {
+  const hasNoSkills = writesRequest.preparedSkills.length === 0;
+  if (hasNoSkills) {
+    return [];
+  }
+
+  const instructionPaths = [...new Set(writesRequest.selectedAgents.flatMap((agent) => instructionPath(agent) ?? []))];
+  const writes = await Promise.all(
+    instructionPaths.map((filePath) =>
+      createSharedFileWrites({
+        root: writesRequest.request.destination.root,
+        previousReceipt: writesRequest.previousReceipt,
         filePath,
         kind: "instruction",
-        plan: (files) =>
-          Either.try({
-            try: () =>
-              planInstructionFile({
-                path: filePath,
-                desired: {
-                  _tag: "present",
-                  agentIds: input.selectedAgents
-                    .filter((agent) => instructionPath(agent) === filePath)
-                    .map((agent) => agent.id),
-                  skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
-                },
-                ...files,
-              }),
-            catch: wrapAsInstallError,
+        planFile: ({ currentFile, previousFile }) =>
+          planInstructionFile({
+            path: filePath,
+            desired: {
+              _tag: "present",
+              agentIds: writesRequest.selectedAgents
+                .filter((agent) => instructionPath(agent) === filePath)
+                .map((agent) => agent.id),
+              skills: writesRequest.preparedSkills.map(({ installedSkill, markdown }) => ({
+                installedSkill,
+                markdown,
+              })),
+            },
+            currentFile,
+            previousFile,
           }),
       }),
-    );
+    ),
+  );
 
-    return writes.flat();
+  return writes.flat();
+};
+
+const createInstructionLinkWrite = async ({
+  writesRequest,
+  agent,
+}: {
+  writesRequest: AgentWritesRequest;
+  agent: AgentDefinition;
+}): Promise<FileChange[]> => {
+  const target = agent.target;
+  const isNotInstructionLink = target._tag !== "instructionLink";
+  if (isNotInstructionLink) {
+    return [];
+  }
+
+  return createSharedFileWrites({
+    root: writesRequest.request.destination.root,
+    previousReceipt: writesRequest.previousReceipt,
+    filePath: target.configPath,
+    kind: "instructionLink",
+    planFile: ({ currentFile, previousFile }) =>
+      planInstructionLink({ agent, desired: { _tag: "present" }, currentFile, previousFile }),
   });
+};
 
-const createInstructionLinkWrites = (input: AgentWritesRequest) =>
-  Effect.gen(function* () {
-    if (input.preparedSkills.length === 0) {
-      return [];
-    }
+const createInstructionLinkWrites = async (writesRequest: AgentWritesRequest): Promise<FileChange[]> => {
+  const hasNoSkills = writesRequest.preparedSkills.length === 0;
+  if (hasNoSkills) {
+    return [];
+  }
 
-    const writes = yield* Effect.forEach(input.selectedAgents, (agent) =>
-      agent.target._tag === "instructionLink"
-        ? createSharedFileWrite({
-            root: input.request.destination.root,
-            previousReceipt: input.previousReceipt,
-            filePath: agent.target.configPath,
-            kind: "instructionLink",
-            plan: (files) =>
-              Either.try({
-                try: () => planInstructionLink({ agent, desired: { _tag: "present" }, ...files }),
-                catch: wrapAsInstallError,
-              }),
-          })
-        : Effect.succeed([]),
-    );
+  const writes = await Promise.all(
+    writesRequest.selectedAgents.map((agent) => createInstructionLinkWrite({ writesRequest, agent })),
+  );
 
-    return writes.flat();
-  });
+  return writes.flat();
+};
 
-export const createAgentWrites = (input: AgentWritesRequest) =>
-  Effect.gen(function* () {
-    const directoryWrites = yield* Effect.forEach(input.selectedAgents, (agent) =>
-      createSkillDirectoryWrites({ ...input, agent }),
-    );
-    const ruleWrites = yield* Effect.forEach(input.selectedAgents, (agent) =>
-      createRuleFileWrites({ ...input, agent }),
-    );
-    const instructionWrites = yield* createInstructionWrites(input);
-    const instructionLinkWrites = yield* createInstructionLinkWrites(input);
+export const createAgentWrites = async (writesRequest: AgentWritesRequest): Promise<FileChange[]> => {
+  const directoryWrites = await Promise.all(
+    writesRequest.selectedAgents.map((agent) => createSkillDirectoryWrites({ ...writesRequest, agent })),
+  );
+  const ruleWrites = await Promise.all(
+    writesRequest.selectedAgents.map((agent) => createRuleFileWrites({ ...writesRequest, agent })),
+  );
+  const instructionWrites = await createInstructionWrites(writesRequest);
+  const instructionLinkWrites = await createInstructionLinkWrites(writesRequest);
 
-    return [...directoryWrites.flat(), ...ruleWrites.flat(), ...instructionWrites, ...instructionLinkWrites];
-  });
+  return [...directoryWrites.flat(), ...ruleWrites.flat(), ...instructionWrites, ...instructionLinkWrites];
+};
