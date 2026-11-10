@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 
-import { Either, Option } from "effect";
+import { Option } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { agentCatalog } from "../../catalog/agent-catalog.js";
 import { findFeature } from "../../catalog/feature-catalog.js";
 import type { OwnedFile } from "../ownership.js";
-import { type InstructionFilePlan, InstructionFilePlanError, planInstructionFile } from "./instruction-file.js";
+import { type InstructionFilePlan, planInstructionFile } from "./instruction-file.js";
 
 const startMarker = "<!-- agent-setup:skills start -->";
 const endMarker = "<!-- agent-setup:skills end -->";
@@ -55,10 +55,16 @@ const request = (input?: {
 
 type RequestInput = Parameters<typeof request>[0];
 
-const plan = (input?: RequestInput): InstructionFilePlan =>
-  Either.getOrThrowWith(planInstructionFile(request(input)), (error) => new Error(error.message));
+const plan = (input?: RequestInput): InstructionFilePlan => planInstructionFile(request(input));
 
-const rejects = (input: unknown): boolean => Either.isLeft(planInstructionFile(input));
+const rejects = (input: unknown): boolean => {
+  try {
+    planInstructionFile(input);
+    return false;
+  } catch {
+    return true;
+  }
+};
 
 const write = (input?: RequestInput) => {
   const operation = plan(input);
@@ -210,13 +216,7 @@ describe("planInstructionFile", () => {
     ["reversed markers", `${endMarker}body${startMarker}`],
     ["duplicate blocks", `${startMarker}one${endMarker}${startMarker}two${endMarker}`],
   ])("rejects %s", (_case, current) => {
-    const instructionMerge = planInstructionFile(request({ currentBytes: encode(current) }));
-
-    expect(Either.isLeft(instructionMerge)).toBe(true);
-    if (Either.isLeft(instructionMerge)) {
-      expect(instructionMerge.left).toBeInstanceOf(InstructionFilePlanError);
-      expect(instructionMerge.left.message).toContain("marker");
-    }
+    expect(() => planInstructionFile(request({ currentBytes: encode(current) }))).toThrow("marker");
   });
 
   it("rejects edits inside a receipted body and changed framing", () => {

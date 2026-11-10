@@ -6,7 +6,7 @@ import { Effect, Schema } from "effect";
 import { scopeSchema } from "../install/receipt.js";
 import * as TerminalUI from "./terminal-ui.js";
 
-export const scopeOption = Options.choice("scope", scopeSchema.literals).pipe(
+export const scopeOption = Options.choice("scope", scopeSchema.options).pipe(
   Options.withDefault("global"),
   Options.withDescription("Target the global home installation root (default)"),
 );

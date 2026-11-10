@@ -1,7 +1,7 @@
 /** Files the prepared package ships: hook code and skill trees read from the prepared folder and planned as whole-file writes. */
 
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
 import type { z } from "zod";
 
 import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
@@ -190,10 +190,13 @@ export const readPreparedSkills = (input: { request: InstallRequest; featureIds:
           return yield* new InstallError({ issue: `Prepared skill ${installedSkill.id} is missing SKILL.md.` });
         }
 
-        const markdown = yield* Either.mapLeft(
-          decodeStrictText(skillFile.bytes, path.join(directory, "SKILL.md")),
-          (issue) => new InstallError({ issue }),
-        );
+        const markdownReply = decodeStrictText(skillFile.bytes, path.join(directory, "SKILL.md"));
+        const isMarkdownInvalid = markdownReply._tag === "invalid";
+        if (isMarkdownInvalid) {
+          return yield* new InstallError({ issue: markdownReply.message });
+        }
+
+        const markdown = markdownReply.fileContents;
 
         return yield* Schema.validate(preparedSkillSchema, { onExcessProperty: "error" })({
           installedSkill,

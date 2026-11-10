@@ -4,6 +4,7 @@ import { Path } from "@effect/platform";
 import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
 
 import { agentCatalog } from "../catalog/agent-catalog.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { planInstructionFile } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { hashBytes } from "./file-bytes.js";
@@ -62,11 +63,15 @@ const checkFormatRestoration = (
 const restoreInstructionFile = (target: RestoreTarget) =>
   checkFormatRestoration(
     { ...target, format: "Instruction" },
-    planInstructionFile({
-      path: target.file.path,
-      desired: { _tag: "absent" },
-      currentFile: target.snapshot,
-      previousFile: { _tag: "owned", file: target.file },
+    Either.try({
+      try: () =>
+        planInstructionFile({
+          path: target.file.path,
+          desired: { _tag: "absent" },
+          currentFile: target.snapshot,
+          previousFile: { _tag: "owned", file: target.file },
+        }),
+      catch: toInstallError,
     }),
   );
 
@@ -99,7 +104,7 @@ const restoreRequestSchema = Schema.Struct({
   root: absoluteRootSchema.annotations({
     description: "Canonical installation root containing the receipted files.",
   }),
-  files: Schema.Array(Schema.typeSchema(ownedFileSchema)).annotations({
+  files: Schema.Array(zodAsEffectSchema(ownedFileSchema)).annotations({
     description: "Exact receipt entries whose final unowned state must be computed.",
   }),
 }).annotations({

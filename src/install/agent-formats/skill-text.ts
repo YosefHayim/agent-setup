@@ -1,6 +1,4 @@
-/** How a skill's text reaches an agent file: leading frontmatter removed. */
-
-import { Schema } from "effect";
+import { z } from "zod";
 
 // e.g. "---\n" or "---\r\n" at the start of a skill markdown body
 const frontmatterOpening = /^---(?:\r\n|\n)/;
@@ -9,9 +7,15 @@ const frontmatterBlock = /^---(?:\r\n|\n)(?:[\s\S]*?(?:\r\n|\n))?---(?:(?:\r\n|\
 
 export const stripFrontmatter = (markdown: string): string => markdown.replace(frontmatterBlock, "");
 
-export const withCompleteFrontmatter = <Encoded>(markdown: Schema.Schema<string, Encoded>) =>
-  markdown.pipe(
-    Schema.filter((text) => !frontmatterOpening.test(text) || frontmatterBlock.test(text), {
-      message: () => "Leading YAML frontmatter must have exact opening and closing delimiter lines.",
-    }),
-  );
+const isFrontmatterComplete = (markdown: string): boolean => {
+  const isFrontmatterMissing = !frontmatterOpening.test(markdown);
+  if (isFrontmatterMissing) {
+    return true;
+  }
+
+  return frontmatterBlock.test(markdown);
+};
+
+export const markdownWithCompleteFrontmatterSchema = z
+  .string()
+  .refine(isFrontmatterComplete, "Leading YAML frontmatter must have exact opening and closing delimiter lines.");

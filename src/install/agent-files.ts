@@ -173,16 +173,20 @@ const createInstructionWrites = (input: AgentWritesRequest) =>
         filePath,
         kind: "instruction",
         plan: (files) =>
-          planInstructionFile({
-            path: filePath,
-            desired: {
-              _tag: "present",
-              agentIds: input.selectedAgents
-                .filter((agent) => instructionPath(agent) === filePath)
-                .map((agent) => agent.id),
-              skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
-            },
-            ...files,
+          Either.try({
+            try: () =>
+              planInstructionFile({
+                path: filePath,
+                desired: {
+                  _tag: "present",
+                  agentIds: input.selectedAgents
+                    .filter((agent) => instructionPath(agent) === filePath)
+                    .map((agent) => agent.id),
+                  skills: input.preparedSkills.map(({ installedSkill, markdown }) => ({ installedSkill, markdown })),
+                },
+                ...files,
+              }),
+            catch: toInstallError,
           }),
       }),
     );

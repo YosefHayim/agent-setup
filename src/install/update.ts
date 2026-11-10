@@ -12,6 +12,7 @@ import {
   platformRequirementSchema,
   preparedPackageSchema,
   selectedFeatureChoiceSchema,
+  toInstallError,
 } from "./install-request.js";
 import { readReceipt } from "./receipt.js";
 
@@ -76,7 +77,10 @@ export const update = (input: unknown) =>
   Effect.gen(function* () {
     const request = yield* decodeStrictly(updateRequestSchema)(input);
     const path = yield* Path.Path;
-    const receiptSnapshot = yield* readReceipt(path.join(request.destination.root, receiptPath));
+    const receiptSnapshot = yield* Effect.tryPromise({
+      try: () => readReceipt(path.join(request.destination.root, receiptPath)),
+      catch: toInstallError,
+    });
     if (receiptSnapshot._tag === "missing") {
       return yield* new UpdateError({ issue: "No ownership receipt exists at the requested scope." });
     }

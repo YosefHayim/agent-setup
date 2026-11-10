@@ -3,6 +3,7 @@
 import { FileSystem, Path } from "@effect/platform";
 import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
 
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { versionSchema } from "./receipt.js";
 
 class PackageRootError extends Schema.TaggedError<PackageRootError>()("PackageRootError", {
@@ -17,7 +18,7 @@ class PackageRootError extends Schema.TaggedError<PackageRootError>()("PackageRo
 
 const packageManifestSchema = Schema.parseJson(
   Schema.Struct({
-    version: versionSchema.annotations({
+    version: zodAsEffectSchema(versionSchema).annotations({
       description: "Semantic package version published in the ownership receipt.",
     }),
   }),

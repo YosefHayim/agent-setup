@@ -38,11 +38,10 @@ import type { PreviousFileValue } from "./ownership.js";
 import { createHookWrites, readPreparedSkills } from "./package-files.js";
 import type { FileChange, ReceiptTarget } from "./plan.js";
 import { planInstall } from "./plan-changes.js";
-import { type Receipt, type ReceiptSnapshot, readReceipt, receiptJsonSchema } from "./receipt.js";
+import { encodeReceiptJson, type Receipt, type ReceiptSnapshot, readReceipt } from "./receipt.js";
 import { planStaleRestorations } from "./restore.js";
 
-const receiptEqual = (left: Receipt, right: Receipt): boolean =>
-  Schema.encodeSync(receiptJsonSchema)(left) === Schema.encodeSync(receiptJsonSchema)(right);
+const receiptEqual = (left: Receipt, right: Receipt): boolean => encodeReceiptJson(left) === encodeReceiptJson(right);
 
 const configSnapshotFile = (snapshot: ConfigFileSnapshot): FileSnapshot =>
   snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "file", bytes: snapshot.bytes };
@@ -355,7 +354,10 @@ export const install = (input: unknown) =>
   Effect.gen(function* () {
     const request = yield* decodeStrictly(installRequestSchema)(input);
     const path = yield* Path.Path;
-    const receiptSnapshot = yield* readReceipt(path.join(request.destination.root, receiptPath));
+    const receiptSnapshot = yield* Effect.tryPromise({
+      try: () => readReceipt(path.join(request.destination.root, receiptPath)),
+      catch: toInstallError,
+    });
     const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : [];
     const requestedIds = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
     const features = { _tag: "selected", ids: [...installedIds, ...requestedIds] } as const;

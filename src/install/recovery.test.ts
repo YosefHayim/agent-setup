@@ -1,5 +1,4 @@
-import { describe, expect, it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { decodeRecoveryRecordJson } from "./recovery.js";
 
@@ -39,23 +38,21 @@ const driveRecord = (fields: object) => ({
 });
 
 describe("recovery", () => {
-  it.effect("decodes strict contained recovery records", () =>
-    Effect.gen(function* () {
-      const rootRecord = {
-        ...validRecord,
-        root: "/",
-        receiptPath: "/.agent-setup/receipt.json",
-        transactionRoot: `/${transactionName}`,
-        snapshots: [missingAt("/.agent-setup/receipt.json")],
-      };
+  it("decodes strict contained recovery records", () => {
+    const rootRecord = {
+      ...validRecord,
+      root: "/",
+      receiptPath: "/.agent-setup/receipt.json",
+      transactionRoot: `/${transactionName}`,
+      snapshots: [missingAt("/.agent-setup/receipt.json")],
+    };
 
-      expect(yield* decodeRecoveryRecordJson(JSON.stringify(validRecord))).toEqual(validRecord);
-      expect((yield* decodeRecoveryRecordJson(JSON.stringify(rootRecord))).root).toBe("/");
-    }),
-  );
+    expect(decodeRecoveryRecordJson(JSON.stringify(validRecord))).toEqual(validRecord);
+    expect(decodeRecoveryRecordJson(JSON.stringify(rootRecord)).root).toBe("/");
+  });
 
   // Every malformed record must fail before recovery can touch the filesystem.
-  it.effect.each([
+  it.each([
     { name: "embedded NUL", record: withSnapshots([missingAt("/safe/file\0.txt")]) },
     { name: "recovery marker target", record: withSnapshots([missingAt("/safe/.agent-setup/recovery.json")]) },
     {
@@ -131,9 +128,7 @@ describe("recovery", () => {
       name: "POSIX backslash snapshot",
       record: withSnapshots([snapshotAt("/safe/a", `${transactionRoot}/snapshots\\0`)]),
     },
-  ])("rejects an ambiguous or self-destructive record: $name", ({ record }) =>
-    Effect.gen(function* () {
-      expect(Exit.isFailure(yield* Effect.exit(decodeRecoveryRecordJson(JSON.stringify(record))))).toBe(true);
-    }),
-  );
+  ])("rejects an ambiguous or self-destructive record: $name", ({ record }) => {
+    expect(() => decodeRecoveryRecordJson(JSON.stringify(record))).toThrow();
+  });
 });

@@ -69,7 +69,7 @@ export const preparedPackageSchema = Schema.Struct({
   root: absoluteRootSchema.annotations({
     description: "Absolute prepared dist root containing only verified skills and runtime files.",
   }),
-  version: versionSchema.annotations({
+  version: zodAsEffectSchema(versionSchema).annotations({
     description: "Semantic package version published in the ownership receipt.",
   }),
 }).annotations({

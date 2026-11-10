@@ -4,14 +4,14 @@ import { installedSkillSchema } from "../../catalog/feature-catalog.js";
 import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import { hashBytes } from "../file-bytes.js";
 import {
+  agentOwnerSchema,
   fileKindSchema,
-  fileOwnerSchema,
   previousFileValueSchema,
   relativePathSchema,
   wholeFileOwnershipSchema,
 } from "../ownership.js";
 import { writeOperationSchema } from "../plan.js";
-import { stripFrontmatter, withCompleteFrontmatter } from "./skill-text.js";
+import { markdownWithCompleteFrontmatterSchema, stripFrontmatter } from "./skill-text.js";
 
 const textEncoder = new TextEncoder();
 
@@ -31,7 +31,7 @@ const ruleFileSkillSchema = Schema.Struct({
   installedSkill: zodAsEffectSchema(installedSkillSchema).annotations({
     description: "Catalog-owned installed skill identity used for the output filename.",
   }),
-  markdown: withCompleteFrontmatter(Schema.String).pipe(
+  markdown: zodAsEffectSchema(markdownWithCompleteFrontmatterSchema).pipe(
     Schema.filter((markdown) => stripFrontmatter(markdown).trim().length > 0, {
       message: () => "Rule-file markdown requires a non-empty body after frontmatter.",
     }),
@@ -42,10 +42,10 @@ const ruleFileSkillSchema = Schema.Struct({
 });
 
 const previousRuleFileSchema = Schema.Struct({
-  path: relativePathSchema.annotations({
+  path: zodAsEffectSchema(relativePathSchema).annotations({
     description: "Exact rule path whose original state is retained for restoration.",
   }),
-  previous: Schema.typeSchema(previousFileValueSchema).annotations({
+  previous: zodAsEffectSchema(previousFileValueSchema).annotations({
     description: "Decoded original whole-file state retained across updates.",
   }),
 });
@@ -99,10 +99,10 @@ type RuleFileRequest = Schema.Schema.Type<typeof ruleFileRequestSchema>;
 
 const ruleFileWriteSchema = Schema.TaggedStruct("write", {
   file: Schema.Struct({
-    owner: fileOwnerSchema.members[1],
-    path: relativePathSchema,
-    kind: fileKindSchema.members[2],
-    ownership: wholeFileOwnershipSchema,
+    owner: zodAsEffectSchema(agentOwnerSchema),
+    path: zodAsEffectSchema(relativePathSchema),
+    kind: zodAsEffectSchema(fileKindSchema.options[2]),
+    ownership: zodAsEffectSchema(wholeFileOwnershipSchema),
   }),
   bytes: writeOperationSchema.fields.bytes,
 });

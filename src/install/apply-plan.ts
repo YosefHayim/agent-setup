@@ -3,19 +3,18 @@ import { rmdir } from "node:fs/promises";
 
 import { FileSystem, Path } from "@effect/platform";
 import { BadArgument, type PlatformError, SystemError } from "@effect/platform/Error";
-import { Cause, Effect, Exit, Ref, Schema } from "effect";
+import { Cause, Effect, Exit, Ref } from "effect";
 
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
 import { type FileSnapshot, readFileSnapshot } from "./host-files.js";
 import type { ExpectedCurrent, FileChange, Plan, Precondition, ReceiptOperation } from "./plan.js";
-import { receiptJsonSchema } from "./receipt.js";
+import { encodeReceiptJson } from "./receipt.js";
 import {
+  createUnfinishedChangeError,
   decodeRecoveryRecordJson,
+  encodeRecoveryRecordJson,
   type RecoveryRecord,
-  recoveryRecordJsonSchema,
-  recoveryRecordSchema,
   type TargetSnapshot,
-  UnfinishedChangeError,
 } from "./recovery.js";
 import { parentDirectories, validatePlanRoot, validateTarget } from "./target-paths.js";
 
@@ -82,13 +81,19 @@ const badArgument = (method: string, description: string) =>
 const isAlreadyExists = (error: PlatformError): boolean =>
   error._tag === "SystemError" && error.reason === "AlreadyExists";
 
+const checkTarget = (root: string, targetPath: string) =>
+  Effect.tryPromise({ try: () => validateTarget(root, targetPath), catch: (cause) => cause });
+
+const checkPlanRoot = (planRoot: string) =>
+  Effect.tryPromise({ try: () => validatePlanRoot(planRoot), catch: (cause) => cause });
+
 const combineCauses = (causes: ReadonlyArray<Cause.Cause<unknown>>): Cause.Cause<unknown> =>
   causes.reduce((combined, cause) => Cause.sequential(combined, cause), Cause.empty);
 
 const failureCauses = (exits: ReadonlyArray<Exit.Exit<unknown, unknown>>) =>
   exits.flatMap((exit) => (Exit.isFailure(exit) ? [exit.cause] : []));
 
-const unfinishedChange = (recoveryPath: string) => Cause.fail(new UnfinishedChangeError({ recoveryPath }));
+const unfinishedChange = (recoveryPath: string) => Cause.fail(createUnfinishedChangeError(recoveryPath));
 
 // Runs the cleanup, then fails with the original cause plus any cleanup failure.
 const failAfter = <R>(cause: Cause.Cause<unknown>, cleanup: Effect.Effect<unknown, unknown, R>) =>
@@ -151,14 +156,14 @@ const preflightTargets = (preparedPlan: PreparedPlan) =>
       preparedPlan.receipt.targetPath,
       preparedPlan.receipt.recoveryPath,
     ],
-    (targetPath) => validateTarget(preparedPlan.root, targetPath),
+    (targetPath) => checkTarget(preparedPlan.root, targetPath),
     { discard: true },
   );
 
 const ensureRecoveryAbsent = (recoveryPath: string) =>
   Effect.gen(function* () {
     if (yield* pathExists(recoveryPath)) {
-      return yield* new UnfinishedChangeError({ recoveryPath });
+      return yield* Effect.fail(createUnfinishedChangeError(recoveryPath));
     }
   });
 
@@ -170,7 +175,7 @@ const removeTransaction = (preparedPlan: PreparedPlan) =>
 const captureTarget = (root: string, target: { targetPath: string; snapshotPath: string }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    yield* validateTarget(root, target.targetPath);
+    yield* checkTarget(root, target.targetPath);
     const current = yield* readFileSnapshot(target.targetPath);
     if (current._tag === "missing") {
       return targetSnapshot(target.targetPath, { _tag: "missing" });
@@ -264,7 +269,7 @@ const prepareTargets = (preparedPlan: PreparedPlan) =>
     yield* Effect.forEach(preparedPlan.files, prepareFile, { discard: true });
     if (preparedPlan.receipt.operation._tag === "receiptPublish") {
       const fileSystem = yield* FileSystem.FileSystem;
-      const receiptJson = yield* Schema.encode(receiptJsonSchema)(preparedPlan.receipt.operation.receipt);
+      const receiptJson = encodeReceiptJson(preparedPlan.receipt.operation.receipt);
       yield* fileSystem.writeFileString(preparedPlan.receipt.preparedPath, receiptJson);
     }
   });
@@ -272,7 +277,7 @@ const prepareTargets = (preparedPlan: PreparedPlan) =>
 const ensureTargetParent = (transaction: Transaction, targetPath: string) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    for (const directory of yield* parentDirectories(transaction.preparedPlan.root, targetPath)) {
+    for (const directory of parentDirectories(transaction.preparedPlan.root, targetPath)) {
       const isDirectory = yield* fileSystem.stat(directory).pipe(
         Effect.map((entry) => entry.type === "Directory"),
         Effect.catchIf(isNotFound, () => Effect.succeed(false)),
@@ -299,25 +304,29 @@ const publishRecoveryMarker = (transaction: Transaction) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const { pendingRecordPath, receipt, root } = transaction.preparedPlan;
-    const recoveryJson = yield* Schema.encode(recoveryRecordJsonSchema)(pendingRecoveryRecord(transaction));
+    const recoveryJson = encodeRecoveryRecordJson(pendingRecoveryRecord(transaction));
 
     yield* fileSystem.writeFileString(pendingRecordPath, recoveryJson, { flag: "wx", mode: 0o600 });
     yield* ensureTargetParent(transaction, receipt.recoveryPath);
-    yield* validateTarget(root, receipt.recoveryPath);
+    yield* checkTarget(root, receipt.recoveryPath);
     return yield* fileSystem.link(pendingRecordPath, receipt.recoveryPath).pipe(
       Effect.as(true),
       Effect.catchIf(isAlreadyExists, () => Effect.succeed(false)),
     );
   });
 
-const recoveryRecordsEqual = Schema.equivalence(recoveryRecordSchema);
-
 const verifyRecoveryMarker = (transaction: Transaction) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const recoveryPath = transaction.preparedPlan.receipt.recoveryPath;
-    const recoveryRecord = yield* decodeRecoveryRecordJson(yield* fileSystem.readFileString(recoveryPath));
-    if (!recoveryRecordsEqual(recoveryRecord, pendingRecoveryRecord(transaction))) {
+    const recoveryJson = yield* fileSystem.readFileString(recoveryPath);
+    const recoveryRecord = yield* Effect.try({
+      try: () => decodeRecoveryRecordJson(recoveryJson),
+      catch: (cause) => cause,
+    });
+    const isRecoveryRecordChanged =
+      encodeRecoveryRecordJson(recoveryRecord) !== encodeRecoveryRecordJson(pendingRecoveryRecord(transaction));
+    if (isRecoveryRecordChanged) {
       return yield* badArgument("readFile", `Recovery marker ${recoveryPath} changed during the transaction.`);
     }
   });
@@ -344,7 +353,7 @@ type UnchangedCheck = {
 // Fails unless the target still holds the expected state, so no step overwrites bytes someone else changed.
 const ensureUnchanged = (transaction: Transaction, check: UnchangedCheck) =>
   Effect.gen(function* () {
-    yield* validateTarget(transaction.preparedPlan.root, check.targetPath);
+    yield* checkTarget(transaction.preparedPlan.root, check.targetPath);
     const current = yield* readFileSnapshot(check.targetPath);
     if (yield* holdsState(current, check.expected)) {
       return;
@@ -469,9 +478,7 @@ const removeEmptiedDirectories = (preparedPlan: PreparedPlan) =>
     const removedPaths = [...preparedPlan.files, preparedPlan.receipt]
       .filter((target) => target.operation._tag === "remove")
       .map((target) => target.targetPath);
-    const parents = yield* Effect.forEach(removedPaths, (targetPath) =>
-      parentDirectories(preparedPlan.root, targetPath),
-    );
+    const parents = removedPaths.map((targetPath) => parentDirectories(preparedPlan.root, targetPath));
     const deepestFirst = [...new Set(parents.flat())].sort((left, right) => right.length - left.length);
 
     yield* Effect.forEach(deepestFirst, (directory) => Effect.ignore(removeEmptyDirectory(directory)), {
@@ -549,7 +556,7 @@ const recoverCommit = (transaction: Transaction, commitCause: Cause.Cause<unknow
 export const applyPlan = (plan: Plan) =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
-      const root = yield* restore(validatePlanRoot(plan.root));
+      const root = yield* restore(checkPlanRoot(plan.root));
       const preparedPlan = yield* preparePlan(plan, root);
       yield* restore(preflightTargets(preparedPlan));
       yield* restore(ensureRecoveryAbsent(preparedPlan.receipt.recoveryPath));

@@ -4,8 +4,8 @@ import { installedSkillSchema } from "../../catalog/feature-catalog.js";
 import { zodAsEffectSchema } from "../../zod-as-effect-schema.js";
 import { hashBytes } from "../file-bytes.js";
 import {
+  agentOwnerSchema,
   fileKindSchema,
-  fileOwnerSchema,
   previousFileValueSchema,
   relativePathSchema,
   wholeFileOwnershipSchema,
@@ -55,7 +55,7 @@ const preparedSkillFieldsSchema = Schema.Struct({
   }),
   sourceFiles: Schema.Array(
     Schema.Struct({
-      path: relativePathSchema.annotations({
+      path: zodAsEffectSchema(relativePathSchema).annotations({
         description: "File path relative to one prepared installed-skill directory.",
       }),
       bytes: Schema.Uint8ArrayFromSelf.annotations({
@@ -114,10 +114,10 @@ const skillDirectoryRequestFieldsSchema = Schema.Struct({
   }),
   previousFiles: Schema.Array(
     Schema.Struct({
-      path: relativePathSchema.annotations({
+      path: zodAsEffectSchema(relativePathSchema).annotations({
         description: "Exact desired destination whose restoration state is known.",
       }),
-      previous: Schema.typeSchema(previousFileValueSchema).annotations({
+      previous: zodAsEffectSchema(previousFileValueSchema).annotations({
         description: "Exact file state from before this destination first became owned.",
       }),
     }),
@@ -206,10 +206,10 @@ type SkillDirectoryRequest = Schema.Schema.Type<typeof skillDirectoryRequestSche
 
 const skillWriteSchema = Schema.TaggedStruct("write", {
   file: Schema.Struct({
-    owner: fileOwnerSchema.members[1],
-    path: relativePathSchema,
-    kind: fileKindSchema.members[1],
-    ownership: wholeFileOwnershipSchema,
+    owner: zodAsEffectSchema(agentOwnerSchema),
+    path: zodAsEffectSchema(relativePathSchema),
+    kind: zodAsEffectSchema(fileKindSchema.options[1]),
+    ownership: zodAsEffectSchema(wholeFileOwnershipSchema),
   }),
   bytes: writeOperationSchema.fields.bytes,
 });
