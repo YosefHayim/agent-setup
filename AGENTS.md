@@ -35,7 +35,7 @@ Names are plain English, one word per idea; the approved words live in [`LANGUAG
 
 Hard rules agents must hold every turn.
 
-- **Check gate** — `pnpm check` = Turborepo running lint (Biome + knip), typecheck, tests, build and the generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/image-to-code/scripts/` is the single sanctioned exception.
+- **Check gate** — `pnpm check` = Turborepo running lint (Biome + knip), typecheck, tests, build and the generated-document check. `tsconfig.json` typechecks everything, tests included; `tsconfig.build.json` extends it and leaves the test files out of the build output. The image-to-code harness under `src/skills/image-to-code/scripts/` is the single sanctioned exception.
 - **Effect / Schema** — capabilities return Effect; only `src/cli/main.ts` starts the runtime. Runtime, persisted, catalog, CLI, and agent-format data begin as Effect Schema. Application failures use `Schema.TaggedError`. No hand-rolled `isX` / `parseX` pairs for literals and numbers.
 - **Hooks** — installed hooks stay dependency-free plain Node (`node:*`, the shared hook files `src/hooks/*.ts`, own feature code only), **fail-open**. Application code imports hook code only through a feature's `command/` module.
 - **Ownership** — inspect → plan → validate → apply → write receipt last. A receipt is the only deletion authority. Catalog-closed shipping: the feature catalog owns exact shipped paths.

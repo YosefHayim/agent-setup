@@ -27,7 +27,7 @@
     "prod": "pnpm build && node dist/src/cli/main.js",
     "prepare": "husky",
     "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "tsc && node -e \"require('node:fs').chmodSync('dist/src/cli/main.js',0o755)\"",
+    "build": "tsc --project tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli/main.js',0o755)\"",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/agent-setup.tsbuildinfo",

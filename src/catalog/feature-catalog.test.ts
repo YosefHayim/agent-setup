@@ -5,6 +5,7 @@ import {
   defaultFeatureIds,
   featureCatalog,
   featureCatalogSchema,
+  featureIdSchema,
   findFeature,
   listSkillsForFeatures,
 } from "./feature-catalog.js";
@@ -184,7 +185,10 @@ describe("featureCatalog", () => {
 
   it("derives defaults, installed skills, and exact shipped allowlists", () => {
     expect(defaultFeatureIds).toEqual(["scratch-folder-guard", "process-kill-guard", "git-hook-guard"]);
-    expect(listSkillsForFeatures(["scratch-folder-guard", "git-hook-guard"])).toEqual([]);
+    const scratchFolderGuardId = featureIdSchema.parse("scratch-folder-guard");
+    const gitHookGuardId = featureIdSchema.parse("git-hook-guard");
+
+    expect(listSkillsForFeatures([scratchFolderGuardId, gitHookGuardId])).toEqual([]);
     expect(
       listSkillsForFeatures(featureCatalog.map((feature) => feature.id)).map((skill) => [skill.id, skill.shippedPaths]),
     ).toEqual([
