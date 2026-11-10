@@ -4,7 +4,7 @@ import { Either, Schema } from "effect";
 import { findNodeAtLocation, type Node, parseTree } from "jsonc-parser";
 
 import { hashBytes } from "./file-bytes.js";
-import { InstallError } from "./install-request.js";
+import { createInstallError } from "./install-request.js";
 
 const textEncoder = new TextEncoder();
 const encodeJson = Schema.encodeSync(Schema.parseJson());
@@ -29,13 +29,9 @@ const commaBetween = (input: { source: string; start: number; end: number }): nu
 const spliceSource = (input: { source: string; start: number; end: number; text?: string }): string =>
   input.source.slice(0, input.start) + (input.text || "") + input.source.slice(input.end);
 
-const separatorError = new InstallError({ issue: "settings.json property separators could not be preserved safely." });
+const separatorError = createInstallError("settings.json property separators could not be preserved safely.");
 
-const removeJsonProperty = (input: {
-  source: string;
-  parent: Node;
-  property: Node;
-}): Either.Either<string, InstallError> => {
+const removeJsonProperty = (input: { source: string; parent: Node; property: Node }): Either.Either<string, Error> => {
   const properties = objectProperties(input.parent);
   const index = properties.indexOf(input.property);
   const previous = properties[index - 1];
@@ -80,11 +76,11 @@ export const editJsonValue = (input: {
   source: string;
   path: ReadonlyArray<string>;
   value: unknown;
-}): Either.Either<string, InstallError> => {
+}): Either.Either<string, Error> => {
   const located = locateProperty(input);
   if (located === undefined) {
     return Either.left(
-      new InstallError({ issue: `settings.json path /${input.path.join("/")} is not an editable object property.` }),
+      createInstallError(`settings.json path /${input.path.join("/")} is not an editable object property.`),
     );
   }
 
@@ -96,7 +92,7 @@ export const editJsonValue = (input: {
 
     const currentValue = property.children?.[1];
     if (currentValue === undefined) {
-      return Either.left(new InstallError({ issue: `settings.json property ${key} has no value.` }));
+      return Either.left(createInstallError(`settings.json property ${key} has no value.`));
     }
 
     return Either.right(
@@ -136,13 +132,13 @@ export const editJsonValue = (input: {
   );
 };
 
-const locateArray = (input: { source: string; path: ReadonlyArray<string> }): Either.Either<Node, InstallError> => {
+const locateArray = (input: { source: string; path: ReadonlyArray<string> }): Either.Either<Node, Error> => {
   const root = parseTree(input.source);
   const array = root === undefined ? undefined : findNodeAtLocation(root, [...input.path]);
 
   return array?.type === "array"
     ? Either.right(array)
-    : Either.left(new InstallError({ issue: `settings.json path /${input.path.join("/")} is not an array.` }));
+    : Either.left(createInstallError(`settings.json path /${input.path.join("/")} is not an array.`));
 };
 
 // A new item copies the spacing in front of the last item, so removing it again restores the exact bytes.
@@ -150,7 +146,7 @@ export const appendJsonArrayItem = (input: {
   source: string;
   path: ReadonlyArray<string>;
   value: unknown;
-}): Either.Either<string, InstallError> => {
+}): Either.Either<string, Error> => {
   const located = locateArray(input);
 
   return Either.flatMap(located, (array) => {
@@ -190,7 +186,7 @@ export const removeJsonArrayItem = (input: {
   source: string;
   path: ReadonlyArray<string>;
   index: number;
-}): Either.Either<string, InstallError> => {
+}): Either.Either<string, Error> => {
   const located = locateArray(input);
 
   return Either.flatMap(located, (array) => {
@@ -198,7 +194,7 @@ export const removeJsonArrayItem = (input: {
     const item = items[input.index];
     if (item === undefined) {
       return Either.left(
-        new InstallError({ issue: `settings.json array /${input.path.join("/")} has no item ${input.index}.` }),
+        createInstallError(`settings.json array /${input.path.join("/")} has no item ${input.index}.`),
       );
     }
 

@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform";
-import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { Effect, Either } from "effect";
 
 import { type AgentDefinition, agentCatalog, detectAgents } from "../catalog/agent-catalog.js";
 import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "../catalog/feature-catalog.js";
@@ -28,11 +28,11 @@ import {
 } from "./host-files.js";
 import { hooksPath, receiptPath, settingsPath } from "./install-paths.js";
 import {
-  InstallError,
+  createInstallError,
   type InstallRequest,
   type InstallSummary,
   installRequestSchema,
-  toInstallError,
+  wrapAsInstallError,
 } from "./install-request.js";
 import type { PreviousFileValue } from "./ownership.js";
 import { createHookWrites, readPreparedSkills } from "./package-files.js";
@@ -46,48 +46,37 @@ const receiptEqual = (left: Receipt, right: Receipt): boolean => encodeReceiptJs
 const configSnapshotFile = (snapshot: ConfigFileSnapshot): FileSnapshot =>
   snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "file", bytes: snapshot.bytes };
 
-const decodeStrictly =
-  <Decoded, Encoded>(schema: Schema.Schema<Decoded, Encoded>) =>
-  (input: unknown) =>
-    Schema.decodeUnknown(schema, { onExcessProperty: "error" })(input).pipe(
-      Effect.mapError((error) => new InstallError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) })),
-    );
-
-const listFeaturesWithDependencies = (
-  request: InstallRequest,
-): Either.Either<ReadonlyArray<FeatureId>, InstallError> => {
+const listFeaturesWithDependencies = (request: InstallRequest): Either.Either<ReadonlyArray<FeatureId>, Error> => {
   const ids = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
 
   const dependencyCheck = addDependencies(ids);
   const isFeatureUnknown = dependencyCheck.status === "unknown";
   if (isFeatureUnknown) {
-    return Either.left(new InstallError({ issue: `Unknown feature ${dependencyCheck.featureId}.` }));
+    return Either.left(createInstallError(`Unknown feature ${dependencyCheck.featureId}.`));
   }
 
   return Either.right(dependencyCheck.featureIds);
 };
 
-const resolveSelectedAgents = (
-  ids: ReadonlyArray<string>,
-): Either.Either<ReadonlyArray<AgentDefinition>, InstallError> => {
+const pickSelectedAgents = (ids: ReadonlyArray<string>): Either.Either<ReadonlyArray<AgentDefinition>, Error> => {
   const unknownId = ids.find((id) => !agentCatalog.some((agent) => agent.id === id));
   if (unknownId !== undefined) {
-    return Either.left(new InstallError({ issue: `Unknown agent: ${unknownId}` }));
+    return Either.left(createInstallError(`Unknown agent: ${unknownId}`));
   }
 
   if (ids.length !== new Set(ids).size) {
-    return Either.left(new InstallError({ issue: "Agent selection contains duplicate IDs." }));
+    return Either.left(createInstallError("Agent selection contains duplicate IDs."));
   }
 
   return Either.right(agentCatalog.filter((agent) => ids.includes(agent.id)));
 };
 
-const resolveAgents = (request: InstallRequest): Either.Either<ReadonlyArray<AgentDefinition>, InstallError> => {
+const pickAgents = (request: InstallRequest): Either.Either<ReadonlyArray<AgentDefinition>, Error> => {
   if (request.agents._tag === "selected") {
-    return resolveSelectedAgents(request.agents.ids);
+    return pickSelectedAgents(request.agents.ids);
   }
 
-  return resolveSelectedAgents(
+  return pickSelectedAgents(
     detectAgents(request.agents.evidence).flatMap((agent) => (agent.installed ? [agent.id] : [])),
   );
 };
@@ -161,7 +150,7 @@ const inspectManagedConfig = (request: InstallRequest) =>
 const resetPreviousConfigFile = (input: {
   receipt: Receipt | undefined;
   snapshot: FileSnapshot;
-}): Either.Either<PreviousFileValue, InstallError> => {
+}): Either.Either<PreviousFileValue, Error> => {
   const file = previousReceiptFile(input.receipt, managedConfigPath);
   if (file === undefined) {
     return Either.right(previousFileValue(input.snapshot));
@@ -169,16 +158,14 @@ const resetPreviousConfigFile = (input: {
 
   return file.ownership._tag === "wholeFile"
     ? Either.right(file.ownership.previous)
-    : Either.left(
-        new InstallError({ issue: `Receipted whole-file file ${managedConfigPath} has incompatible ownership.` }),
-      );
+    : Either.left(createInstallError(`Receipted whole-file file ${managedConfigPath} has incompatible ownership.`));
 };
 
 const createManagedConfigPlan = (input: {
   request: InstallRequest;
   inspection: ManagedConfigInspection;
   previousReceipt: Receipt | undefined;
-}): Either.Either<ManagedConfigPlan, InstallError> => {
+}): Either.Either<ManagedConfigPlan, Error> => {
   const previous =
     input.request.configuration._tag === "reset"
       ? resetPreviousConfigFile({ receipt: input.previousReceipt, snapshot: input.inspection.file })
@@ -198,7 +185,7 @@ const createManagedConfigPlan = (input: {
         selection: input.inspection.selection,
         previousConfigFile: previous.right,
       }),
-    catch: toInstallError,
+    catch: wrapAsInstallError,
   });
 };
 
@@ -230,7 +217,7 @@ const planHookSettings = (input: {
     const path = yield* Path.Path;
     const claude = agentCatalog.find((agent) => agent.id === "claude-code");
     if (claude === undefined) {
-      return yield* new InstallError({ issue: "Claude Code catalog entry is missing." });
+      return yield* Effect.fail(createInstallError("Claude Code catalog entry is missing."));
     }
 
     const agents = [claude, ...input.selectedAgents.filter((agent) => agent.id !== claude.id)];
@@ -271,10 +258,16 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
     const { request: requested, receiptSnapshot } = input;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const request = yield* decodeStrictly(installRequestSchema)({
+    const destinationRoot = yield* fileSystem.realPath(requested.destination.root);
+    const homeRoot = yield* fileSystem.realPath(requested.host.homeRoot);
+    const requestInput = {
       ...requested,
-      destination: { ...requested.destination, root: yield* fileSystem.realPath(requested.destination.root) },
-      host: { homeRoot: yield* fileSystem.realPath(requested.host.homeRoot) },
+      destination: { ...requested.destination, root: destinationRoot },
+      host: { homeRoot },
+    };
+    const request = yield* Effect.try({
+      try: () => installRequestSchema.parse(requestInput),
+      catch: wrapAsInstallError,
     });
 
     const configInspection = yield* inspectManagedConfig(request);
@@ -282,11 +275,11 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
     const settings = yield* decodeSettings(settingsSnapshot);
     const previousReceipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     if (previousReceipt !== undefined && previousReceipt.scope !== request.destination._tag) {
-      return yield* new InstallError({ issue: "Existing receipt scope does not match the requested destination." });
+      return yield* Effect.fail(createInstallError("Existing receipt scope does not match the requested destination."));
     }
 
     const featureIds = yield* listFeaturesWithDependencies(request);
-    const selectedAgents = yield* resolveAgents(request);
+    const selectedAgents = yield* pickAgents(request);
     const hookWrites = yield* createHookWrites({ request, featureIds, previousReceipt });
     const preparedSkills = yield* readPreparedSkills({ request, featureIds });
     const agentWrites = yield* createAgentWrites({ request, selectedAgents, preparedSkills, previousReceipt });
@@ -337,7 +330,7 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
               ? { _tag: "missing" }
               : { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
         }),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
 
     const unchanged =
@@ -352,19 +345,22 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
     yield* applyPlan(plan);
 
     return installSummary({ tag: "installed", request, featureIds, selectedAgents });
-  }).pipe(Effect.mapError(toInstallError));
+  }).pipe(Effect.mapError(wrapAsInstallError));
 
 export const install = (input: unknown) =>
   Effect.gen(function* () {
-    const request = yield* decodeStrictly(installRequestSchema)(input);
+    const request = yield* Effect.try({
+      try: () => installRequestSchema.parse(input),
+      catch: wrapAsInstallError,
+    });
     const path = yield* Path.Path;
     const receiptSnapshot = yield* Effect.tryPromise({
       try: () => readReceipt(path.join(request.destination.root, receiptPath)),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
     const installedIds = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt.features : [];
     const requestedIds = request.features._tag === "defaults" ? defaultFeatureIds : request.features.ids;
     const features = { _tag: "selected", ids: [...installedIds, ...requestedIds] } as const;
 
     return yield* syncInstall({ request: { ...request, features }, receiptSnapshot });
-  }).pipe(Effect.mapError(toInstallError));
+  }).pipe(Effect.mapError(wrapAsInstallError));

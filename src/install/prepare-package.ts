@@ -6,7 +6,7 @@ import type { PlatformError } from "@effect/platform/Error";
 import { Effect, Schema } from "effect";
 
 import { featureCatalog } from "../catalog/feature-catalog.js";
-import { errorMessage, type preparedPackageSchema } from "./install-request.js";
+import { type PreparedPackage, readErrorMessage } from "./install-request.js";
 import { findPackageRoot, readPackageVersion } from "./package-root.js";
 
 class PreparePackageError extends Schema.TaggedError<PreparePackageError>()("PreparePackageError", {
@@ -18,8 +18,6 @@ class PreparePackageError extends Schema.TaggedError<PreparePackageError>()("Pre
     return `Cannot prepare agent-setup package: ${this.issue}`;
   }
 }
-
-type PreparedPackage = Schema.Schema.Type<typeof preparedPackageSchema>;
 
 const copyFile = (input: { source: string; destination: string }) =>
   Effect.gen(function* () {
@@ -159,7 +157,7 @@ export const preparePackage = Effect.gen(function* () {
   const path = yield* Path.Path;
   const packageRoot = yield* Effect.tryPromise({
     try: findPackageRoot,
-    catch: (error) => new PreparePackageError({ issue: errorMessage(error) }),
+    catch: (error) => new PreparePackageError({ issue: readErrorMessage(error) }),
   });
   const compiledHooksRoot = path.join(packageRoot, "dist", "src", "hooks");
   if (!(yield* fileSystem.exists(compiledHooksRoot))) {
@@ -170,7 +168,7 @@ export const preparePackage = Effect.gen(function* () {
 
   const version = yield* Effect.tryPromise({
     try: readPackageVersion,
-    catch: (error) => new PreparePackageError({ issue: errorMessage(error) }),
+    catch: (error) => new PreparePackageError({ issue: readErrorMessage(error) }),
   });
   const preparedRoot = path.join(packageRoot, "dist", "prepared");
   yield* fileSystem.remove(preparedRoot, { recursive: true }).pipe(Effect.catchAll(() => Effect.void));

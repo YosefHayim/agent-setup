@@ -4,14 +4,13 @@ import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";
-import { errorMessage, InstallError, interactionSchema, toInstallError } from "./install-request.js";
+import { interactionSchema, isInstallError, readErrorMessage, wrapAsInstallError } from "./install-request.js";
 import { planUninstall } from "./plan-changes.js";
 import { readReceipt, scopeSchema } from "./receipt.js";
 import { planRestorations } from "./restore.js";
 
-export const uninstallRequestSchema = Schema.extend(
-  installationLocationSchema,
-  Schema.Struct({
+export const uninstallRequestSchema = zodAsEffectSchema(
+  installationLocationSchema.extend({
     interaction: interactionSchema,
   }),
 ).annotations({
@@ -22,7 +21,7 @@ type UninstallRequest = Schema.Schema.Type<typeof uninstallRequestSchema>;
 
 const uninstallSummaryFieldsSchema = {
   scope: zodAsEffectSchema(scopeSchema),
-  interaction: interactionSchema,
+  interaction: zodAsEffectSchema(interactionSchema),
 };
 
 const uninstallSummarySchema = Schema.Union(
@@ -47,7 +46,11 @@ const toUninstallError = (error: unknown): UninstallError => {
     return error;
   }
 
-  return new UninstallError({ issue: error instanceof InstallError ? error.issue : errorMessage(error) });
+  if (isInstallError(error)) {
+    return new UninstallError({ issue: error.issue });
+  }
+
+  return new UninstallError({ issue: readErrorMessage(error) });
 };
 
 const decodeUninstallRequest = (input: unknown) =>
@@ -75,7 +78,7 @@ export const uninstall = (input: unknown) =>
     // The receipt is the only authority to remove anything, so no receipt means nothing to do.
     const receiptSnapshot = yield* Effect.tryPromise({
       try: () => readReceipt(path.join(request.destination.root, receiptPath)),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
     if (receiptSnapshot._tag === "missing") {
       return uninstallSummary("absent", request);
@@ -101,7 +104,8 @@ export const uninstall = (input: unknown) =>
           },
           receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(receiptSnapshot.bytes) },
         }),
-      catch: (error) => new UninstallError({ issue: `Generated uninstall plan is invalid: ${errorMessage(error)}` }),
+      catch: (error) =>
+        new UninstallError({ issue: `Generated uninstall plan is invalid: ${readErrorMessage(error)}` }),
     });
 
     yield* applyPlan(plannedUninstall);

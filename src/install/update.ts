@@ -1,60 +1,62 @@
 import { Path } from "@effect/platform";
 import { Effect, Schema, ParseResult as SchemaParseIssue } from "effect";
+import { z } from "zod";
 import { addDependencies } from "../catalog/feature-catalog.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { syncInstall } from "./install.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";
 import {
   agentChoiceSchema,
   configurationChoiceSchema,
-  errorMessage,
   type InstallRequest,
   interactionSchema,
   platformRequirementSchema,
   preparedPackageSchema,
+  readErrorMessage,
   selectedFeatureChoiceSchema,
-  toInstallError,
+  wrapAsInstallError,
 } from "./install-request.js";
-import { readReceipt } from "./receipt.js";
+import { readReceipt, scopeSchema } from "./receipt.js";
 
-const updateFeatureChoiceSchema = Schema.Union(
-  Schema.TaggedStruct("preserve", {}).annotations({
-    description: "Reuse the dependency-resolved features recorded by the current receipt.",
-  }),
-  Schema.TaggedStruct("refresh", { ids: selectedFeatureChoiceSchema.fields.ids }).annotations({
-    description: "Require the named features to be installed, then refresh the receipt's whole selection.",
-  }),
-  selectedFeatureChoiceSchema,
-).annotations({
-  description: "Preserved, refreshed, or replacement feature selection for an existing installation.",
-});
+const updateFeatureChoiceSchema = z
+  .discriminatedUnion("_tag", [
+    z
+      .strictObject({ _tag: z.literal("preserve") })
+      .describe("Reuse the dependency-resolved features recorded by the current receipt."),
+    z
+      .strictObject({
+        _tag: z.literal("refresh"),
+        ids: selectedFeatureChoiceSchema.shape.ids,
+      })
+      .describe("Require the named features to be installed, then refresh the receipt's whole selection."),
+    selectedFeatureChoiceSchema,
+  ])
+  .describe("Preserved, refreshed, or replacement feature selection for an existing installation.");
 
-const updateRequestSchema = Schema.extend(
-  installationLocationSchema,
-  Schema.Struct({
+const updateRequestSchema = installationLocationSchema
+  .extend({
     preparedPackage: preparedPackageSchema,
     features: updateFeatureChoiceSchema,
     agents: agentChoiceSchema,
     interaction: interactionSchema,
     configuration: configurationChoiceSchema,
-  }),
-).annotations({
-  description: "Complete update capability request decoded before receipt inspection.",
-});
+  })
+  .describe("Complete update capability request decoded before receipt inspection.");
 
 const updateSummaryFieldsSchema = {
-  scope: Schema.Literal("global", "project"),
-  features: selectedFeatureChoiceSchema.fields.ids,
-  agents: agentChoiceSchema.members[0].fields.ids,
-  platformRequirements: Schema.Array(platformRequirementSchema),
+  scope: scopeSchema,
+  features: selectedFeatureChoiceSchema.shape.ids,
+  agents: agentChoiceSchema.options[0].shape.ids,
+  platformRequirements: z.array(platformRequirementSchema),
   interaction: interactionSchema,
 };
 
-const updateSummarySchema = Schema.Union(
-  Schema.TaggedStruct("updated", updateSummaryFieldsSchema),
-  Schema.TaggedStruct("unchanged", updateSummaryFieldsSchema),
-);
+const updateSummarySchema = z.discriminatedUnion("_tag", [
+  z.strictObject({ _tag: z.literal("updated"), ...updateSummaryFieldsSchema }),
+  z.strictObject({ _tag: z.literal("unchanged"), ...updateSummaryFieldsSchema }),
+]);
 
-type UpdateSummary = Schema.Schema.Type<typeof updateSummarySchema>;
+type UpdateSummary = z.infer<typeof updateSummarySchema>;
 
 class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", {
   issue: Schema.NonEmptyString.annotations({
@@ -75,11 +77,11 @@ const decodeStrictly =
 
 export const update = (input: unknown) =>
   Effect.gen(function* () {
-    const request = yield* decodeStrictly(updateRequestSchema)(input);
+    const request = yield* decodeStrictly(zodAsEffectSchema(updateRequestSchema))(input);
     const path = yield* Path.Path;
     const receiptSnapshot = yield* Effect.tryPromise({
       try: () => readReceipt(path.join(request.destination.root, receiptPath)),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     });
     if (receiptSnapshot._tag === "missing") {
       return yield* new UpdateError({ issue: "No ownership receipt exists at the requested scope." });
@@ -117,6 +119,6 @@ export const update = (input: unknown) =>
     return updateSummary;
   }).pipe(
     Effect.mapError((error) =>
-      error instanceof UpdateError ? error : new UpdateError({ issue: errorMessage(error) }),
+      error instanceof UpdateError ? error : new UpdateError({ issue: readErrorMessage(error) }),
     ),
   );

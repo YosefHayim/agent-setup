@@ -6,6 +6,7 @@ import { expect, layer } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import { defaultConfig } from "../config/config-schema.js";
+import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { install } from "./install.js";
 import { installRequestSchema } from "./install-request.js";
 import { planRestorations } from "./restore.js";
@@ -72,7 +73,7 @@ const installRequest = (input: { root: string; preparedRoot: string }) => ({
   configuration: { _tag: "selected", config: defaultConfig },
 });
 
-const decodeInstallRequest = Schema.decodeUnknownEither(installRequestSchema, { onExcessProperty: "error" });
+const decodeInstallRequest = Schema.decodeUnknownEither(zodAsEffectSchema(installRequestSchema));
 
 layer(NodeContext.layer)("install", (it) => {
   it.scoped("installs one decoded prepared runtime, managed config, settings hook, and ownership receipt", () =>

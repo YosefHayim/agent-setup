@@ -5,7 +5,7 @@ import { Effect, Either, Schema, ParseResult as SchemaParseIssue } from "effect"
 
 import { zodAsEffectSchema } from "../zod-as-effect-schema.js";
 import { bytesEqual, hashBytes, isNotFound } from "./file-bytes.js";
-import { InstallError } from "./install-request.js";
+import { createInstallError } from "./install-request.js";
 import type { FileOwner, OwnedFile, PreviousFileValue } from "./ownership.js";
 import { type ExpectedCurrent, type FileChange, fileChangeSchema } from "./plan.js";
 import type { Receipt } from "./receipt.js";
@@ -39,15 +39,13 @@ export const expectedCurrent = (snapshot: FileSnapshot): ExpectedCurrent =>
 export const previousFileValue = (snapshot: FileSnapshot): PreviousFileValue =>
   snapshot._tag === "missing" ? { _tag: "missing" } : { _tag: "priorFile", bytes: snapshot.bytes };
 
-export const checkFileChange = (input: unknown): Either.Either<FileChange, InstallError> =>
+export const checkFileChange = (input: unknown): Either.Either<FileChange, Error> =>
   Either.mapLeft(
     Schema.validateEither(zodAsEffectSchema(fileChangeSchema), {
       onExcessProperty: "error",
     })(input),
     (error) =>
-      new InstallError({
-        issue: `Generated file change is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`,
-      }),
+      createInstallError(`Generated file change is invalid: ${SchemaParseIssue.TreeFormatter.formatErrorSync(error)}`),
   );
 
 export const previousReceiptFile = (receipt: Receipt | undefined, filePath: string): OwnedFile | undefined =>
@@ -60,16 +58,14 @@ export const previousWholeFile = (input: {
   filePath: string;
   snapshot: FileSnapshot;
   desiredBytes?: Uint8Array;
-}): Either.Either<PreviousFileValue, InstallError> => {
+}): Either.Either<PreviousFileValue, Error> => {
   const file = previousReceiptFile(input.receipt, input.filePath);
   if (file === undefined) {
     return Either.right(previousFileValue(input.snapshot));
   }
 
   if (file.ownership._tag !== "wholeFile") {
-    return Either.left(
-      new InstallError({ issue: `Receipted whole-file file ${input.filePath} has incompatible ownership.` }),
-    );
+    return Either.left(createInstallError(`Receipted whole-file file ${input.filePath} has incompatible ownership.`));
   }
 
   const snapshot = input.snapshot;
@@ -77,9 +73,7 @@ export const previousWholeFile = (input: {
   const desiredContent =
     snapshot._tag === "file" && input.desiredBytes !== undefined && bytesEqual(snapshot.bytes, input.desiredBytes);
   if (!installedContent && !desiredContent) {
-    return Either.left(
-      new InstallError({ issue: `Receipted whole-file file ${input.filePath} changed after installation.` }),
-    );
+    return Either.left(createInstallError(`Receipted whole-file file ${input.filePath} changed after installation.`));
   }
 
   return Either.right(file.ownership.previous);

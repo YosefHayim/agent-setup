@@ -15,7 +15,7 @@ import {
   readFileSnapshot,
 } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
-import { InstallError, type InstallRequest } from "./install-request.js";
+import { createInstallError, type InstallRequest } from "./install-request.js";
 import type { Receipt } from "./receipt.js";
 
 const preparedFileSchema = Schema.Struct({
@@ -100,7 +100,7 @@ const readPreparedFiles = (directory: string) =>
         }
 
         if (type !== "File") {
-          return yield* new InstallError({ issue: `Prepared path ${sourcePath} must be a regular file.` });
+          return yield* Effect.fail(createInstallError(`Prepared path ${sourcePath} must be a regular file.`));
         }
 
         return [{ path: entry.replaceAll("\\", "/"), bytes: yield* fileSystem.readFile(sourcePath) }];
@@ -157,9 +157,9 @@ export const createHookWrites = (input: {
         for (const registration of runtime.registrations) {
           const entrypoint = registrationEntrypoint(runtime, registration);
           if (!files.some((file) => file.path === entrypoint)) {
-            return yield* new InstallError({
-              issue: `Prepared runtime entrypoint is missing: ${sourceDirectory}/${entrypoint}`,
-            });
+            return yield* Effect.fail(
+              createInstallError(`Prepared runtime entrypoint is missing: ${sourceDirectory}/${entrypoint}`),
+            );
           }
         }
 
@@ -187,13 +187,13 @@ export const readPreparedSkills = (input: { request: InstallRequest; featureIds:
         const sourceFiles = yield* readPreparedFiles(directory);
         const skillFile = sourceFiles.find((file) => file.path === "SKILL.md");
         if (skillFile === undefined) {
-          return yield* new InstallError({ issue: `Prepared skill ${installedSkill.id} is missing SKILL.md.` });
+          return yield* Effect.fail(createInstallError(`Prepared skill ${installedSkill.id} is missing SKILL.md.`));
         }
 
         const markdownReply = decodeStrictText(skillFile.bytes, path.join(directory, "SKILL.md"));
         const isMarkdownInvalid = markdownReply._tag === "invalid";
         if (isMarkdownInvalid) {
-          return yield* new InstallError({ issue: markdownReply.message });
+          return yield* Effect.fail(createInstallError(markdownReply.message));
         }
 
         const markdown = markdownReply.fileContents;
@@ -203,11 +203,10 @@ export const readPreparedSkills = (input: { request: InstallRequest; featureIds:
           sourceFiles,
           markdown,
         }).pipe(
-          Effect.mapError(
-            (error) =>
-              new InstallError({
-                issue: `Prepared skill ${installedSkill.id} is invalid: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
-              }),
+          Effect.mapError((error) =>
+            createInstallError(
+              `Prepared skill ${installedSkill.id} is invalid: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+            ),
           ),
         );
       }),

@@ -11,7 +11,7 @@ import { hashBytes } from "./file-bytes.js";
 import { restoreSettings } from "./hook-settings.js";
 import { checkFileChange, expectedCurrent, type FileSnapshot, readFileSnapshot } from "./host-files.js";
 import { hooksPath } from "./install-paths.js";
-import { InstallError, toInstallError } from "./install-request.js";
+import { createInstallError, wrapAsInstallError } from "./install-request.js";
 import { type OwnedFile, ownedFileSchema } from "./ownership.js";
 import { absoluteRootSchema, type FileChange } from "./plan.js";
 import type { Receipt } from "./receipt.js";
@@ -21,9 +21,9 @@ type RestoreTarget = {
   readonly snapshot: FileSnapshot;
 };
 
-const restoreWholeFile = ({ file, snapshot }: RestoreTarget): Either.Either<FileChange, InstallError> => {
+const restoreWholeFile = ({ file, snapshot }: RestoreTarget): Either.Either<FileChange, Error> => {
   if (file.ownership._tag !== "wholeFile") {
-    return Either.left(new InstallError({ issue: `File ${file.path} requires a format-specific restoration.` }));
+    return Either.left(createInstallError(`File ${file.path} requires a format-specific restoration.`));
   }
 
   const ownership = file.ownership;
@@ -47,16 +47,16 @@ const restoreWholeFile = ({ file, snapshot }: RestoreTarget): Either.Either<File
     });
   }
 
-  return Either.left(new InstallError({ issue: `Receipted file ${file.path} changed after installation.` }));
+  return Either.left(createInstallError(`Receipted file ${file.path} changed after installation.`));
 };
 
 const checkFormatRestoration = (
   { file, snapshot, format }: RestoreTarget & { readonly format: string },
   plan: Either.Either<{ readonly _tag: string }, unknown>,
-): Either.Either<FileChange, InstallError> =>
-  Either.flatMap(Either.mapLeft(plan, toInstallError), (operation) =>
+): Either.Either<FileChange, Error> =>
+  Either.flatMap(Either.mapLeft(plan, wrapAsInstallError), (operation) =>
     operation._tag === "none"
-      ? Either.left(new InstallError({ issue: `${format} restoration for ${file.path} returned no operation.` }))
+      ? Either.left(createInstallError(`${format} restoration for ${file.path} returned no operation.`))
       : checkFileChange({ ...operation, expectedCurrent: expectedCurrent(snapshot) }),
   );
 
@@ -71,22 +71,20 @@ const restoreInstructionFile = (target: RestoreTarget) =>
           currentFile: target.snapshot,
           previousFile: { _tag: "owned", file: target.file },
         }),
-      catch: toInstallError,
+      catch: wrapAsInstallError,
     }),
   );
 
-const restoreInstructionLink = (target: RestoreTarget): Either.Either<FileChange, InstallError> => {
+const restoreInstructionLink = (target: RestoreTarget): Either.Either<FileChange, Error> => {
   const { file } = target;
   if (file.owner._tag !== "agent" || file.owner.agentIds.length !== 1) {
-    return Either.left(
-      new InstallError({ issue: `Native config restoration for ${file.path} requires one agent owner.` }),
-    );
+    return Either.left(createInstallError(`Native config restoration for ${file.path} requires one agent owner.`));
   }
 
   const agentId = file.owner.agentIds.at(0);
   const agent = agentCatalog.find((candidate) => candidate.id === agentId);
   if (agent === undefined || agent.target._tag !== "instructionLink") {
-    return Either.left(new InstallError({ issue: `Native config restoration for ${file.path} has no catalog agent.` }));
+    return Either.left(createInstallError(`Native config restoration for ${file.path} has no catalog agent.`));
   }
 
   return checkFormatRestoration(
@@ -115,7 +113,7 @@ const restoreRequestSchema = Schema.Struct({
 export const planRestorations = (input: unknown) =>
   Effect.gen(function* () {
     const request = yield* Schema.decodeUnknown(restoreRequestSchema, { onExcessProperty: "error" })(input).pipe(
-      Effect.mapError((error) => new InstallError({ issue: SchemaParseIssue.TreeFormatter.formatErrorSync(error) })),
+      Effect.mapError((error) => createInstallError(SchemaParseIssue.TreeFormatter.formatErrorSync(error))),
     );
     const path = yield* Path.Path;
 
@@ -134,7 +132,7 @@ export const planRestorations = (input: unknown) =>
         }
       }),
     );
-  }).pipe(Effect.mapError(toInstallError));
+  }).pipe(Effect.mapError(wrapAsInstallError));
 
 export const planStaleRestorations = (input: {
   root: string;
