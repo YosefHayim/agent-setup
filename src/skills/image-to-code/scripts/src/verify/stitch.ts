@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-/** Stitch two PNGs side by side (scaled) for an original-vs-reproduction compare. */
 import { PNG } from "pngjs";
 
-const [a, b, out] = process.argv.slice(2);
-if (!a || !b || !out) {
+const ALPHA_CHANNEL_OFFSET = 3;
+
+const MAX_CHANNEL_LEVEL = 255;
+
+const BYTES_PER_PIXEL = 4;
+
+const firstArgumentIndex = 2;
+
+const [a, b, out] = process.argv.slice(firstArgumentIndex);
+
+const isStitchPathMissing = !a || !b || !out;
+if (isStitchPathMissing) {
   console.error("usage: tsx src/verify/stitch.ts <left.png> <right.png> <out.png>");
-  process.exit(2);
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
 }
 
 const S = 460;
@@ -15,15 +26,19 @@ const load = (p: string) => PNG.sync.read(fs.readFileSync(p));
 const scale = (src: PNG) => {
   const o = new PNG({ width: S, height: S });
   for (let y = 0; y < S; y++)
-    for (let x = 0; x < S; x++) {
-      const sx = Math.floor((x * src.width) / S);
+    for (let column = 0; column < S; column++) {
+      const sx = Math.floor((column * src.width) / S);
       const sy = Math.floor((y * src.height) / S);
-      const si = (sy * src.width + sx) * 4;
-      const oi = (y * S + x) * 4;
+      const si = (sy * src.width + sx) * BYTES_PER_PIXEL;
+      const oi = (y * S + column) * BYTES_PER_PIXEL;
       o.data[oi] = src.data[si];
       o.data[oi + 1] = src.data[si + 1];
-      o.data[oi + 2] = src.data[si + 2];
-      o.data[oi + 3] = 255;
+      const blueChannelOffset = 2;
+
+      const blueByteOffsetInPixel = 2;
+
+      o.data[oi + blueChannelOffset] = src.data[si + blueByteOffsetInPixel];
+      o.data[oi + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
     }
   return o;
 };
@@ -31,16 +46,20 @@ const A = scale(load(a));
 const B = scale(load(b));
 const W = S * 2 + GAP;
 const c = new PNG({ width: W, height: S });
-c.data.fill(255);
+c.data.fill(MAX_CHANNEL_LEVEL);
 const paste = (img: PNG, ox: number) => {
   for (let y = 0; y < S; y++)
-    for (let x = 0; x < S; x++) {
-      const si = (y * S + x) * 4;
-      const di = (y * W + (x + ox)) * 4;
+    for (let column = 0; column < S; column++) {
+      const si = (y * S + column) * BYTES_PER_PIXEL;
+      const di = (y * W + (column + ox)) * BYTES_PER_PIXEL;
       c.data[di] = img.data[si];
       c.data[di + 1] = img.data[si + 1];
-      c.data[di + 2] = img.data[si + 2];
-      c.data[di + 3] = 255;
+      const blueChannelOffsetInStitched = 2;
+
+      const imageBlueChannelOffset = 2;
+
+      c.data[di + blueChannelOffsetInStitched] = img.data[si + imageBlueChannelOffset];
+      c.data[di + ALPHA_CHANNEL_OFFSET] = MAX_CHANNEL_LEVEL;
     }
 };
 paste(A, 0);

@@ -1,19 +1,18 @@
-#!/usr/bin/env node
-/**
- * Local music-bed fallback — the last link in the audio chain (no ElevenLabs
- * key, no Higgsfield credits). Zero dependencies: it writes a 16-bit stereo WAV
- * directly. It is a bed, not a score — ffmpeg (`assemble-cut.mjs`) masters it to
- * -14 LUFS / -1 dBTP and ducks it under the voiceover.
- *
- * Usage: node synth.mjs --out bed.wav [--seconds 24] [--bpm 100] [--mood epic|warm|tense|playful] [--seed 7]
- */
+#!/usr/bin/ampEnvelope node
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+const MAX_INT16_SAMPLE = 32767;
+
+const DEFAULT_BPM = 100;
+
+const DEFAULT_SECONDS = 24;
+
+const DEFAULT_MOOD = "epic";
+
 const SR = 44100;
 
-/** Chord progressions (semitone offsets from the root) per mood, plus a root MIDI note. */
 const MOODS = {
   epic: {
     root: 45,
@@ -53,165 +52,304 @@ const MOODS = {
   },
 };
 
-/** Small deterministic PRNG so a given --seed is reproducible. */
-function mulberry32(seed) {
+const createRandomGenerator = (seed) => {
   let a = seed >>> 0;
   return () => {
     a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const prngIncrement = 0x6d2b79f5;
+
+    a = (a + prngIncrement) | 0;
+    const prngFirstShift = 15;
+
+    let t = Math.imul(a ^ (a >>> prngFirstShift), 1 | a);
+    const prngMultiplier = 61;
+
+    const prngSecondShift = 7;
+
+    t = (t + Math.imul(t ^ (t >>> prngSecondShift), prngMultiplier | t)) ^ t;
+    const uint32Range = 4294967296;
+
+    const prngThirdShift = 14;
+
+    return ((t ^ (t >>> prngThirdShift)) >>> 0) / uint32Range;
   };
-}
+};
 
-const midiToHz = (m) => 440 * 2 ** ((m - 69) / 12);
-const saw = (phase) => 2 * (phase - Math.floor(phase + 0.5));
+const semitonesPerOctave = 12;
 
-/** One-pole lowpass over a Float64 buffer. */
-function lowpass(buf, cutoffHz) {
+const midiNoteA4 = 69;
+
+const octaveRatio = 2;
+
+const concertAHz = 440;
+
+const convertMidiToHz = (m) => concertAHz * octaveRatio ** ((m - midiNoteA4) / semitonesPerOctave);
+const sawRoundingOffset = 0.5;
+
+const sawRangeScale = 2;
+
+const readSawSample = (phase) => sawRangeScale * (phase - Math.floor(phase + sawRoundingOffset));
+
+const applyLowpass = (samples, cutoffHz) => {
   const dt = 1 / SR;
-  const rc = 1 / (2 * Math.PI * cutoffHz);
+  const fullCircleFactor = 2;
+
+  const rc = 1 / (fullCircleFactor * Math.PI * cutoffHz);
   const alpha = dt / (rc + dt);
   let prev = 0;
-  for (let i = 0; i < buf.length; i++) {
-    prev += alpha * (buf[i] - prev);
-    buf[i] = prev;
+  for (let i = 0; i < samples.length; i++) {
+    prev += alpha * (samples[i] - prev);
+    samples[i] = prev;
   }
-  return buf;
-}
+  return samples;
+};
 
-/** Render a mono mix for the whole bed. */
-export function renderBed({ seconds, bpm, mood, seed }) {
+export const createMusicBed = ({ seconds, bpm, mood, seed }) => {
   const n = Math.floor(seconds * SR);
   const out = new Float64Array(n);
   const spec = MOODS[mood] || MOODS.epic;
-  const rng = mulberry32(seed);
-  const beat = 60 / bpm;
-  const barLen = beat * 4;
+  const rng = createRandomGenerator(seed);
+  const secondsPerMinute = 60;
 
-  // Pads: two detuned saws per chord note through a lowpass, one chord per bar.
+  const beat = secondsPerMinute / bpm;
+  const beatsPerBar = 4;
+
+  const barLen = beat * beatsPerBar;
+
+  // Pads: two detuned saws per chord note through a applyLowpass, one chord per bar.
   for (let bar = 0; bar * barLen < seconds; bar++) {
     const chord = spec.chords[bar % spec.chords.length];
     const start = Math.floor(bar * barLen * SR);
-    const len = Math.min(Math.floor((barLen + 0.3) * SR), n - start);
-    if (len <= 0) break;
+
+    const barEndTailSeconds = 0.3;
+
+    const len = Math.min(Math.floor((barLen + barEndTailSeconds) * SR), n - start);
+    const isNoSamplesLeft = len <= 0;
+    if (isNoSamplesLeft) break;
+
     const pad = new Float64Array(len);
     for (const semi of chord) {
-      const hz = midiToHz(spec.root + 12 + semi);
+      const octaveSemitones = 12;
+
+      const hz = convertMidiToHz(spec.root + octaveSemitones + semi);
       for (let i = 0; i < len; i++) {
         const t = i / SR;
-        pad[i] += saw(hz * 1.0 * t) + saw(hz * 1.006 * t);
+        const detuneRatio = 1.006;
+
+        pad[i] += readSawSample(hz * 1.0 * t) + readSawSample(hz * detuneRatio * t);
       }
     }
-    lowpass(pad, 2000);
+    const lowpassCutoffHz = 2000;
+
+    applyLowpass(pad, lowpassCutoffHz);
     for (let i = 0; i < len; i++) {
       const t = i / SR;
-      const env = Math.min(1, t / 0.25) * Math.min(1, (len / SR - t) / 0.4);
-      out[start + i] += (pad[i] / (chord.length * 2)) * env * 0.32;
+      const releaseSeconds = 0.4;
+
+      const attackSeconds = 0.25;
+
+      const envelope = Math.min(1, t / attackSeconds) * Math.min(1, (len / SR - t) / releaseSeconds);
+      const padGain = 0.32;
+
+      const chordAverageDivisor = 2;
+
+      out[start + i] += (pad[i] / (chord.length * chordAverageDivisor)) * envelope * padGain;
     }
   }
 
-  // Sub bass: root of each bar, sine + a touch of saw.
+  // Sub bass: root of each bar, sine + a touch of readSawSample.
   for (let bar = 0; bar * barLen < seconds; bar++) {
-    const hz = midiToHz(spec.root);
+    const hz = convertMidiToHz(spec.root);
     const start = Math.floor(bar * barLen * SR);
     const len = Math.min(Math.floor(barLen * SR), n - start);
     for (let i = 0; i < len; i++) {
       const t = i / SR;
-      const env = Math.min(1, t / 0.02) * Math.exp(-t * 0.6);
-      out[start + i] += (Math.sin(2 * Math.PI * hz * t) * 0.7 + saw(hz * t) * 0.2) * env * 0.3;
+      const ampDecayRate = 0.6;
+
+      const ampAttackSeconds = 0.02;
+
+      const ampEnvelope = Math.min(1, t / ampAttackSeconds) * Math.exp(-t * ampDecayRate);
+      const sineSawGain = 0.3;
+
+      const sawMixGain = 0.2;
+
+      const sineMixGain = 0.7;
+
+      const fullCircleFactor = 2;
+
+      out[start + i] +=
+        (Math.sin(fullCircleFactor * Math.PI * hz * t) * sineMixGain + readSawSample(hz * t) * sawMixGain) *
+        ampEnvelope *
+        sineSawGain;
     }
   }
 
   // Kick: four-on-the-floor from the halfway point, so energy lifts at the turn.
-  const kickFrom = seconds * 0.4;
-  for (let t = kickFrom; t < seconds - 0.1; t += beat) {
+  const kickStartFraction = 0.4;
+
+  const kickFrom = seconds * kickStartFraction;
+  const kickTailSeconds = 0.1;
+
+  for (let t = kickFrom; t < seconds - kickTailSeconds; t += beat) {
     const start = Math.floor(t * SR);
-    const len = Math.min(Math.floor(0.18 * SR), n - start);
+    const kickLengthSeconds = 0.18;
+
+    const len = Math.min(Math.floor(kickLengthSeconds * SR), n - start);
     for (let i = 0; i < len; i++) {
       const tt = i / SR;
-      const f = 120 * Math.exp(-tt * 30) + 45;
-      out[start + i] += Math.sin(2 * Math.PI * f * tt) * Math.exp(-tt * 8) * 0.9;
+      const kickEndHz = 45;
+
+      const kickPitchDecayRate = 30;
+
+      const kickStartHz = 120;
+
+      const f = kickStartHz * Math.exp(-tt * kickPitchDecayRate) + kickEndHz;
+      const kickGain = 0.9;
+
+      const kickAmpDecayRate = 8;
+
+      const fullCircleFactor = 2;
+
+      out[start + i] += Math.sin(fullCircleFactor * Math.PI * f * tt) * Math.exp(-tt * kickAmpDecayRate) * kickGain;
     }
   }
 
   // Noise riser into the last quarter (the pre-payoff lift).
-  const riseStart = Math.floor(seconds * 0.7 * SR);
-  const riseLen = Math.floor(seconds * 0.15 * SR);
+  const riseStartFraction = 0.7;
+
+  const riseStart = Math.floor(seconds * riseStartFraction * SR);
+  const riseLengthFraction = 0.15;
+
+  const riseLen = Math.floor(seconds * riseLengthFraction * SR);
   for (let i = 0; i < riseLen && riseStart + i < n; i++) {
     const p = i / riseLen;
-    out[riseStart + i] += (rng() * 2 - 1) * p * p * 0.25;
+    const riseGain = 0.25;
+
+    const noiseRangeScale = 2;
+
+    out[riseStart + i] += (rng() * noiseRangeScale - 1) * p * p * riseGain;
   }
 
   // Normalize to -1 dBFS headroom (loudnorm masters properly later).
   let peak = 1e-9;
   for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(out[i]));
-  const gain = 0.89 / peak;
+  const targetPeak = 0.89;
+
+  const gain = targetPeak / peak;
   for (let i = 0; i < n; i++) out[i] *= gain;
   return out;
-}
+};
 
 // --- IO layer ---
 
-/** Encode a mono Float64 buffer as a 16-bit stereo PCM WAV (Haas-widened). */
-export function encodeWav(mono) {
+export const encodeWav = (mono) => {
   const n = mono.length;
   const bytesPerSample = 2;
   const channels = 2;
   const pcmByteLength = n * channels * bytesPerSample;
-  const buf = Buffer.alloc(44 + pcmByteLength);
-  buf.write("RIFF", 0);
-  buf.writeUInt32LE(36 + pcmByteLength, 4);
-  buf.write("WAVE", 8);
-  buf.write("fmt ", 12);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(SR, 24);
-  buf.writeUInt32LE(SR * channels * bytesPerSample, 28);
-  buf.writeUInt16LE(channels * bytesPerSample, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write("data", 36);
-  buf.writeUInt32LE(pcmByteLength, 40);
-  const haas = Math.floor(0.008 * SR);
+  const wavHeaderBytes = 44;
+
+  const samples = Buffer.alloc(wavHeaderBytes + pcmByteLength);
+  samples.write("RIFF", 0);
+  const riffChunkSizeOffset = 4;
+
+  const riffHeaderBytesAfterSize = 36;
+
+  samples.writeUInt32LE(riffHeaderBytesAfterSize + pcmByteLength, riffChunkSizeOffset);
+  const waveFormatOffset = 8;
+
+  samples.write("WAVE", waveFormatOffset);
+  const fmtChunkOffset = 12;
+
+  samples.write("fmt ", fmtChunkOffset);
+  const fmtChunkSize = 16;
+
+  const fmtChunkSizeOffset = 16;
+
+  samples.writeUInt32LE(fmtChunkSize, fmtChunkSizeOffset);
+  const audioFormatOffset = 20;
+
+  samples.writeUInt16LE(1, audioFormatOffset);
+  const channelCountOffset = 22;
+
+  samples.writeUInt16LE(channels, channelCountOffset);
+  const sampleRateOffset = 24;
+
+  samples.writeUInt32LE(SR, sampleRateOffset);
+  const byteRateOffset = 28;
+
+  samples.writeUInt32LE(SR * channels * bytesPerSample, byteRateOffset);
+  const blockAlignOffset = 32;
+
+  samples.writeUInt16LE(channels * bytesPerSample, blockAlignOffset);
+  const bitsPerSampleOffset = 34;
+
+  const bitsPerSample = 16;
+
+  samples.writeUInt16LE(bitsPerSample, bitsPerSampleOffset);
+  const pcmChunkOffset = 36;
+
+  samples.write("data", pcmChunkOffset);
+  const pcmChunkSizeOffset = 40;
+
+  samples.writeUInt32LE(pcmByteLength, pcmChunkSizeOffset);
+  const haasDelaySeconds = 0.008;
+
+  const haas = Math.floor(haasDelaySeconds * SR);
   let off = 44;
   for (let i = 0; i < n; i++) {
     const l = Math.max(-1, Math.min(1, mono[i]));
     const r = Math.max(-1, Math.min(1, mono[Math.max(0, i - haas)]));
-    buf.writeInt16LE((l * 32767) | 0, off);
-    buf.writeInt16LE((r * 32767) | 0, off + 2);
-    off += 4;
-  }
-  return buf;
-}
+    samples.writeInt16LE((l * MAX_INT16_SAMPLE) | 0, off);
+    const rightSampleOffset = 2;
 
-function parseFlags(argv) {
+    samples.writeInt16LE((r * MAX_INT16_SAMPLE) | 0, off + rightSampleOffset);
+    const bytesPerStereoFrame = 4;
+
+    off += bytesPerStereoFrame;
+  }
+  return samples;
+};
+
+const parseFlags = (argv) => {
   const out = {};
   // e.g. "--out" → "out"
-  for (let i = 0; i < argv.length; i += 2) out[argv[i].replace(/^--/, "")] = argv[i + 1];
-  return out;
-}
+  const argumentPairStride = 2;
 
-function main() {
-  const f = parseFlags(process.argv.slice(2));
-  if (!f.out) throw new Error("Usage: synth.mjs --out bed.wav [--seconds 24] [--bpm 100] [--mood epic] [--seed 7]");
-  const bed = renderBed({
-    seconds: Number(f.seconds || 24),
-    bpm: Number(f.bpm || 100),
-    mood: f.mood || "epic",
-    seed: Number(f.seed || 7),
+  for (let i = 0; i < argv.length; i += argumentPairStride) out[argv[i].replace(/^--/, "")] = argv[i + 1];
+  return out;
+};
+
+const runSynthCli = () => {
+  const firstArgumentIndex = 2;
+
+  const f = parseFlags(process.argv.slice(firstArgumentIndex));
+
+  const isFOutMissing = !f.out;
+  if (isFOutMissing)
+    throw new Error("Usage: synth.mjs --out bed.wav [--seconds 24] [--bpm 100] [--mood epic] [--seed 7]");
+
+  const defaultSeed = 7;
+
+  const bed = createMusicBed({
+    seconds: Number(f.seconds || DEFAULT_SECONDS),
+    bpm: Number(f.bpm || DEFAULT_BPM),
+    mood: f.mood || DEFAULT_MOOD,
+    seed: Number(f.seed || defaultSeed),
   });
   mkdirSync(dirname(f.out), { recursive: true });
   writeFileSync(f.out, encodeWav(bed));
-  process.stdout.write(`Wrote ${f.out} (${f.seconds || 24}s, ${f.mood || "epic"} @ ${f.bpm || 100}bpm)\n`);
-}
+  process.stdout.write(
+    `Wrote ${f.out} (${f.seconds || DEFAULT_SECONDS}s, ${f.mood || DEFAULT_MOOD} @ ${f.bpm || DEFAULT_BPM}bpm)\n`,
+  );
+};
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isRunAsScript = import.meta.url === `file://${process.argv[1]}`;
+if (isRunAsScript) {
   try {
-    main();
-  } catch (err) {
-    process.stderr.write(`${err.message}\n`);
+    runSynthCli();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
     process.exit(1);
   }
 }

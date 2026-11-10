@@ -1,20 +1,32 @@
 #!/usr/bin/env node
-/** Wrap an SVG file in a margin-free HTML sized to the canvas, for pixel-diffing. */
 import fs from "node:fs";
 
-const [inSvg, outHtml, sizeArg] = process.argv.slice(2);
-if (!inSvg || !outHtml) {
+const firstArgumentIndex = 2;
+
+const [inSvg, outHtml, sizeArg] = process.argv.slice(firstArgumentIndex);
+
+const isSvgOrHtmlMissing = !inSvg || !outHtml;
+if (isSvgOrHtmlMissing) {
   console.error("usage: tsx src/html/wrap.ts <in.svg> <out.html> [size]");
-  process.exit(2);
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
 }
 
-const size = Number(sizeArg || 1254);
+const defaultSvgSizePixels = 1254;
+
+const size = Number(sizeArg || defaultSvgSizePixels);
+
 let svg = fs.readFileSync(inSvg, "utf8");
 
-if (!/viewBox=/.test(svg)) {
+const isViewBoxMissing = !/viewBox=/.test(svg);
+if (isViewBoxMissing) {
   const w = (svg.match(/width="(\d+(?:\.\d+)?)"/) || [])[1];
+
   const h = (svg.match(/height="(\d+(?:\.\d+)?)"/) || [])[1];
-  if (w && h) svg = svg.replace(/<svg /, `<svg viewBox="0 0 ${w} ${h}" `);
+
+  const hasCanvasSize = w && h;
+  if (hasCanvasSize) svg = svg.replace(/<svg /, `<svg viewBox="0 0 ${w} ${h}" `);
 }
 
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>

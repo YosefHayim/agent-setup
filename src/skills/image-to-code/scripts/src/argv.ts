@@ -1,31 +1,44 @@
-export type ArgValue = string | boolean | string[];
+const FLAG_PREFIX = "--";
+export type ArgField = string | boolean | string[];
 
-export function parseArgs(argv: string[], options?: { repeat?: string[] }): Record<string, ArgValue> {
-  const repeat = new Set(options?.repeat || []);
-  const args: Record<string, ArgValue> = {};
-  for (const key of repeat) args[key] = [];
+export const parseArgumentList = (argv: string[], settings?: { repeat?: string[] }): Record<string, ArgField> => {
+  const repeat = new Set(settings?.repeat || []);
+  const argumentList: Record<string, ArgField> = {};
+  for (const key of repeat) argumentList[key] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
-    if (!token.startsWith("--")) continue;
-    const key = token.slice(2);
+
+    const isNotFlagToken = !token.startsWith(FLAG_PREFIX);
+    if (isNotFlagToken) continue;
+
+    const flagNameStartIndex = 2;
+
+    const key = token.slice(flagNameStartIndex);
+
     const next = argv[i + 1];
-    if (next !== undefined && !next.startsWith("--")) {
-      if (repeat.has(key)) (args[key] as string[]).push(next);
-      else args[key] = next;
+
+    const isNextTokenArgument = next != null && !next.startsWith(FLAG_PREFIX);
+    if (isNextTokenArgument) {
+      const isRepeatedFlag = repeat.has(key);
+      if (isRepeatedFlag) (argumentList[key] as string[]).push(next);
+      else argumentList[key] = next;
+
       i++;
     } else {
-      args[key] = true;
+      argumentList[key] = true;
     }
   }
-  return args;
-}
+  return argumentList;
+};
 
-export function argString(args: Record<string, ArgValue>, key: string): string | undefined {
-  const v = args[key];
-  return typeof v === "string" ? v : undefined;
-}
+export const readStringArgument = (argumentList: Record<string, ArgField>, key: string): string | undefined => {
+  const flagArgument = argumentList[key];
 
-export function argBool(args: Record<string, ArgValue>, key: string): boolean {
-  return args[key] === true;
-}
+  const isStringArgument = typeof flagArgument === "string";
+  return isStringArgument ? flagArgument : undefined;
+};
+
+export const readBooleanArgument = (argumentList: Record<string, ArgField>, key: string): boolean => {
+  return argumentList[key] === true;
+};

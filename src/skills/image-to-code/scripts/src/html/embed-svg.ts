@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-/** Rebuild an HTML viewer page embedding an optimized SVG. */
 import fs from "node:fs";
-import { argString, parseArgs } from "#src/argv.js";
+import { parseArgumentList, readStringArgument } from "#src/argv.js";
 
-const args = parseArgs(process.argv.slice(2));
-const svgPath = argString(args, "svg") || "out.min.svg";
-const outPath = argString(args, "out") || "out.html";
-const title = argString(args, "title") || "Animated SVG";
+const firstArgumentIndex = 2;
+
+const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+const svgPath = readStringArgument(argumentList, "svg") || "out.min.svg";
+const outPath = readStringArgument(argumentList, "out") || "out.html";
+const title = readStringArgument(argumentList, "title") || "Animated SVG";
 
 const svg = fs.readFileSync(svgPath, "utf8");
 const html = `<!doctype html>

@@ -1,62 +1,92 @@
 #!/usr/bin/env node
 
-/**
- * run-crux.mjs — zero-dep Chrome UX Report (CrUX) API field checker.
- *
- * Queries the CrUX API for a URL's real-user Core Web Vitals (the 75th
- * percentile Google uses), classifies each against the budget, prints a
- * report, and exits non-zero when a Core Web Vital is "poor". This is the
- * durable field source: Google is discontinuing CrUX field data from the
- * PageSpeed Insights API, so field checks should read from CrUX directly.
- * No dependencies — Node 18+ global fetch only.
- *
- * Unlike a lab run, CrUX reports a real INP (there are real users interacting).
- * A URL with too little traffic has no CrUX record — that is reported as
- * "no field data" and passes (absence of data is not a budget breach).
- *
- * Usage:
- *   node run-crux.mjs <url> [--origin] [--form-factor=PHONE|DESKTOP|TABLET]
- *                          [--key=KEY] [--budgets=FILE] [--json] [--strict]
- *
- * The key may also come from CRUX_API_KEY or PSI_API_KEY (the same Google API
- * key works once the "Chrome UX Report API" is enabled on the project).
- */
-
 import { readFile } from "node:fs/promises";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+const ORIGIN_LEVEL = "origin";
+
+const RATING_NEEDS_IMPROVEMENT = "needs-improvement";
+
+const RATING_POOR = "poor";
+
+const RATING_GOOD = "good";
+
+const BUDGETS_FLAG_PREFIX = "--budgets=";
+
+const KEY_FLAG_PREFIX = "--key=";
+
+const FORM_FACTOR_FLAG_PREFIX = "--form-factor=";
+
+const PHONE_FORM_FACTOR = "PHONE";
+
+const NEWLINE_CHARACTER = "\n";
 
 const CRUX_ENDPOINT = "https://chromeuxreport.googleapis.com/v1/records:queryRecord";
 
-/** Good-line budget (the "good" upper bound per vital). Override with --budgets. */
+const LCP_GOOD_MILLISECONDS = 2500;
+const INP_GOOD_MILLISECONDS = 200;
+const CLS_GOOD_SCORE = 0.1;
+const ONE_POINT_EIGHT_SECONDS_MILLISECONDS = 1800;
+const TTFB_GOOD_MILLISECONDS = 800;
+
 const DEFAULT_BUDGETS = {
-  lcpMs: 2500,
-  inpMs: 200,
-  clsScore: 0.1,
-  fcpMs: 1800,
-  ttfbMs: 800,
+  lcpMs: LCP_GOOD_MILLISECONDS,
+  inpMs: INP_GOOD_MILLISECONDS,
+  clsScore: CLS_GOOD_SCORE,
+  fcpMs: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
+  ttfbMs: TTFB_GOOD_MILLISECONDS,
 };
 
-/**
- * The five vitals we read, each mapped to its CrUX metric key and the standard
- * [good, poor] rating bounds. CrUX returns CLS as a decimal string; the rest
- * are integer milliseconds. `core` vitals can fail the gate.
- */
 const METRICS = [
-  { id: "LCP", key: "largest_contentful_paint", budget: "lcpMs", good: 2500, poor: 4000, cls: false, core: true },
-  { id: "INP", key: "interaction_to_next_paint", budget: "inpMs", good: 200, poor: 500, cls: false, core: true },
-  { id: "CLS", key: "cumulative_layout_shift", budget: "clsScore", good: 0.1, poor: 0.25, cls: true, core: true },
-  { id: "FCP", key: "first_contentful_paint", budget: "fcpMs", good: 1800, poor: 3000, cls: false, core: false },
+  {
+    id: "LCP",
+    key: "largest_contentful_paint",
+    budget: "lcpMs",
+    good: LCP_GOOD_MILLISECONDS,
+    poor: 4000,
+    cls: false,
+    core: true,
+  },
+  {
+    id: "INP",
+    key: "interaction_to_next_paint",
+    budget: "inpMs",
+    good: INP_GOOD_MILLISECONDS,
+    poor: 500,
+    cls: false,
+    core: true,
+  },
+  {
+    id: "CLS",
+    key: "cumulative_layout_shift",
+    budget: "clsScore",
+    good: CLS_GOOD_SCORE,
+    poor: 0.25,
+    cls: true,
+    core: true,
+  },
+  {
+    id: "FCP",
+    key: "first_contentful_paint",
+    budget: "fcpMs",
+    good: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
+    poor: 3000,
+    cls: false,
+    core: false,
+  },
   {
     id: "TTFB",
     key: "experimental_time_to_first_byte",
     budget: "ttfbMs",
-    good: 800,
-    poor: 1800,
+    good: TTFB_GOOD_MILLISECONDS,
+    poor: ONE_POINT_EIGHT_SECONDS_MILLISECONDS,
     cls: false,
     core: false,
   },
 ];
 
-function usage() {
+const createUsageMessage = () => {
   return [
     "Chrome UX Report (CrUX) API field checker — real-user Core Web Vitals.",
     "",
@@ -66,161 +96,282 @@ function usage() {
     "",
     "The key may also come from CRUX_API_KEY or PSI_API_KEY.",
     "Exit 0 = within budget or no field data, 1 = budget breached, 2 = request error.",
-  ].join("\n");
-}
+  ].join(NEWLINE_CHARACTER);
+};
 
-function parseArgs(argv) {
-  const args = {
-    formFactor: "PHONE",
+const parseArgumentList = (argv) => {
+  const argumentList = {
+    formFactor: PHONE_FORM_FACTOR,
     key: process.env.CRUX_API_KEY || process.env.PSI_API_KEY,
     origin: false,
-    json: false,
+    isMachineReadable: false,
     strict: false,
   };
   for (const arg of argv) {
-    if (arg === "--help" || arg === "-h") return { ...args, help: true };
-    if (arg === "--json") args.json = true;
-    else if (arg === "--strict") args.strict = true;
-    else if (arg === "--origin") args.origin = true;
-    else if (arg.startsWith("--form-factor=")) args.formFactor = arg.slice("--form-factor=".length).toUpperCase();
-    else if (arg.startsWith("--key=")) args.key = arg.slice("--key=".length);
-    else if (arg.startsWith("--budgets=")) args.budgets = arg.slice("--budgets=".length);
-    else if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
-    else if (!args.url) args.url = arg;
-    else throw new Error(`Unexpected argument: ${arg}`);
+    const isHelpFlag = arg === "--help" || arg === "-h";
+    if (isHelpFlag) return { ...argumentList, help: true };
+
+    const isMachineReadableFlag = arg === "--json";
+    if (isMachineReadableFlag) {
+      argumentList.isMachineReadable = true;
+      continue;
+    }
+
+    const isStrictFlag = arg === "--strict";
+    if (isStrictFlag) {
+      argumentList.strict = true;
+      continue;
+    }
+
+    const isOriginFlag = arg === "--origin";
+    if (isOriginFlag) {
+      argumentList.origin = true;
+      continue;
+    }
+
+    const isFormFactorFlag = arg.startsWith(FORM_FACTOR_FLAG_PREFIX);
+    if (isFormFactorFlag) {
+      argumentList.formFactor = arg.slice(FORM_FACTOR_FLAG_PREFIX.length).toUpperCase();
+      continue;
+    }
+
+    const isKeyFlag = arg.startsWith(KEY_FLAG_PREFIX);
+    if (isKeyFlag) {
+      argumentList.key = arg.slice(KEY_FLAG_PREFIX.length);
+      continue;
+    }
+
+    const isBudgetsFlag = arg.startsWith(BUDGETS_FLAG_PREFIX);
+    if (isBudgetsFlag) {
+      argumentList.budgets = arg.slice(BUDGETS_FLAG_PREFIX.length);
+      continue;
+    }
+
+    const isUnknownFlag = arg.startsWith("--");
+    if (isUnknownFlag) throw new Error(`Unknown argument: ${arg}`);
+
+    const isUrlAlreadyGiven = Boolean(argumentList.url);
+    if (isUrlAlreadyGiven) throw new Error(`Unexpected argument: ${arg}`);
+
+    argumentList.url = arg;
   }
-  if (!args.help && !args.url) throw new Error("A URL is required. Try --help.");
-  if (!["PHONE", "DESKTOP", "TABLET"].includes(args.formFactor))
-    throw new Error("--form-factor must be PHONE, DESKTOP, or TABLET");
-  return args;
-}
 
-/** Classify a raw p75 value against [good, poor] bounds. */
-function ratingFromValue(value, good, poor) {
-  if (value <= good) return "good";
-  if (value > poor) return "poor";
-  return "needs-improvement";
-}
+  const isUrlMissing = !argumentList.url;
+  if (isUrlMissing) throw new Error("A URL is required. Try --help.");
 
-/** Pull the p75 for one metric from a CrUX record, or null if absent. */
-function p75Of(metric, cruxMetrics) {
-  const percentileText = cruxMetrics?.[metric.key]?.percentiles?.p75;
-  if (percentileText === undefined || percentileText === null) return null;
+  const isFormFactorInvalid = ![PHONE_FORM_FACTOR, "DESKTOP", "TABLET"].includes(argumentList.formFactor);
+  if (isFormFactorInvalid) throw new Error("--form-factor must be PHONE, DESKTOP, or TABLET");
+
+  return argumentList;
+};
+
+const readRatingFromField = (field, good, poor) => {
+  const isFieldGood = field <= good;
+  if (isFieldGood) return RATING_GOOD;
+
+  const isFieldPoor = field > poor;
+  if (isFieldPoor) return RATING_POOR;
+
+  return RATING_NEEDS_IMPROVEMENT;
+};
+
+const readP75 = (metric, cruxMetrics) => {
+  const percentileString = cruxMetrics?.[metric.key]?.percentiles?.p75;
+  const isPercentileMissing = percentileString == null;
+  if (isPercentileMissing) return null;
+
   // CrUX encodes CLS as a 2-decimal string ("0.08"); other metrics are integer ms.
-  return metric.cls ? Number.parseFloat(percentileText) : Number(percentileText);
-}
+  const isCumulativeLayoutShift = metric.cls === true;
+  return isCumulativeLayoutShift ? Number.parseFloat(percentileString) : Number(percentileString);
+};
 
-function formatValue(metric, value) {
-  if (value === null) return "—";
-  if (metric.cls) return value.toFixed(2);
-  return value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${Math.round(value)} ms`;
-}
+const createMetricLabel = (metric, metricReading) => {
+  const isReadingMissing = metricReading === null;
+  if (isReadingMissing) return "—";
 
-function formatDate(date) {
-  if (!date) return "?";
-  return `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
-}
+  const isCumulativeLayoutShift = metric.cls === true;
+  const clsDecimals = 2;
 
-/** Build the evaluation object from a CrUX record. Pure. */
-function evaluate(record, budgets, strict) {
-  const cruxMetrics = record?.metrics;
-  const rows = METRICS.map((metric) => {
-    const value = p75Of(metric, cruxMetrics);
-    const rating = value === null ? "n/a" : ratingFromValue(value, metric.good, metric.poor);
+  if (isCumulativeLayoutShift) return metricReading.toFixed(clsDecimals);
+
+  const isOverOneSecond = metricReading >= MILLISECONDS_PER_SECOND;
+  return isOverOneSecond
+    ? `${(metricReading / MILLISECONDS_PER_SECOND).toFixed(1)} s`
+    : `${Math.round(metricReading)} ms`;
+};
+
+const createDateStamp = (date) => {
+  const isDateMissing = date == null;
+  if (isDateMissing) return "?";
+
+  const dateMonthDigits = 2;
+
+  const dayDigits = 2;
+
+  return `${date.year}-${String(date.month).padStart(dateMonthDigits, "0")}-${String(date.day).padStart(dayDigits, "0")}`;
+};
+
+const evaluate = (cruxReply, budgets, strict) => {
+  const cruxMetrics = cruxReply?.metrics;
+  const metricChecks = METRICS.map((metric) => {
+    const p75Reading = readP75(metric, cruxMetrics);
+    const hasP75Reading = p75Reading !== null;
+    const rating = hasP75Reading ? readRatingFromField(p75Reading, metric.good, metric.poor) : "n/a";
     const budget = budgets[metric.budget];
-    const overBudget = value !== null && value > budget;
-    const coreFail = metric.core && rating === "poor";
-    const strictFail = strict && metric.core && value !== null && (rating !== "good" || overBudget);
-    return { ...metric, value, rating, budget, overBudget, failed: coreFail || strictFail };
+    const overBudget = hasP75Reading && p75Reading > budget;
+    const coreFail = metric.core && rating === RATING_POOR;
+    const strictFail = strict && metric.core && hasP75Reading && (rating !== RATING_GOOD || overBudget);
+    return { ...metric, value: p75Reading, rating, budget, overBudget, failed: coreFail || strictFail };
   });
-  const passed = !rows.some((row) => row.failed);
-  return { rows, passed };
-}
+  const passed = !metricChecks.some((metricCheck) => metricCheck.failed);
+  return { rows: metricChecks, passed };
+};
 
-function renderReport(assessment, meta) {
+const readMetricFlag = (metricCheck) => {
+  const isMetricFailed = metricCheck.failed;
+  if (isMetricFailed) return "  ✗ FAIL";
+
+  const isMetricNeedingImprovement = metricCheck.rating === RATING_NEEDS_IMPROVEMENT;
+  if (isMetricNeedingImprovement) return "  ! warn";
+
+  return "";
+};
+
+const createReport = (assessment, meta) => {
   const lines = [`Chrome UX Report — ${meta.url} (${meta.formFactor}, ${meta.level}-level)`];
-  if (meta.period) lines.push(`Collection period: ${meta.period}`);
+
+  const hasCollectionPeriod = meta.period != null;
+  if (hasCollectionPeriod) lines.push(`Collection period: ${meta.period}`);
+
   lines.push("", "Real-user Core Web Vitals (p75):");
-  for (const row of assessment.rows) {
-    let flag = "";
-    if (row.failed) flag = "  ✗ FAIL";
-    else if (row.rating === "needs-improvement") flag = "  ! warn";
+  for (const metricCheck of assessment.rows) {
+    const flag = readMetricFlag(metricCheck);
+    const metricRatingColumnWidth = 18;
+
+    const metricLabelColumnWidth = 9;
+
+    const metricIdColumnWidth = 5;
+
     lines.push(
-      `  ${row.id.padEnd(5)} ${formatValue(row, row.value).padEnd(9)} ${row.rating.padEnd(18)} (budget ≤ ${formatValue(row, row.budget)})${flag}`,
+      `  ${metricCheck.id.padEnd(metricIdColumnWidth)} ${createMetricLabel(metricCheck, metricCheck.value).padEnd(metricLabelColumnWidth)} ${metricCheck.rating.padEnd(metricRatingColumnWidth)} (budget ≤ ${createMetricLabel(metricCheck, metricCheck.budget)})${flag}`,
     );
   }
-  lines.push("", `Verdict: ${assessment.passed ? "PASS" : "FAIL"}`);
-  return lines.join("\n");
-}
 
-// --- IO layer ---------------------------------------------------------------
+  const isPassed = assessment.passed;
+  lines.push("", `Verdict: ${isPassed ? "PASS" : "FAIL"}`);
+  return lines.join(NEWLINE_CHARACTER);
+};
 
-async function loadBudgets(file) {
-  if (!file) return DEFAULT_BUDGETS;
-  const budgetText = await readFile(file, "utf8");
-  return { ...DEFAULT_BUDGETS, ...JSON.parse(budgetText) };
-}
+const loadBudgets = async (budgetsFile) => {
+  const isBudgetsFileMissing = !budgetsFile;
+  if (isBudgetsFileMissing) return DEFAULT_BUDGETS;
 
-/**
- * Query one CrUX record. Returns { record } on success, { notFound: true } when
- * CrUX has no data for the key (404), and throws on any other error.
- */
-async function queryCrux(target, formFactor, key) {
+  const budgetsDocument = await readFile(budgetsFile, "utf8");
+  return { ...DEFAULT_BUDGETS, ...JSON.parse(budgetsDocument) };
+};
+
+const readCruxErrorMessage = async (httpReply) => {
+  const statusMessage = `${httpReply.status} ${httpReply.statusText}`;
+  const replyDocument = await httpReply.text();
+
+  try {
+    const errorDocument = JSON.parse(replyDocument);
+    return errorDocument?.error?.message || statusMessage;
+  } catch {
+    // A reply that is not JSON still reports the HTTP status.
+    return statusMessage;
+  }
+};
+
+// Returns { record } on success, { notFound: true } when CrUX has no data for the target (404).
+const queryCrux = async (target, formFactor, key) => {
   const httpReply = await fetch(`${CRUX_ENDPOINT}?key=${key || ""}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...target, formFactor }),
   });
-  const cruxDocument = await httpReply.json().catch(() => null);
-  if (httpReply.status === 404) return { notFound: true };
-  if (!httpReply.ok) {
-    const message = cruxDocument?.error?.message || `${httpReply.status} ${httpReply.statusText}`;
-    throw new Error(`CrUX request failed: ${message}`);
-  }
-  return { record: cruxDocument?.record };
-}
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    console.log(usage());
+  const notFoundStatus = 404;
+
+  const isNotFound = httpReply.status === notFoundStatus;
+  if (isNotFound) return { notFound: true };
+
+  const isReplyOk = httpReply.ok;
+  if (isReplyOk) {
+    const cruxDocument = await httpReply.json();
+    return { record: cruxDocument?.record };
+  }
+
+  const errorMessage = await readCruxErrorMessage(httpReply);
+  throw new Error(`CrUX request failed: ${errorMessage}`);
+};
+
+// Prefer the exact URL; fall back to the whole origin when the URL has no CrUX record.
+const queryCruxWithOriginFallback = async (argumentList) => {
+  const isOriginRequested = argumentList.origin;
+  const requestedTarget = isOriginRequested ? { origin: argumentList.url } : { url: argumentList.url };
+  const requestedLookup = await queryCrux(requestedTarget, argumentList.formFactor, argumentList.key);
+
+  const isUrlLookupMissing = requestedLookup.notFound && !isOriginRequested;
+  if (!isUrlLookupMissing) {
+    const requestedLevel = isOriginRequested ? ORIGIN_LEVEL : "url";
+    return { level: requestedLevel, cruxLookup: requestedLookup };
+  }
+
+  const originLookup = await queryCrux({ origin: argumentList.url }, argumentList.formFactor, argumentList.key);
+  return { level: ORIGIN_LEVEL, cruxLookup: originLookup };
+};
+
+const runCruxCommand = async () => {
+  const firstArgumentIndex = 2;
+
+  const argumentList = parseArgumentList(process.argv.slice(firstArgumentIndex));
+  const isHelpRequested = Boolean(argumentList.help);
+  if (isHelpRequested) {
+    console.log(createUsageMessage());
     return;
   }
-  const budgets = await loadBudgets(args.budgets);
 
-  // Prefer the exact URL; fall back to the whole origin when the URL has no
-  // CrUX record (the common case for a specific page on a smaller site).
-  let level = args.origin ? "origin" : "url";
-  let cruxLookup = await queryCrux(args.origin ? { origin: args.url } : { url: args.url }, args.formFactor, args.key);
-  if (cruxLookup.notFound && !args.origin) {
-    level = "origin";
-    cruxLookup = await queryCrux({ origin: args.url }, args.formFactor, args.key);
-  }
+  const budgets = await loadBudgets(argumentList.budgets);
+  const { level, cruxLookup } = await queryCruxWithOriginFallback(argumentList);
 
-  if (cruxLookup.notFound) {
-    const message = `No CrUX field data for ${args.url} (${args.formFactor}) — not enough real-user traffic yet. Skipping field gate.`;
-    console.log(args.json ? JSON.stringify({ url: args.url, noFieldData: true, message }) : message);
+  const isCruxFieldMissing = cruxLookup.notFound;
+  if (isCruxFieldMissing) {
+    const message = `No CrUX field data for ${argumentList.url} (${argumentList.formFactor}) — not enough real-user traffic yet. Skipping field gate.`;
+    const isMachineReadable = argumentList.isMachineReadable;
+    console.log(isMachineReadable ? JSON.stringify({ url: argumentList.url, noFieldData: true, message }) : message);
     return; // exit 0 — absence of data is not a breach
   }
 
-  const evaluated = evaluate(cruxLookup.record, budgets, args.strict);
+  const evaluated = evaluate(cruxLookup.record, budgets, argumentList.strict);
   const period = cruxLookup.record?.collectionPeriod;
+  const hasPeriod = period != null;
   const meta = {
-    url: args.url,
-    formFactor: args.formFactor,
+    url: argumentList.url,
+    formFactor: argumentList.formFactor,
     level,
-    period: period ? `${formatDate(period.firstDate)} → ${formatDate(period.lastDate)}` : null,
+    period: hasPeriod ? `${createDateStamp(period.firstDate)} → ${createDateStamp(period.lastDate)}` : null,
   };
 
-  if (args.json) {
-    console.log(JSON.stringify({ ...meta, ...evaluated }, null, 2));
-  } else {
-    console.log(renderReport(evaluated, meta));
-  }
-  if (!evaluated.passed) process.exitCode = 1;
-}
+  const isMachineReadable = argumentList.isMachineReadable;
+  if (isMachineReadable) {
+    const indentSpaceCount = 2;
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(2);
-});
+    console.log(JSON.stringify({ ...meta, ...evaluated }, null, indentSpaceCount));
+  } else {
+    console.log(createReport(evaluated, meta));
+  }
+
+  const isEvaluationFailed = !evaluated.passed;
+  if (isEvaluationFailed) process.exitCode = 1;
+};
+
+try {
+  await runCruxCommand();
+} catch (error) {
+  const isErrorObject = error instanceof Error;
+  console.error(isErrorObject ? error.message : String(error));
+  const usageExitCode = 2;
+
+  process.exit(usageExitCode);
+}

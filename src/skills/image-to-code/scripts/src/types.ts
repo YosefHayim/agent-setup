@@ -1,6 +1,6 @@
 export type MaskBox = [number, number, number, number] | [number, number, number, number, string];
 
-export interface MaskConfig {
+export interface MaskSettings {
   input: string;
   output: string;
   mode: "erase" | "keep";
