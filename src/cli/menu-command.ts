@@ -129,14 +129,22 @@ const runUpdate = Effect.gen(function* () {
     ],
     confirmMessage: "Apply this update plan?",
     apply: Effect.gen(function* () {
-      const updateSummary = yield* update({
-        destination,
-        host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
-        features,
-        agents: { _tag: "detected", evidence: host.agentEvidence },
-        interaction: { _tag: "interactive" },
-        configuration: { _tag: "automatic" },
+      const preparedPackage = yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error });
+      const updateSummary = yield* Effect.tryPromise({
+        try: (signal) =>
+          update(
+            {
+              destination,
+              host: { homeRoot: host.homeRoot },
+              preparedPackage,
+              features,
+              agents: { _tag: "detected", evidence: host.agentEvidence },
+              interaction: { _tag: "interactive" },
+              configuration: { _tag: "automatic" },
+            },
+            signal,
+          ),
+        catch: (error) => error,
       });
       yield* showUpdate(updateSummary);
     }),

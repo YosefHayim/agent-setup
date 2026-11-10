@@ -1,11 +1,10 @@
 // The one config.json reader and writer behind the `config` command.
 
-import { FileSystem, Path } from "@effect/platform";
-import { Effect } from "effect";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 
 import { isNotFound } from "../install/file-bytes.js";
 import { type InstallationDestination, receiptPath } from "../install/install-paths.js";
-import { wrapAsInstallError } from "../install/install-request.js";
 import { preparePackage } from "../install/prepare-package.js";
 import { readReceipt, type Scope } from "../install/receipt.js";
 import { update } from "../install/update.js";
@@ -22,106 +21,108 @@ type ConfigTarget = {
 
 type ConfigWrite = { readonly _tag: "selected"; readonly config: Config } | { readonly _tag: "reset" };
 
+type PreviousConfigFile = { readonly _tag: "priorFile"; readonly bytes: Uint8Array } | { readonly _tag: "missing" };
+
 // Locates a scope's config.json without reading it, so a full reset still works when the file is unreadable.
-export const resolveConfigTarget = (scope: Scope) =>
-  Effect.gen(function* () {
-    const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
-    const path = yield* Path.Path;
-    const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
-    return {
-      scope,
-      host,
-      destination,
-      configPath: path.join(destination.root, managedConfigPath),
-    } satisfies ConfigTarget;
-  });
+export const locateConfigTarget = async (scope: Scope): Promise<ConfigTarget> => {
+  const host = await scanHost();
+  const destination = destinationForScope({ scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot });
+
+  return {
+    scope,
+    host,
+    destination,
+    configPath: path.join(destination.root, managedConfigPath),
+  };
+};
 
 // Hooks under `root` read its own config.json, else the global one that a first project install copies.
-export const readConfigAt = (request: { readonly root: string; readonly homeRoot: string }) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const ownConfig = yield* Effect.tryPromise({
-      try: () => readConfigFile(path.join(request.root, managedConfigPath)),
-      catch: (error) => error,
-    });
-    if (ownConfig._tag === "present") {
-      return ownConfig.config;
+export const readConfigAt = async (request: { readonly root: string; readonly homeRoot: string }): Promise<Config> => {
+  const ownConfig = await readConfigFile(path.join(request.root, managedConfigPath));
+  const isOwnConfigPresent = ownConfig._tag === "present";
+  if (isOwnConfigPresent) {
+    return ownConfig.config;
+  }
+
+  const isRootHomeRoot = path.resolve(request.root) === path.resolve(request.homeRoot);
+  if (isRootHomeRoot) {
+    return defaultConfig;
+  }
+
+  const globalConfig = await readConfigFile(path.join(request.homeRoot, managedConfigPath));
+  const isGlobalConfigPresent = globalConfig._tag === "present";
+  if (isGlobalConfigPresent) {
+    return globalConfig.config;
+  }
+
+  return defaultConfig;
+};
+
+export const readConfig = async (scope: Scope): Promise<ConfigTarget & { readonly config: Config }> => {
+  const target = await locateConfigTarget(scope);
+  const configAtTarget = await readConfigAt({ root: target.destination.root, homeRoot: target.host.homeRoot });
+
+  return { ...target, config: configAtTarget };
+};
+
+const readPreviousConfigFile = async (configPath: string): Promise<PreviousConfigFile> => {
+  try {
+    const bytes = await readFile(configPath);
+
+    return { _tag: "priorFile", bytes: new Uint8Array(bytes) };
+  } catch (error) {
+    const isConfigFileMissing = isNotFound(error);
+    if (isConfigFileMissing) {
+      return { _tag: "missing" };
     }
 
-    if (path.resolve(request.root) === path.resolve(request.homeRoot)) {
-      return defaultConfig;
-    }
-
-    const globalConfig = yield* Effect.tryPromise({
-      try: () => readConfigFile(path.join(request.homeRoot, managedConfigPath)),
-      catch: (error) => error,
-    });
-    return globalConfig._tag === "present" ? globalConfig.config : defaultConfig;
-  });
-
-export const readConfig = (scope: Scope) =>
-  Effect.gen(function* () {
-    const target = yield* resolveConfigTarget(scope);
-    const config = yield* readConfigAt({ root: target.destination.root, homeRoot: target.host.homeRoot });
-    return { ...target, config };
-  });
-
-const readPreviousConfigFile = (configPath: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    return yield* fileSystem.readFile(configPath).pipe(
-      Effect.map((bytes) => ({ _tag: "priorFile" as const, bytes })),
-      Effect.catchIf(isNotFound, () => Effect.succeed({ _tag: "missing" as const })),
-    );
-  });
+    throw error;
+  }
+};
 
 // An installed scope saves through `update` so the receipt keeps owning config.json; otherwise write the file directly.
-export const saveConfig = (request: { readonly target: ConfigTarget; readonly configuration: ConfigWrite }) =>
-  Effect.gen(function* () {
-    const { target, configuration } = request;
-    const path = yield* Path.Path;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const receiptSnapshot = yield* Effect.tryPromise({
-      try: () => readReceipt(path.join(target.destination.root, receiptPath)),
-      catch: wrapAsInstallError,
-    });
-    if (receiptSnapshot._tag === "present") {
-      if (receiptSnapshot.receipt.scope !== target.scope) {
-        return yield* Effect.fail(
-          new Error(
-            `Receipt scope is ${receiptSnapshot.receipt.scope}, not ${target.scope}; select the matching scope.`,
-          ),
-        );
-      }
+export const saveConfig = async (
+  request: { readonly target: ConfigTarget; readonly configuration: ConfigWrite },
+  signal: AbortSignal,
+): Promise<"receipt" | "file"> => {
+  const { target, configuration } = request;
+  const receiptSnapshot = await readReceipt(path.join(target.destination.root, receiptPath));
+  const isReceiptPresent = receiptSnapshot._tag === "present";
+  const isReceiptScopeMismatched = isReceiptPresent && receiptSnapshot.receipt.scope !== target.scope;
+  if (isReceiptScopeMismatched) {
+    throw new Error(
+      `Receipt scope is ${receiptSnapshot.receipt.scope}, not ${target.scope}; select the matching scope.`,
+    );
+  }
 
-      yield* update({
+  if (isReceiptPresent) {
+    const preparedPackage = await preparePackage();
+    await update(
+      {
         destination: target.destination,
         host: { homeRoot: target.host.homeRoot },
-        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
+        preparedPackage,
         features: { _tag: "preserve" },
         agents: { _tag: "detected", evidence: target.host.agentEvidence },
         interaction: { _tag: "scripted" },
         configuration,
-      });
-      return "receipt" as const;
-    }
+      },
+      signal,
+    );
+    return "receipt";
+  }
 
-    // The plan keeps the old bytes only as its restoration value and never decodes them, so a broken file is replaceable.
-    const previousConfigFile = yield* readPreviousConfigFile(target.configPath);
-    const plan = yield* Effect.try({
-      try: () =>
-        planManagedConfig({
-          scope: target.scope,
-          selection: {
-            _tag: "selected",
-            config: configuration._tag === "reset" ? defaultConfig : configuration.config,
-          },
-          previousConfigFile,
-        }),
-      catch: (error) => error,
-    });
-
-    yield* fileSystem.makeDirectory(path.dirname(target.configPath), { recursive: true });
-    yield* fileSystem.writeFile(target.configPath, plan.managedConfigWrite.bytes);
-    return "file" as const;
+  // The plan keeps the old bytes only as its restoration value and never decodes them, so a broken file is replaceable.
+  const previousConfigFile = await readPreviousConfigFile(target.configPath);
+  const isResetWrite = configuration._tag === "reset";
+  const configToWrite = isResetWrite ? defaultConfig : configuration.config;
+  const managedConfigPlan = planManagedConfig({
+    scope: target.scope,
+    selection: { _tag: "selected", config: configToWrite },
+    previousConfigFile,
   });
+
+  await mkdir(path.dirname(target.configPath), { recursive: true });
+  await writeFile(target.configPath, managedConfigPlan.managedConfigWrite.bytes);
+  return "file";
+};

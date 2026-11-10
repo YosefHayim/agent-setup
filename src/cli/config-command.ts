@@ -12,7 +12,7 @@ import {
   settingValueFromText,
   withSettingValue,
 } from "../config/config-schema.js";
-import { readConfig, resolveConfigTarget, saveConfig } from "../config/scope-config.js";
+import { locateConfigTarget, readConfig, saveConfig } from "../config/scope-config.js";
 import type { Scope } from "../install/receipt.js";
 import { joinZodIssueMessages } from "../zod-issue-messages.js";
 import {
@@ -57,7 +57,7 @@ export const showConfig = (request: {
   readonly format: OutputFormat;
 }) =>
   Effect.gen(function* () {
-    const { config } = yield* readConfig(request.scope);
+    const { config } = yield* Effect.tryPromise({ try: () => readConfig(request.scope), catch: (error) => error });
     if (Option.isSome(request.setting)) {
       const setting = request.setting.value;
       if (request.format === "json") {
@@ -108,7 +108,7 @@ const setCommand = Command.make(
   (args) =>
     Effect.gen(function* () {
       const { setting } = args;
-      const current = yield* readConfig(args.scope);
+      const current = yield* Effect.tryPromise({ try: () => readConfig(args.scope), catch: (error) => error });
       const value = yield* Effect.try({
         try: () => settingValueFromText({ setting, text: args.value }),
         catch: (error) => createCliUsageError(describeSettingRejection(error)),
@@ -117,7 +117,11 @@ const setCommand = Command.make(
         try: () => withSettingValue({ config: current.config, key: setting.key, value }),
         catch: (error) => createCliUsageError(describeSettingRejection(error)),
       });
-      const owner = yield* saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } });
+      const owner = yield* Effect.tryPromise({
+        try: (signal) =>
+          saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
+        catch: (error) => error,
+      });
       if (args.format === "text") {
         yield* Effect.tryPromise({
           try: () => TerminalUI.success(`${setting.label} → ${formatSettingValue({ config: nextConfig, setting })}`),
@@ -159,8 +163,14 @@ const resetCommand = Command.make(
           return;
         }
 
-        const target = yield* resolveConfigTarget(args.scope);
-        const owner = yield* saveConfig({ target, configuration: { _tag: "reset" } });
+        const target = yield* Effect.tryPromise({
+          try: () => locateConfigTarget(args.scope),
+          catch: (error) => error,
+        });
+        const owner = yield* Effect.tryPromise({
+          try: (signal) => saveConfig({ target, configuration: { _tag: "reset" } }, signal),
+          catch: (error) => error,
+        });
         if (args.format === "json") {
           yield* Effect.tryPromise({
             try: () => TerminalUI.showDocument({ _tag: "reset", scope: args.scope, config: defaultConfig, owner }),
@@ -176,13 +186,17 @@ const resetCommand = Command.make(
       }
 
       const setting = args.setting.value;
-      const current = yield* readConfig(args.scope);
+      const current = yield* Effect.tryPromise({ try: () => readConfig(args.scope), catch: (error) => error });
       const nextConfig = yield* Effect.try({
         try: () =>
           withSettingValue({ config: current.config, key: setting.key, value: defaultSettingValue(setting.key) }),
         catch: (error) => error,
       });
-      const owner = yield* saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } });
+      const owner = yield* Effect.tryPromise({
+        try: (signal) =>
+          saveConfig({ target: current, configuration: { _tag: "selected", config: nextConfig } }, signal),
+        catch: (error) => error,
+      });
       if (args.format === "json") {
         yield* Effect.tryPromise({
           try: () =>
