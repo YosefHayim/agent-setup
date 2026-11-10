@@ -51,7 +51,7 @@ export const installCommand = Command.make(
       const installation = yield* install({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
         host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* preparePackage,
+        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
         features: args.featureIds.length === 0 ? { _tag: "defaults" } : { _tag: "selected", ids: args.featureIds },
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "scripted" },

@@ -176,7 +176,10 @@ const captureTarget = (root: string, target: { targetPath: string; snapshotPath:
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     yield* checkTarget(root, target.targetPath);
-    const current = yield* readFileSnapshot(target.targetPath);
+    const current = yield* Effect.tryPromise({
+      try: () => readFileSnapshot(target.targetPath),
+      catch: (error) => error,
+    });
     if (current._tag === "missing") {
       return targetSnapshot(target.targetPath, { _tag: "missing" });
     }
@@ -354,7 +357,10 @@ type UnchangedCheck = {
 const ensureUnchanged = (transaction: Transaction, check: UnchangedCheck) =>
   Effect.gen(function* () {
     yield* checkTarget(transaction.preparedPlan.root, check.targetPath);
-    const current = yield* readFileSnapshot(check.targetPath);
+    const current = yield* Effect.tryPromise({
+      try: () => readFileSnapshot(check.targetPath),
+      catch: (error) => error,
+    });
     if (yield* holdsState(current, check.expected)) {
       return;
     }

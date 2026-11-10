@@ -195,7 +195,11 @@ const addReference = (
     }
     case "jsonRulesArray":
       return Either.mapBoth(
-        addJsonRule({ ...link, previousOwnership: ownership?._tag === "jsonValues" ? ownership : undefined }),
+        Either.try({
+          try: () =>
+            addJsonRule({ ...link, previousOwnership: ownership?._tag === "jsonValues" ? ownership : undefined }),
+          catch: readErrorMessage,
+        }),
         { onLeft: linkIssue, onRight: toWrite },
       );
   }
@@ -221,7 +225,10 @@ const unownedBytes = (request: InstructionLinkRequest, ownership: LinkOwnership)
     case "jsonRulesArray":
       return bytes === undefined || ownership._tag !== "jsonValues"
         ? Either.left("Receipted Continue configuration is missing or incompatible.")
-        : removeJsonRule({ currentBytes: bytes, configPath: target.configPath, ownership });
+        : Either.try({
+            try: () => removeJsonRule({ currentBytes: bytes, configPath: target.configPath, ownership }),
+            catch: readErrorMessage,
+          });
   }
 };
 

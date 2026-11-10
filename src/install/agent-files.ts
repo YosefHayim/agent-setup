@@ -38,12 +38,19 @@ const inspectWholeFiles = (input: FormatWritesRequest, desired: ReadonlyMap<stri
 
     return yield* Effect.forEach([...desired], ([filePath, desiredBytes]) =>
       Effect.gen(function* () {
-        const snapshot = yield* readFileSnapshot(path.join(input.request.destination.root, filePath));
-        const previous = yield* previousWholeFile({
-          receipt: input.previousReceipt,
-          filePath,
-          snapshot,
-          desiredBytes,
+        const snapshot = yield* Effect.tryPromise({
+          try: () => readFileSnapshot(path.join(input.request.destination.root, filePath)),
+          catch: (error) => error,
+        });
+        const previous = yield* Either.try({
+          try: () =>
+            previousWholeFile({
+              receipt: input.previousReceipt,
+              filePath,
+              snapshot,
+              desiredBytes,
+            }),
+          catch: wrapAsInstallError,
         });
 
         return { path: filePath, snapshot, previous };
@@ -61,7 +68,10 @@ const withExpectedCurrent = (
 
       return file === undefined
         ? Either.left(createInstallError(`Missing inspected state for ${write.file.path}.`))
-        : checkFileChange({ ...write, expectedCurrent: expectedCurrent(file.snapshot) });
+        : Either.try({
+            try: () => checkFileChange({ ...write, expectedCurrent: expectedCurrent(file.snapshot) }),
+            catch: wrapAsInstallError,
+          });
     }),
   );
 
@@ -137,7 +147,10 @@ const createSharedFileWrite = (input: {
 }) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
-    const snapshot = yield* readFileSnapshot(path.join(input.root, input.filePath));
+    const snapshot = yield* Effect.tryPromise({
+      try: () => readFileSnapshot(path.join(input.root, input.filePath)),
+      catch: (error) => error,
+    });
     const previousFile = previousReceiptFile(input.previousReceipt, input.filePath);
     if (previousFile !== undefined && previousFile.kind._tag !== input.kind) {
       const label = input.kind === "instruction" ? "instruction" : "native config";
@@ -158,7 +171,12 @@ const createSharedFileWrite = (input: {
       return [];
     }
 
-    return [yield* checkFileChange({ ...plan, expectedCurrent: expectedCurrent(snapshot) })];
+    return [
+      yield* Either.try({
+        try: () => checkFileChange({ ...plan, expectedCurrent: expectedCurrent(snapshot) }),
+        catch: wrapAsInstallError,
+      }),
+    ];
   });
 
 const createInstructionWrites = (input: AgentWritesRequest) =>

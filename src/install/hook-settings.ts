@@ -9,7 +9,7 @@ import { decodeStrictText } from "./file-bytes.js";
 import { findDuplicateJsonKey } from "./find-duplicate-json-key.js";
 import { applicationOwner, checkFileChange, expectedCurrent, type FileSnapshot } from "./host-files.js";
 import { settingsPath } from "./install-paths.js";
-import { createInstallError } from "./install-request.js";
+import { createInstallError, wrapAsInstallError } from "./install-request.js";
 import { appendJsonArrayItem, editJsonValue, hashJsonValue, removeJsonArrayItem } from "./json-edit.js";
 import type { HookEntriesOwnership, OwnedFile, OwnedHookEvent, OwnedJsonValue } from "./ownership.js";
 import { installedHookFile, registrationEntrypoint } from "./package-files.js";
@@ -252,7 +252,10 @@ const editHookEvent = (input: { source: string; plan: HookEventPlan }): Either.E
   if (current === undefined) {
     return desired.length === 0
       ? Either.right(input.source)
-      : editJsonValue({ source: input.source, path, value: desired });
+      : Either.try({
+          try: () => editJsonValue({ source: input.source, path, value: desired }),
+          catch: wrapAsInstallError,
+        });
   }
 
   const ownedHashes = owned === undefined ? [] : owned.entries;
@@ -275,20 +278,27 @@ const editHookEvent = (input: { source: string; plan: HookEventPlan }): Either.E
   const withoutStale = applyEdits({
     source: input.source,
     items: staleIndexes,
-    edit: (source, index) => removeJsonArrayItem({ source, path, index }),
+    edit: (source, index) =>
+      Either.try({ try: () => removeJsonArrayItem({ source, path, index }), catch: wrapAsInstallError }),
   });
   const withAdded = Either.flatMap(withoutStale, (source) =>
     applyEdits({
       source,
       items: addedGroups,
-      edit: (edited, group) => appendJsonArrayItem({ source: edited, path, value: group }),
+      edit: (edited, group) =>
+        Either.try({
+          try: () => appendJsonArrayItem({ source: edited, path, value: group }),
+          catch: wrapAsInstallError,
+        }),
     }),
   );
   const emptiedCreatedEvent =
     current.length - staleIndexes.length + addedGroups.length === 0 && !eventPreviouslyPresent(input.plan);
 
   return emptiedCreatedEvent
-    ? Either.flatMap(withAdded, (source) => editJsonValue({ source, path, value: undefined }))
+    ? Either.flatMap(withAdded, (source) =>
+        Either.try({ try: () => editJsonValue({ source, path, value: undefined }), catch: wrapAsInstallError }),
+      )
     : withAdded;
 };
 
@@ -314,7 +324,10 @@ const removeEmptyCreatedHooks = (input: {
     return Either.right({ source: input.source, document: document.right });
   }
 
-  const withoutHooks = editJsonValue({ source: input.source, path: ["hooks"], value: undefined });
+  const withoutHooks = Either.try({
+    try: () => editJsonValue({ source: input.source, path: ["hooks"], value: undefined }),
+    catch: wrapAsInstallError,
+  });
 
   return Either.flatMap(withoutHooks, (source) => {
     const withoutHooksDocument = parseSettings(source, "Generated settings.json");
@@ -405,7 +418,10 @@ const editHookSettings = (input: {
   const createsHooksContainer = document.hooks === undefined && input.desiredGroups.size > 0;
   const ownsHooksContainer = input.previous?.createdContainers.includes("/hooks") === true || createsHooksContainer;
   const withContainer = createsHooksContainer
-    ? editJsonValue({ source: input.decoded.source, path: ["hooks"], value: {} })
+    ? Either.try({
+        try: () => editJsonValue({ source: input.decoded.source, path: ["hooks"], value: {} }),
+        catch: wrapAsInstallError,
+      })
     : Either.right(input.decoded.source);
   const withEvents = Either.flatMap(withContainer, (source) =>
     applyEdits({ source, items: plans, edit: (edited, plan) => editHookEvent({ source: edited, plan }) }),
@@ -545,7 +561,7 @@ export const planSettings = (input: {
       filePreviouslyPresent: previousOwnership.filePreviouslyPresent,
     });
 
-    return checkFileChange(restoration);
+    return Either.try({ try: () => checkFileChange(restoration), catch: wrapAsInstallError });
   }
 
   const isSettingsUnchanged = source === input.decoded.source;
@@ -563,11 +579,15 @@ export const planSettings = (input: {
     events,
   };
 
-  return checkFileChange({
-    _tag: "write",
-    file: { owner: applicationOwner, path: filePath, kind: { _tag: "settings" }, ownership },
-    bytes: textEncoder.encode(source),
-    expectedCurrent: expectedCurrent(input.snapshot),
+  return Either.try({
+    try: () =>
+      checkFileChange({
+        _tag: "write",
+        file: { owner: applicationOwner, path: filePath, kind: { _tag: "settings" }, ownership },
+        bytes: textEncoder.encode(source),
+        expectedCurrent: expectedCurrent(input.snapshot),
+      }),
+    catch: wrapAsInstallError,
   });
 };
 
@@ -615,5 +635,5 @@ export const restoreSettings = (input: {
     filePreviouslyPresent: previous.right.filePreviouslyPresent,
   });
 
-  return checkFileChange(restoration);
+  return Either.try({ try: () => checkFileChange(restoration), catch: wrapAsInstallError });
 };

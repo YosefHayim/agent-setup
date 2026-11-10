@@ -75,7 +75,7 @@ const runInstall = Effect.gen(function* () {
       const installation = yield* install({
         destination,
         host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* preparePackage,
+        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
         features: { _tag: "selected", ids: features },
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "interactive" },
@@ -127,7 +127,7 @@ const runUpdate = Effect.gen(function* () {
       const updateSummary = yield* update({
         destination,
         host: { homeRoot: host.homeRoot },
-        preparedPackage: yield* preparePackage,
+        preparedPackage: yield* Effect.tryPromise({ try: preparePackage, catch: (error) => error }),
         features,
         agents: { _tag: "detected", evidence: host.agentEvidence },
         interaction: { _tag: "interactive" },

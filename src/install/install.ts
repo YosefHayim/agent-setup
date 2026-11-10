@@ -120,12 +120,12 @@ const inspectManagedConfig = (request: InstallRequest) =>
     switch (request.configuration._tag) {
       case "selected":
         return {
-          file: yield* readFileSnapshot(configPath),
+          file: yield* Effect.tryPromise({ try: () => readFileSnapshot(configPath), catch: (error) => error }),
           selection: { _tag: "selected", config: request.configuration.config },
         } satisfies ManagedConfigInspection;
       case "reset":
         return {
-          file: yield* readFileSnapshot(configPath),
+          file: yield* Effect.tryPromise({ try: () => readFileSnapshot(configPath), catch: (error) => error }),
           selection: { _tag: "selected", config: defaultConfig },
         } satisfies ManagedConfigInspection;
       case "automatic": {
@@ -169,10 +169,14 @@ const createManagedConfigPlan = (input: {
   const previous =
     input.request.configuration._tag === "reset"
       ? resetPreviousConfigFile({ receipt: input.previousReceipt, snapshot: input.inspection.file })
-      : previousWholeFile({
-          receipt: input.previousReceipt,
-          filePath: managedConfigPath,
-          snapshot: input.inspection.file,
+      : Either.try({
+          try: () =>
+            previousWholeFile({
+              receipt: input.previousReceipt,
+              filePath: managedConfigPath,
+              snapshot: input.inspection.file,
+            }),
+          catch: wrapAsInstallError,
         });
   if (Either.isLeft(previous)) {
     return Either.left(previous.left);
@@ -231,7 +235,10 @@ const planHookSettings = (input: {
         const isClaudeSettings = filePath === settingsPath;
         const snapshot = isClaudeSettings
           ? input.claudeSettings.snapshot
-          : yield* readFileSnapshot(path.join(input.request.destination.root, filePath));
+          : yield* Effect.tryPromise({
+              try: () => readFileSnapshot(path.join(input.request.destination.root, filePath)),
+              catch: (error) => error,
+            });
 
         return yield* planSettings({
           filePath,
@@ -271,7 +278,10 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
     });
 
     const configInspection = yield* inspectManagedConfig(request);
-    const settingsSnapshot = yield* readFileSnapshot(path.join(request.destination.root, settingsPath));
+    const settingsSnapshot = yield* Effect.tryPromise({
+      try: () => readFileSnapshot(path.join(request.destination.root, settingsPath)),
+      catch: (error) => error,
+    });
     const settings = yield* decodeSettings(settingsSnapshot);
     const previousReceipt = receiptSnapshot._tag === "present" ? receiptSnapshot.receipt : undefined;
     if (previousReceipt !== undefined && previousReceipt.scope !== request.destination._tag) {
@@ -288,9 +298,13 @@ export const syncInstall = (input: { request: InstallRequest; receiptSnapshot: R
       inspection: configInspection,
       previousReceipt,
     });
-    const managedConfigWrite = yield* checkFileChange({
-      ...managedConfigPlan.managedConfigWrite,
-      expectedCurrent: expectedCurrent(configInspection.file),
+    const managedConfigWrite = yield* Either.try({
+      try: () =>
+        checkFileChange({
+          ...managedConfigPlan.managedConfigWrite,
+          expectedCurrent: expectedCurrent(configInspection.file),
+        }),
+      catch: wrapAsInstallError,
     });
     const settingsPlans = yield* planHookSettings({
       request,
