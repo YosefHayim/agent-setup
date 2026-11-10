@@ -132,10 +132,12 @@ const readPrompt = (message) => {
   const isStringMessage = typeof message === "string";
   if (isStringMessage) return message;
 
-  const isPromptMessageUnreadable = !Array.isArray(message) || message.some((block) => block.type === "tool_result");
+  const isPromptMessageUnreadable = !Array.isArray(message) || message.some((block) => block?.type === "tool_result");
   if (isPromptMessageUnreadable) return null;
 
-  return message.find((block) => block.type === TEXT_BLOCK_TYPE)?.text || "";
+  const promptText = message.find((block) => block?.type === TEXT_BLOCK_TYPE)?.text;
+  const isPromptTextString = typeof promptText === "string";
+  return isPromptTextString ? promptText : "";
 };
 
 // Only what the person typed: task notices and command output start with "<", interruptions with "[",
@@ -155,8 +157,10 @@ const isUserPrompt = (transcriptLine) => {
 const countAssistant = (stats, message) => {
   const usage = message.usage;
   const hasUsage = usage != null;
+  const isContentList = Array.isArray(message.content);
+  const contentBlocks = isContentList ? message.content.filter((block) => block != null) : [];
 
-  for (const block of message.content || []) {
+  for (const block of contentBlocks) {
     const isBlockTypeNotToolUse = block.type !== "tool_use";
     if (isBlockTypeNotToolUse) continue;
 
@@ -166,7 +170,7 @@ const countAssistant = (stats, message) => {
     if (isNewTool) stats.tools.push(block.name);
   }
 
-  const hasReplyBlock = message.content?.some((block) => block.type === TEXT_BLOCK_TYPE) ?? false;
+  const hasReplyBlock = contentBlocks.some((block) => block.type === TEXT_BLOCK_TYPE);
   const isNewReply = hasReplyBlock && message.id !== stats.lastReplyId;
   if (isNewReply) {
     stats.lastReplyId = message.id;
@@ -241,7 +245,7 @@ const updateTranscriptStats = (sessionId, transcriptPath) => {
 
   const { lines, bytes } = readNewLines(transcriptPath, stats.offset, size);
   for (const line of lines) {
-    const isBlankLine = !line;
+    const isBlankLine = line === "";
     if (isBlankLine) continue;
 
     const parsedLine = readTranscriptLineOrNull(line);
