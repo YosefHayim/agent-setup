@@ -101,6 +101,20 @@ interface WritePlanRequest {
   readonly receipt?: ExpectedCurrent;
 }
 
+interface CommitCase {
+  readonly name: string;
+  readonly seeded: Readonly<Record<string, Uint8Array>>;
+  readonly target: string;
+  readonly receipt: ExpectedCurrent;
+}
+
+interface RejectedWriteCase {
+  readonly name: string;
+  readonly seeded: Readonly<Record<string, Uint8Array>>;
+  readonly files: Readonly<Record<string, ExpectedCurrent>>;
+  readonly receipt: ExpectedCurrent;
+}
+
 const createWritePlan = (root: string, { files, receipt = expectedMissing }: WritePlanRequest): Plan => {
   const planned = Object.entries(files).map(([path, expectedCurrent]) => ({
     file: createSettingsFile(path),
@@ -145,6 +159,17 @@ const createTemporaryDirectory = (prefix: string): string => {
   temporaryDirectories.push(directory);
 
   return directory;
+};
+
+const requireReceiptPublish = (plan: Plan) => {
+  const receiptOperation = plan.receipt;
+  const isReceiptPublish = receiptOperation._tag === "receiptPublish";
+
+  if (!isReceiptPublish) {
+    throw new Error("The test plan must publish its receipt.");
+  }
+
+  return receiptOperation;
 };
 
 const seedFiles = (root: string, files: Readonly<Record<string, Uint8Array>>): void => {
@@ -325,7 +350,7 @@ describe("applyPlan", () => {
     );
   });
 
-  it.each([
+  it.each<CommitCase>([
     {
       name: "file bytes into a new parent directory",
       seeded: {},
@@ -358,11 +383,11 @@ describe("applyPlan", () => {
     await applyPlanUninterrupted(plan);
 
     expectFileBytes(root, target, installedBytes);
-    expect(readPublishedReceipt(root)).toEqual(plan.receipt.receipt);
+    expect(readPublishedReceipt(root)).toEqual(requireReceiptPublish(plan).receipt);
     expect(listTransactionDirectories(root)).toEqual([]);
   });
 
-  it.each([
+  it.each<RejectedWriteCase>([
     {
       name: "a receipt that appeared after planning",
       seeded: { [receiptFile]: changedReceiptBytes },
@@ -713,7 +738,7 @@ describe("applyPlan under injected filesystem faults", () => {
     expect(writerVerdicts.filter((verdict) => verdict._tag === "fulfilled")).toHaveLength(1);
     expect(writerVerdicts.filter((writerVerdict) => writerVerdict._tag === "rejected")).toHaveLength(1);
     expectFileBytes(root, "settings.json", installedBytes);
-    expect(readPublishedReceipt(root)).toEqual(plan.receipt.receipt);
+    expect(readPublishedReceipt(root)).toEqual(requireReceiptPublish(plan).receipt);
     expectMissingPaths(root, [recoveryFile]);
     expect(listTransactionDirectories(root)).toEqual([]);
   });

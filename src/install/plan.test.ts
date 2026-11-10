@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkPlan } from "./plan.js";
+import { checkPlan, type Plan } from "./plan.js";
 import { planInstall, planUninstall } from "./plan-changes.js";
 
 const oldHash = "1111111111111111111111111111111111111111111111111111111111111111";
@@ -162,6 +162,17 @@ const attachOwnership = <File extends { readonly ownership: object }>(file: File
   ownership: { ...file.ownership, ...ownership },
 });
 
+const requireReceiptPublish = (plan: Plan) => {
+  const receiptOperation = plan.receipt;
+  const isReceiptPublish = receiptOperation._tag === "receiptPublish";
+
+  if (!isReceiptPublish) {
+    throw new Error("The test plan must publish its receipt.");
+  }
+
+  return receiptOperation;
+};
+
 const publishPlan = (operations: ReadonlyArray<object>, ownedFiles: ReadonlyArray<object>) => ({
   scope: "project",
   root: "/workspace",
@@ -296,21 +307,21 @@ describe("checkPlan", () => {
 
   it("strictly decodes a published plan with every file kind, owner, and ownership tag", () => {
     const plan = checkPlan(completePlan);
+    const publishedReceipt = requireReceiptPublish(plan);
 
     expect(plan.scope).toBe("project");
     expect(plan.root).toBe("/workspace");
     expect(plan.operations.map((operation) => operation._tag)).toEqual(Array(9).fill("write"));
-    expect(plan.receipt._tag).toBe("receiptPublish");
-    expect(new Set(plan.receipt.receipt.ownedFiles.map((file) => file.kind._tag))).toEqual(
+    expect(new Set(publishedReceipt.receipt.ownedFiles.map((file) => file.kind._tag))).toEqual(
       new Set(["runtime", "skill", "rule", "instruction", "instructionLink", "settings", "managedConfig"]),
     );
-    expect(new Set(plan.receipt.receipt.ownedFiles.map((file) => file.ownership._tag))).toEqual(
+    expect(new Set(publishedReceipt.receipt.ownedFiles.map((file) => file.ownership._tag))).toEqual(
       new Set(["wholeFile", "managedBlock", "jsonValues", "hookEntries", "yamlSequenceValue"]),
     );
-    expect(new Set(plan.receipt.receipt.ownedFiles.map((file) => file.owner._tag))).toEqual(
+    expect(new Set(publishedReceipt.receipt.ownedFiles.map((file) => file.owner._tag))).toEqual(
       new Set(["application", "agent"]),
     );
-    expect(plan.receipt.target.kind).toEqual({ _tag: "receipt" });
+    expect(publishedReceipt.target.kind).toEqual({ _tag: "receipt" });
   });
 
   it.each([
