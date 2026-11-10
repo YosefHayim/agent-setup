@@ -27,8 +27,10 @@ export const uninstallCommand = Command.make(
   { scope: scopeOption, yes: yesOption, format: formatOption },
   (args) =>
     Effect.gen(function* () {
-      if (args.format === "text")
+      const isTextFormat = args.format === "text";
+      if (isTextFormat) {
         yield* Effect.tryPromise({ try: () => TerminalUI.intro("uninstall"), catch: (error) => error });
+      }
       const confirmed = yield* Effect.tryPromise({
         try: () =>
           confirmDestructive({

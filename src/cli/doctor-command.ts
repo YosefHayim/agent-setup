@@ -68,8 +68,10 @@ export const showScopeHealth = ({ scope, report }: ScopeHealth) =>
 
 export const doctorCommand = Command.make("doctor", { format: formatOption }, (args) =>
   Effect.gen(function* () {
-    if (args.format === "text")
+    const isTextFormat = args.format === "text";
+    if (isTextFormat) {
       yield* Effect.tryPromise({ try: () => TerminalUI.intro("doctor"), catch: (error) => error });
+    }
     const scopes = yield* checkBothScopes;
     const unhealthy = scopes.some((scopeHealth) => scopeHealth.report.discrepancies.length > 0);
     if (unhealthy) process.exitCode = 1;

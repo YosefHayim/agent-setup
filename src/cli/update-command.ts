@@ -31,8 +31,10 @@ export const updateCommand = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      if (args.format === "text")
+      const isTextFormat = args.format === "text";
+      if (isTextFormat) {
         yield* Effect.tryPromise({ try: () => TerminalUI.intro("update"), catch: (error) => error });
+      }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
       const updateSummary = yield* update({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),

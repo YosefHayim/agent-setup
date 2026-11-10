@@ -24,11 +24,14 @@ export const showInstallation = (installation: {
         ),
       catch: (error) => error,
     });
-    if (installation.agents.length > 0)
+
+    const hasAgents = installation.agents.length > 0;
+    if (hasAgents) {
       yield* Effect.tryPromise({
         try: () => TerminalUI.detail(`Agents: ${installation.agents.join(", ")}`),
         catch: (error) => error,
       });
+    }
   });
 
 export const installCommand = Command.make(
@@ -40,8 +43,10 @@ export const installCommand = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      if (args.format === "text")
+      const isTextFormat = args.format === "text";
+      if (isTextFormat) {
         yield* Effect.tryPromise({ try: () => TerminalUI.intro("install"), catch: (error) => error });
+      }
       const host = yield* Effect.tryPromise({ try: () => scanHost(), catch: (error) => error });
       const installation = yield* install({
         destination: destinationForScope({ scope: args.scope, homeRoot: host.homeRoot, projectRoot: host.projectRoot }),
