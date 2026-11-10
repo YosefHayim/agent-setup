@@ -6,12 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readConfig } from "../../lib/hook-config.js";
-import { allowAndExit, printDecisionAndExit } from "../../lib/hook-output.js";
-import { SESSION_ID_PATTERN } from "../../lib/session-ids.js";
-import { readTranscriptHead } from "../../lib/transcript-reader.js";
-import { decideScratchCleanup } from "../lib/scratch-cleanup-decision.js";
-import { agentScratchFolders, holdsFiles } from "../lib/session-scratch.js";
+import { readConfig } from "../../hook-config.js";
+import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
+import { SESSION_ID_PATTERN } from "../../session-ids.js";
+import { readTranscriptHead } from "../../transcript-reader.js";
+import { decideScratchCleanup } from "../scratch-cleanup-decision.js";
+import { agentScratchFolders, holdsFiles } from "../session-scratch.js";
 
 // A thread opened in the terminal or the editor; "exec" and subagent threads have nobody reading along.
 const INTERACTIVE_CODEX_SOURCES = ["cli", "vscode"];

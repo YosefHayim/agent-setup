@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { agentDefinitionSchema, instructionLinkTargetSchema } from "../../catalog/agent-catalog.js";
-import { joinZodIssueMessages } from "../../zod-issue-messages.js";
-import { readErrorMessage } from "../install-request.js";
+import { agentDefinitionSchema, instructionLinkTargetSchema } from "#src/catalog/agent-catalog.js";
+import { readErrorMessage } from "#src/install/install-request.js";
 import {
   agentOwnerSchema,
   instructionLinkKindSchema,
@@ -11,7 +10,8 @@ import {
   relativePathSchema,
   type YamlSequenceValueOwnership,
   yamlSequenceValueOwnershipSchema,
-} from "../ownership.js";
+} from "#src/install/ownership.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { addJsonRule, jsonRulesOwnershipIsValid, removeJsonRule } from "./json-rules-link.js";
 import { addYamlRead, removeYamlRead } from "./yaml-read-link.js";
 

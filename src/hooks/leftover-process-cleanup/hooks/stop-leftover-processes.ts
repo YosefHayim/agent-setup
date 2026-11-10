@@ -2,15 +2,15 @@
 import { existsSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { liveClaudeProcessIds } from "../../lib/claude-live-sessions.js";
-import { codeRootFolders } from "../../lib/code-repos.js";
-import { readConfig } from "../../lib/hook-config.js";
-import { claimIntervalSlot } from "../../lib/interval-stamp.js";
-import { runningProcesses } from "../../lib/process-table.js";
-import { ancestorProcessIds, decideLeftoverProcesses, isNeverStopped } from "../lib/leftover-process-decision.js";
-import { leftoverStateFolder, writeStoppedProcesses } from "../lib/leftover-process-log.js";
-import { stopProcesses } from "../lib/stop-processes.js";
-import { listWorkingFolders } from "../lib/working-folders.js";
+import { liveClaudeProcessIds } from "../../claude-live-sessions.js";
+import { codeRootFolders } from "../../code-repos.js";
+import { readConfig } from "../../hook-config.js";
+import { claimIntervalSlot } from "../../interval-stamp.js";
+import { runningProcesses } from "../../process-table.js";
+import { ancestorProcessIds, decideLeftoverProcesses, isNeverStopped } from "../leftover-process-decision.js";
+import { leftoverStateFolder, writeStoppedProcesses } from "../leftover-process-log.js";
+import { stopProcesses } from "../stop-processes.js";
+import { listWorkingFolders } from "../working-folders.js";
 
 // Stop and SubagentStop fire every turn; a look a few seconds ago already covers the processes that are left.
 const SCAN_MINIMUM_INTERVAL_SECONDS = 20;

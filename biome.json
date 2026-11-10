@@ -31,7 +31,7 @@
                 "patterns": [
                   {
                     "group": ["commander", "@clack/prompts", "picocolors", "effect", "@effect/*"],
-                    "message": "Hooks run without dependencies: import only node:*, src/hooks/lib/*, and the feature's own lib/."
+                    "message": "Hooks run without dependencies: import only node:*, the shared hook files in src/hooks/*.ts, and the feature's own files."
                   }
                 ]
               }

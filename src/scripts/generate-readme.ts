@@ -3,9 +3,9 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { type FeatureDefinition, featureCatalog } from "../catalog/feature-catalog.js";
-import { configSettings, defaultConfig } from "../config/config-schema.js";
-import { environmentVariables } from "../config/environment-variables.js";
+import { type FeatureDefinition, featureCatalog } from "#src/catalog/feature-catalog.js";
+import { configSettings, defaultConfig } from "#src/config/config-schema.js";
+import { environmentVariables } from "#src/config/environment-variables.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const README_PATH = path.join(ROOT, "README.md");
@@ -74,7 +74,7 @@ const featuresTable = (): string =>
 
 const communitySection = (descriptions: ReadonlyMap<string, string>): string =>
   [
-    "These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:",
+    "These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx --conditions=source src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:",
     "",
     "| Skill | What it does | By |",
     "| --- | --- | --- |",

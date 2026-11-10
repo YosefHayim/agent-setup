@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "../config/host-scan.js";
-import { install } from "../install/install.js";
-import { preparePackage } from "../install/prepare-package.js";
+import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { install } from "#src/install/install.js";
+import { preparePackage } from "#src/install/prepare-package.js";
 import { createCommand, featureIdsArgument, formatOption, type ScopeOptions, scopeOption } from "./cli-options.js";
 import * as TerminalUI from "./terminal-ui.js";
 

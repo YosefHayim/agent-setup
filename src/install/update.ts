@@ -2,8 +2,8 @@ import * as path from "node:path";
 
 import { z } from "zod";
 
-import { addDependencies } from "../catalog/feature-catalog.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { addDependencies } from "#src/catalog/feature-catalog.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { syncInstall } from "./install.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";
 import {

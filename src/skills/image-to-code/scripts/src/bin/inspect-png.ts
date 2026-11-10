@@ -5,8 +5,8 @@ import path from "node:path";
  * Read a target PNG's dimensions, sample hex colors at pixels, and/or report a palette.
  */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "../lib/argv.js";
-import { colorAt, toHex } from "../lib/png.js";
+import { argString, parseArgs } from "#src/argv.js";
+import { colorAt, toHex } from "#src/png.js";
 
 const args = parseArgs(process.argv.slice(2), { repeat: ["at"] });
 const inputArg = argString(args, "input");

@@ -11,16 +11,16 @@ import { writeSync } from "node:fs";
 import os from "node:os";
 import { parseArgs } from "node:util";
 
-import { readConfig } from "../../lib/hook-config.js";
-import { claimIntervalSlot } from "../../lib/interval-stamp.js";
-import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../lib/watcher-lock.js";
-import { cleanUpCaches } from "../lib/cache-cleanup.js";
-import { appendToCleanupLog } from "../lib/cleanup-log.js";
-import { cacheCleanupStampFile, cleanupLockFile } from "../lib/cleanup-state.js";
-import { isSessionLive } from "../lib/live-sessions.js";
-import { reportLine } from "../lib/report-line.js";
-import { pushUnpushedBranches } from "../lib/unpushed-branches.js";
-import { cleanUpWorktrees } from "../lib/worktree-cleanup.js";
+import { readConfig } from "../../hook-config.js";
+import { claimIntervalSlot } from "../../interval-stamp.js";
+import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../watcher-lock.js";
+import { cleanUpCaches } from "../cache-cleanup.js";
+import { appendToCleanupLog } from "../cleanup-log.js";
+import { cacheCleanupStampFile, cleanupLockFile } from "../cleanup-state.js";
+import { isSessionLive } from "../live-sessions.js";
+import { reportLine } from "../report-line.js";
+import { pushUnpushedBranches } from "../unpushed-branches.js";
+import { cleanUpWorktrees } from "../worktree-cleanup.js";
 
 type WatcherOptions = {
   readonly sessionId: string;

@@ -2,8 +2,8 @@
 import fs from "node:fs";
 /** Locate logo groups on a mostly-white canvas via column/row projection. */
 import { PNG } from "pngjs";
-import { argString, parseArgs } from "../lib/argv.js";
-import { toHex } from "../lib/png.js";
+import { argString, parseArgs } from "#src/argv.js";
+import { toHex } from "#src/png.js";
 
 const args = parseArgs(process.argv.slice(2));
 const input = argString(args, "input") || "target.png";

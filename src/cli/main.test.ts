@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { defaultConfig } from "../config/config-schema.js";
-import { installRequestSchema } from "../install/install-request.js";
+import { defaultConfig } from "#src/config/config-schema.js";
+import { installRequestSchema } from "#src/install/install-request.js";
 import { isBareArgv } from "./main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { type Command, CommanderError } from "commander";
 
-import { readPackageVersion } from "../install/package-root.js";
+import { readPackageVersion } from "#src/install/package-root.js";
 import { createCatalogCommand } from "./catalog-command.js";
 import { createCommand, isCliUsageError } from "./cli-options.js";
 import { createConfigCommand } from "./config-command.js";

@@ -3,7 +3,7 @@ import * as path from "node:path";
 
 import type { z } from "zod";
 
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";
 import { installationLocationSchema, receiptPath } from "./install-paths.js";

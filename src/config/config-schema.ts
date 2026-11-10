@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { nonEmptyTrimmedTextSchema } from "../install/text-rules.js";
+import { nonEmptyTrimmedTextSchema } from "#src/install/text-rules.js";
 
 const CODE_ROOT_FOLDERS = ["Desktop/Code", "Code", "Projects", "dev", "src", "repos"];
 

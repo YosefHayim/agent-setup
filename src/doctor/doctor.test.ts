@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defaultConfig } from "../config/config-schema.js";
+import { defaultConfig } from "#src/config/config-schema.js";
 import { checkHealth } from "./doctor.js";
 
 const noEvidence = { homePaths: [], absolutePaths: [], commands: [] };

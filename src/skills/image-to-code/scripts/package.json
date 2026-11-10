@@ -3,6 +3,9 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
+  "imports": {
+    "#src/*": "./src/*"
+  },
   "description": "Verification + inspection scripts for the image-to-code skill (render+diff, color sampling, SVG optimize).",
   "scripts": {
     "typecheck": "tsc --noEmit",

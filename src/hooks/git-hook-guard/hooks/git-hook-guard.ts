@@ -4,11 +4,11 @@
 
 import { readFileSync, writeSync } from "node:fs";
 
-import { shellCommandOf, startFolderOf } from "../../lib/bash-hook-input.js";
-import { readConfig } from "../../lib/hook-config.js";
-import { allowAndExit, printDecisionAndExit } from "../../lib/hook-output.js";
-import { decideGitHook } from "../lib/git-hook-decision.js";
-import { inspectRepoHooks } from "../lib/hooks-installed.js";
+import { shellCommandOf, startFolderOf } from "../../bash-hook-input.js";
+import { readConfig } from "../../hook-config.js";
+import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
+import { decideGitHook } from "../git-hook-decision.js";
+import { inspectRepoHooks } from "../hooks-installed.js";
 
 const runGitHookGuard = (): never => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));

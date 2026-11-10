@@ -4,9 +4,9 @@
 import { readFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { readConfig } from "../../lib/hook-config.js";
-import { allowAndExit, printDecisionAndExit } from "../../lib/hook-output.js";
-import { decideScratchWrite, type ToolCall } from "../lib/scratch-write-decision.js";
+import { readConfig } from "../../hook-config.js";
+import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
+import { decideScratchWrite, type ToolCall } from "../scratch-write-decision.js";
 
 const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
   typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);

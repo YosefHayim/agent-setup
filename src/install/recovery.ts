@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
 const portablePath = (filePath: string): string => filePath.replaceAll("\\", "/");

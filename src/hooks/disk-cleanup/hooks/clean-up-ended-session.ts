@@ -4,8 +4,8 @@
 
 import { readFileSync } from "node:fs";
 
-import { startDetachedWatcher } from "../../lib/detached-watcher.js";
-import { sessionIdFrom } from "../../lib/session-ids.js";
+import { startDetachedWatcher } from "../../detached-watcher.js";
+import { sessionIdFrom } from "../../session-ids.js";
 
 // Grok's session IDs are not UUIDs and its transcripts are never read, so its sessions own no worktree: its watcher
 // only gives the caches their daily look.

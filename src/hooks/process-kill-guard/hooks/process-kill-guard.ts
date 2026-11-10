@@ -4,13 +4,13 @@
 
 import { readFileSync, writeSync } from "node:fs";
 import os from "node:os";
-import { shellCommandOf } from "../../lib/bash-hook-input.js";
-import { liveClaudeProcessIds } from "../../lib/claude-live-sessions.js";
-import { readConfig } from "../../lib/hook-config.js";
-import { allowAndExit, printDecisionAndExit } from "../../lib/hook-output.js";
-import { runningProcesses } from "../../lib/process-table.js";
-import { decideKill } from "../lib/kill-decision.js";
-import { killTargetsIn } from "../lib/kill-targets.js";
+import { shellCommandOf } from "../../bash-hook-input.js";
+import { liveClaudeProcessIds } from "../../claude-live-sessions.js";
+import { readConfig } from "../../hook-config.js";
+import { allowAndExit, printDecisionAndExit } from "../../hook-output.js";
+import { runningProcesses } from "../../process-table.js";
+import { decideKill } from "../kill-decision.js";
+import { killTargetsIn } from "../kill-targets.js";
 
 const runProcessKillGuard = (): never => {
   const hookInput: unknown = JSON.parse(readFileSync(0, "utf8"));

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { AgentDefinition } from "../catalog/agent-catalog.js";
+import type { AgentDefinition } from "#src/catalog/agent-catalog.js";
 import { instructionPath, planInstructionFile } from "./agent-formats/instruction-file.js";
 import { planInstructionLink } from "./agent-formats/instruction-link.js";
 import { planRuleFiles } from "./agent-formats/rule-file.js";

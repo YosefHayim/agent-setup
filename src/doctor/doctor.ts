@@ -2,22 +2,22 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { type AgentEvidence, agentCatalog, agentEvidenceSchema, detectAgents } from "../catalog/agent-catalog.js";
+import { type AgentEvidence, agentCatalog, agentEvidenceSchema, detectAgents } from "#src/catalog/agent-catalog.js";
 import {
   addDependencies,
   type FeatureDefinition,
   type FeatureId,
   type FeaturePlatform,
   featureCatalog,
-} from "../catalog/feature-catalog.js";
-import { type ConfigFileSnapshot, managedConfigPath, readConfigFile } from "../config/config-file.js";
-import type { Config } from "../config/config-schema.js";
-import { hostPlatformSchema } from "../config/host-scan.js";
-import { installationDestinationSchema, receiptPath } from "../install/install-paths.js";
-import { preparedPackageSchema, readErrorMessage, wrapAsInstallError } from "../install/install-request.js";
-import { isPathPresent } from "../install/prepare-package.js";
-import { type Receipt, type ReceiptSnapshot, readReceipt, type Scope } from "../install/receipt.js";
-import { joinZodIssueMessages } from "../zod-issue-messages.js";
+} from "#src/catalog/feature-catalog.js";
+import { type ConfigFileSnapshot, managedConfigPath, readConfigFile } from "#src/config/config-file.js";
+import type { Config } from "#src/config/config-schema.js";
+import { hostPlatformSchema } from "#src/config/host-scan.js";
+import { installationDestinationSchema, receiptPath } from "#src/install/install-paths.js";
+import { preparedPackageSchema, readErrorMessage, wrapAsInstallError } from "#src/install/install-request.js";
+import { isPathPresent } from "#src/install/prepare-package.js";
+import { type Receipt, type ReceiptSnapshot, readReceipt, type Scope } from "#src/install/receipt.js";
+import { joinZodIssueMessages } from "#src/zod-issue-messages.js";
 
 const healthRequestSchema = z.strictObject({
   destination: installationDestinationSchema,

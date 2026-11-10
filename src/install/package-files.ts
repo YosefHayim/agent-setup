@@ -3,8 +3,13 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import { type FeatureId, featureCatalog, installedSkillSchema, skillsForFeatures } from "../catalog/feature-catalog.js";
-import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../zod-issue-messages.js";
+import {
+  type FeatureId,
+  featureCatalog,
+  installedSkillSchema,
+  skillsForFeatures,
+} from "#src/catalog/feature-catalog.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { decodeStrictText, hashBytes } from "./file-bytes.js";
 import {
   applicationOwner,

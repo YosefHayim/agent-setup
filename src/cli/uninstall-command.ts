@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
-import { destinationForScope, scanHost } from "../config/host-scan.js";
-import { uninstall } from "../install/uninstall.js";
+import { destinationForScope, scanHost } from "#src/config/host-scan.js";
+import { uninstall } from "#src/install/uninstall.js";
 import {
   confirmDestructive,
   createCommand,

@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { findAgent } from "../../catalog/agent-catalog.js";
-import { featureCatalog, findFeature } from "../../catalog/feature-catalog.js";
-import type { PreviousFileValue } from "../ownership.js";
+import { findAgent } from "#src/catalog/agent-catalog.js";
+import { featureCatalog, findFeature } from "#src/catalog/feature-catalog.js";
+import type { PreviousFileValue } from "#src/install/ownership.js";
 import { planSkillDirectory, type SkillDirectoryPlan } from "./skill-directory.js";
 
 const textEncoder = new TextEncoder();

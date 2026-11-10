@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { agentCatalog } from "../../catalog/agent-catalog.js";
-import { findFeature } from "../../catalog/feature-catalog.js";
-import type { OwnedFile } from "../ownership.js";
+import { agentCatalog } from "#src/catalog/agent-catalog.js";
+import { findFeature } from "#src/catalog/feature-catalog.js";
+import type { OwnedFile } from "#src/install/ownership.js";
 import { type InstructionFilePlan, planInstructionFile } from "./instruction-file.js";
 
 const startMarker = "<!-- agent-setup:skills start -->";

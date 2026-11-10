@@ -1,7 +1,7 @@
 import { Argument, Command, Option } from "commander";
 
-import type { Scope } from "../install/receipt.js";
-import { scopeSchema } from "../install/receipt.js";
+import type { Scope } from "#src/install/receipt.js";
+import { scopeSchema } from "#src/install/receipt.js";
 import * as TerminalUI from "./terminal-ui.js";
 
 export type OutputFormat = "text" | "json";

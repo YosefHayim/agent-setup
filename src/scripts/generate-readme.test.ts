@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { configSettings } from "../config/config-schema.js";
-import { environmentVariables } from "../config/environment-variables.js";
+import { configSettings } from "#src/config/config-schema.js";
+import { environmentVariables } from "#src/config/environment-variables.js";
 
 const readme = readFileSync(path.resolve("README.md"), "utf8");
 

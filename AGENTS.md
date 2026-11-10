@@ -7,7 +7,7 @@ Entrypoint for coding agents and maintainers. Claude Code, Codex, Cursor, Kiro, 
 **agent-setup** is a TypeScript CLI that installs, updates, uninstalls, diagnoses, configures, and scaffolds an owned set of agent skills, dependency-free hooks, agent configuration, and copyable single-gate CI/publish workflow templates.
 
 ```bash
-pnpm tsx src/cli/main.ts install image-to-code
+pnpm tsx --conditions=source src/cli/main.ts install image-to-code
 ```
 
 Voice lives in **agent-voice** and free provider routing in **free-model-router**, each in its own repository. Do not add either back here.
@@ -37,7 +37,7 @@ Hard rules agents must hold every turn.
 
 - **Check gate** — `pnpm check` = Turborepo running lint (Biome + knip), typecheck, tests, build and the generated-document check. One root `tsconfig`; the image-to-code harness under `src/skills/image-to-code/scripts/` is the single sanctioned exception.
 - **Effect / Schema** — capabilities return Effect; only `src/cli/main.ts` starts the runtime. Runtime, persisted, catalog, CLI, and agent-format data begin as Effect Schema. Application failures use `Schema.TaggedError`. No hand-rolled `isX` / `parseX` pairs for literals and numbers.
-- **Hooks** — installed hooks stay dependency-free plain Node (`node:*`, `src/hooks/lib/**`, own feature code only), **fail-open**. Application code imports hook code only through a feature's `command/` module.
+- **Hooks** — installed hooks stay dependency-free plain Node (`node:*`, the shared hook files `src/hooks/*.ts`, own feature code only), **fail-open**. Application code imports hook code only through a feature's `command/` module.
 - **Ownership** — inspect → plan → validate → apply → write receipt last. A receipt is the only deletion authority. Catalog-closed shipping: the feature catalog owns exact shipped paths.
 - **Shape** — capability-owned paths; kebab-case authored directories; PascalCase UI files; kebab-case public IDs/flags. One command path; `TerminalUI` owns presentation; non-TTY never prompts.
 - **Local tooling** — local `src/scripts/dev/` for personal/one-off scripts. All maintained build/check tools live under `src/scripts/`, and product code never imports them.

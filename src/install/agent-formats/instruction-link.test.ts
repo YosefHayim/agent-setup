@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { findAgent } from "../../catalog/agent-catalog.js";
-import type { FileChange } from "../plan.js";
+import { findAgent } from "#src/catalog/agent-catalog.js";
+import type { FileChange } from "#src/install/plan.js";
 import { type InstructionLinkPlan, planInstructionLink } from "./instruction-link.js";
 
 const textEncoder = new TextEncoder();

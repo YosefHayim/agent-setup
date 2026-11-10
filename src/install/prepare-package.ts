@@ -4,7 +4,7 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { featureCatalog } from "../catalog/feature-catalog.js";
+import { featureCatalog } from "#src/catalog/feature-catalog.js";
 import { isNotFound } from "./file-bytes.js";
 import { type PreparedPackage, readErrorMessage } from "./install-request.js";
 import { findPackageRoot, readPackageVersion } from "./package-root.js";
@@ -68,43 +68,43 @@ const copyTree = async (input: { source: string; destination: string }): Promise
   }
 };
 
-// The shared hook lib is copied into each feature's lib/, so tsc's src/hooks/lib specifier becomes a
-// sibling of lib/ for hooks, watchers, and commands, and a same-folder import for lib files themselves.
-// e.g. "../../lib/hook-config.js" from src/hooks/<feature>/hooks/ or src/hooks/<feature>/lib/
-const SHARED_HOOK_LIB_IMPORT = "../../lib/";
+// Source hook code has no lib/ folder. A feature's lib files sit beside its hooks/, watchers/ and command/
+// folders, and the shared hook files sit beside the feature folders. So a source import "../<name>.js" from a
+// part, or "../../<name>.js" for a shared file, names a lib file. Installed, every lib file sits in the
+// feature's lib/: a part imports "../lib/<name>.js" and a lib file imports "./<name>.js".
+const SOURCE_LIB_IMPORT_PATTERN = /(?:\.\.\/)+([^"'/]+\.js)(?=["'])/g;
+const HOOK_PART_FOLDERS = ["hooks", "watchers", "command"];
 
-const RUNTIME_IMPORT_PARTS: ReadonlyArray<{ readonly part: string; readonly runtimeImport: string }> = [
-  { part: "hooks", runtimeImport: "../lib/" },
-  { part: "watchers", runtimeImport: "../lib/" },
-  { part: "command", runtimeImport: "../lib/" },
-  { part: "lib", runtimeImport: "./" },
-];
-
-const rewriteSharedLibFile = async (input: { preparedPath: string; runtimeImport: string }): Promise<boolean> => {
-  const source = await readFile(input.preparedPath, "utf8");
-  const usesSharedRuntime = source.includes(SHARED_HOOK_LIB_IMPORT);
-  if (usesSharedRuntime) {
-    await writeFile(input.preparedPath, source.replaceAll(SHARED_HOOK_LIB_IMPORT, input.runtimeImport));
+const copyLibFiles = async (input: { sourceFolder: string; destinationFolder: string }): Promise<void> => {
+  const isSourcePresent = await isPathPresent(input.sourceFolder);
+  if (!isSourcePresent) {
+    return;
   }
 
-  return usesSharedRuntime;
+  const entries = await readdir(input.sourceFolder, { withFileTypes: true });
+  const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+  for (const fileName of fileNames) {
+    await copyFile({
+      source: path.join(input.sourceFolder, fileName),
+      destination: path.join(input.destinationFolder, fileName),
+    });
+  }
 };
 
-const rewriteSharedLibImports = async (input: { partRoot: string; runtimeImport: string }): Promise<boolean> => {
-  const isPartPresent = await isPathPresent(input.partRoot);
-  if (!isPartPresent) {
-    return false;
+const rewriteLibImportsInFolder = async (input: { folder: string; importPrefix: string }): Promise<void> => {
+  const isFolderPresent = await isPathPresent(input.folder);
+  if (!isFolderPresent) {
+    return;
   }
 
-  const entryNames = await readdir(input.partRoot);
-  const preparedFileNames = entryNames.filter((name) => name.endsWith(".js"));
-  const sharedRuntimeUsers = await Promise.all(
-    preparedFileNames.map((name) =>
-      rewriteSharedLibFile({ preparedPath: path.join(input.partRoot, name), runtimeImport: input.runtimeImport }),
-    ),
-  );
-
-  return sharedRuntimeUsers.some(Boolean);
+  const entryNames = await readdir(input.folder);
+  const jsFileNames = entryNames.filter((name) => name.endsWith(".js"));
+  for (const jsFileName of jsFileNames) {
+    const filePath = path.join(input.folder, jsFileName);
+    const source = await readFile(filePath, "utf8");
+    const libImportsRewritten = source.replace(SOURCE_LIB_IMPORT_PATTERN, `${input.importPrefix}$1`);
+    await writeFile(filePath, libImportsRewritten);
+  }
 };
 
 const copyHookFeature = async (input: {
@@ -112,32 +112,29 @@ const copyHookFeature = async (input: {
   preparedRoot: string;
   sourceDirectory: string;
 }): Promise<void> => {
-  const compiledFeatureRoot = path.join(input.packageRoot, "dist", "src", "hooks", input.sourceDirectory);
+  const compiledHooksRoot = path.join(input.packageRoot, "dist", "src", "hooks");
+  const compiledFeatureRoot = path.join(compiledHooksRoot, input.sourceDirectory);
   const preparedFeatureRoot = path.join(input.preparedRoot, "hooks", input.sourceDirectory);
+  const preparedLibFolder = path.join(preparedFeatureRoot, "lib");
   const isFeatureCompiled = await isPathPresent(compiledFeatureRoot);
   if (!isFeatureCompiled) {
     return;
   }
 
-  for (const part of ["hooks", "watchers", "lib", "command"]) {
+  for (const part of HOOK_PART_FOLDERS) {
     await copyTree({
       source: path.join(compiledFeatureRoot, part),
       destination: path.join(preparedFeatureRoot, part),
     });
   }
 
-  const sharedRuntimeUsers = await Promise.all(
-    RUNTIME_IMPORT_PARTS.map(({ part, runtimeImport }) =>
-      rewriteSharedLibImports({ partRoot: path.join(preparedFeatureRoot, part), runtimeImport }),
-    ),
-  );
-  const isSharedLibNeeded = sharedRuntimeUsers.some(Boolean);
-  if (isSharedLibNeeded) {
-    await copyTree({
-      source: path.join(input.packageRoot, "dist", "src", "hooks", "lib"),
-      destination: path.join(preparedFeatureRoot, "lib"),
-    });
+  await copyLibFiles({ sourceFolder: compiledFeatureRoot, destinationFolder: preparedLibFolder });
+  await copyLibFiles({ sourceFolder: compiledHooksRoot, destinationFolder: preparedLibFolder });
+
+  for (const part of HOOK_PART_FOLDERS) {
+    await rewriteLibImportsInFolder({ folder: path.join(preparedFeatureRoot, part), importPrefix: "../lib/" });
   }
+  await rewriteLibImportsInFolder({ folder: preparedLibFolder, importPrefix: "./" });
 };
 
 const copySkillFeature = async (input: {

@@ -1,8 +1,8 @@
 import { realpath } from "node:fs/promises";
 import * as path from "node:path";
 
-import { type AgentDefinition, agentCatalog, detectAgents } from "../catalog/agent-catalog.js";
-import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "../catalog/feature-catalog.js";
+import { type AgentDefinition, agentCatalog, detectAgents } from "#src/catalog/agent-catalog.js";
+import { addDependencies, defaultFeatureIds, type FeatureId, featureCatalog } from "#src/catalog/feature-catalog.js";
 import {
   type ConfigFileSnapshot,
   type ManagedConfigPlan,
@@ -10,8 +10,8 @@ import {
   managedConfigPath,
   planManagedConfig,
   readConfigFile,
-} from "../config/config-file.js";
-import { defaultConfig } from "../config/config-schema.js";
+} from "#src/config/config-file.js";
+import { defaultConfig } from "#src/config/config-schema.js";
 import { createAgentWrites } from "./agent-files.js";
 import { applyPlan } from "./apply-plan.js";
 import { hashBytes } from "./file-bytes.js";

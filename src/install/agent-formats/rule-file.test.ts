@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { findAgent } from "../../catalog/agent-catalog.js";
-import { findFeature } from "../../catalog/feature-catalog.js";
+import { findAgent } from "#src/catalog/agent-catalog.js";
+import { findFeature } from "#src/catalog/feature-catalog.js";
 import { planRuleFiles, ruleFileRequestSchema } from "./rule-file.js";
 
 const textEncoder = new TextEncoder();

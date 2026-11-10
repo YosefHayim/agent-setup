@@ -13,7 +13,7 @@ It installs into global `~/.claude` or project-local `.claude/`, keeps Schema-va
 From a checkout of this repo, run `pnpm install` once. Then install the safe default scratch folder guard globally:
 
 ```bash
-pnpm tsx src/cli/main.ts install
+pnpm tsx --conditions=source src/cli/main.ts install
 ```
 
 Then restart Claude Code so hooks and skills load in the next session.
@@ -21,7 +21,7 @@ Then restart Claude Code so hooks and skills load in the next session.
 For a repo-local install that can be committed with the project:
 
 ```bash
-pnpm tsx src/cli/main.ts install --scope project
+pnpm tsx --conditions=source src/cli/main.ts install --scope project
 ```
 
 ## Usage
@@ -29,15 +29,15 @@ pnpm tsx src/cli/main.ts install --scope project
 Print command help, or open the interactive TUI (same options as CLI args; shows an ordered plan and asks for approval before applying):
 
 ```bash
-pnpm tsx src/cli/main.ts
-pnpm tsx src/cli/main.ts menu
+pnpm tsx --conditions=source src/cli/main.ts
+pnpm tsx --conditions=source src/cli/main.ts menu
 ```
 
 Add a specific skill or hook set. `install` only adds: features that are already installed stay installed:
 
 ```bash
-pnpm tsx src/cli/main.ts install write-readme update-agent-docs
-pnpm tsx src/cli/main.ts install image-to-code
+pnpm tsx --conditions=source src/cli/main.ts install write-readme update-agent-docs
+pnpm tsx --conditions=source src/cli/main.ts install image-to-code
 ```
 
 Keep an existing install and refresh its copied skills and hooks. Named IDs must already be installed; every installed feature is refreshed and none is removed:
@@ -152,7 +152,7 @@ Status-line presets for Claude Code and Codex live in `src/statuslines/`. Each i
 ## Recommended community skills
 
 <!-- AUTO:SKILLS:START -->
-These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:
+These skills ship with agent-setup for convenience — installable the same way (`pnpm tsx --conditions=source src/cli/main.ts install <id>`) — but they are **authored by others**, not by agent-setup. Full credit and upstream sources:
 
 | Skill | What it does | By |
 | --- | --- | --- |

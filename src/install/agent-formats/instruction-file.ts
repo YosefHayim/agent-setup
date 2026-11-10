@@ -1,15 +1,15 @@
 import { z } from "zod";
 
-import { type AgentDefinition, agentCatalog, agentIdSchema } from "../../catalog/agent-catalog.js";
-import { installedSkillSchema } from "../../catalog/feature-catalog.js";
-import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "../../zod-issue-messages.js";
-import { bytesEqual, hashBytes } from "../file-bytes.js";
+import { type AgentDefinition, agentCatalog, agentIdSchema } from "#src/catalog/agent-catalog.js";
+import { installedSkillSchema } from "#src/catalog/feature-catalog.js";
+import { bytesEqual, hashBytes } from "#src/install/file-bytes.js";
 import {
   agentOwnerSchema,
   instructionKindSchema,
   managedBlockOwnershipSchema,
   relativePathSchema,
-} from "../ownership.js";
+} from "#src/install/ownership.js";
+import { addZodIssueDetails, joinZodIssueMessages, type ZodIssueDetail } from "#src/zod-issue-messages.js";
 import { markdownWithCompleteFrontmatterSchema, stripFrontmatter } from "./skill-text.js";
 
 const startMarker = "<!-- agent-setup:skills start -->";

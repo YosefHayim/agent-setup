@@ -4,9 +4,9 @@
 
 import { readFileSync } from "node:fs";
 
-import { startDetachedWatcher } from "../../lib/detached-watcher.js";
-import { sessionIdFrom } from "../../lib/session-ids.js";
-import { rehomeAgentFrom } from "../lib/rehome-ledger.js";
+import { startDetachedWatcher } from "../../detached-watcher.js";
+import { sessionIdFrom } from "../../session-ids.js";
+import { rehomeAgentFrom } from "../rehome-ledger.js";
 
 const handOverEndedSession = (): void => {
   const agent = rehomeAgentFrom(process.env.AGENT_SETUP_AGENT_ID);

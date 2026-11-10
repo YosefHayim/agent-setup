@@ -2,17 +2,17 @@ import { join, resolve } from "node:path";
 
 import type { Command } from "commander";
 
-import { detectAgents } from "../catalog/agent-catalog.js";
-import { defaultFeatureIds, featureCatalog } from "../catalog/feature-catalog.js";
-import { destinationForScope, type HostScan, scanHost } from "../config/host-scan.js";
-import { install } from "../install/install.js";
-import { receiptPath } from "../install/install-paths.js";
-import { wrapAsInstallError } from "../install/install-request.js";
-import { preparePackage } from "../install/prepare-package.js";
-import { readReceipt } from "../install/receipt.js";
-import { uninstall } from "../install/uninstall.js";
-import { update } from "../install/update.js";
-import { copyWorkflows } from "../workflows/copy-workflows.js";
+import { detectAgents } from "#src/catalog/agent-catalog.js";
+import { defaultFeatureIds, featureCatalog } from "#src/catalog/feature-catalog.js";
+import { destinationForScope, type HostScan, scanHost } from "#src/config/host-scan.js";
+import { install } from "#src/install/install.js";
+import { receiptPath } from "#src/install/install-paths.js";
+import { wrapAsInstallError } from "#src/install/install-request.js";
+import { preparePackage } from "#src/install/prepare-package.js";
+import { readReceipt } from "#src/install/receipt.js";
+import { uninstall } from "#src/install/uninstall.js";
+import { update } from "#src/install/update.js";
+import { copyWorkflows } from "#src/workflows/copy-workflows.js";
 import { showFeatureList } from "./catalog-command.js";
 import { createCommand } from "./cli-options.js";
 import { checkBothScopes, showScopeHealth } from "./doctor-command.js";
