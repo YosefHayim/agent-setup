@@ -230,8 +230,8 @@ const planReferenceChange = (request: InstructionLinkRequest): InstructionLinkPl
   return { _tag: "restore", file, bytes };
 };
 
-export const planInstructionLink = (details: unknown): InstructionLinkPlan => {
-  const requestCheck = instructionLinkRequestSchema.safeParse(details);
+export const planInstructionLink = (uncheckedRequest: unknown): InstructionLinkPlan => {
+  const requestCheck = instructionLinkRequestSchema.safeParse(uncheckedRequest);
 
   const isRequestAccepted = requestCheck.success;
 

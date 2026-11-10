@@ -107,20 +107,20 @@ const receiptTarget: ReceiptTarget = {
   owner: applicationOwner,
 };
 
-const readAutomaticSettingsSelection = (details: {
+const readAutomaticSettingsSelection = (selectionRead: {
   request: InstallRequest;
   target: ConfigFileSnapshot;
   global: ConfigFileSnapshot | null;
 }): ManagedConfigRequest["selection"] => {
-  const target = details.target;
+  const target = selectionRead.target;
   const isTargetPresent = target._tag === "present";
   if (isTargetPresent) {
     return { _tag: "selected", config: target.config };
   }
 
-  const isProjectInstall = details.request.destination._tag === "project";
+  const isProjectInstall = selectionRead.request.destination._tag === "project";
   if (isProjectInstall) {
-    const globalSnapshot = details.global;
+    const globalSnapshot = selectionRead.global;
     const isGlobalSnapshotMissing = globalSnapshot == null;
 
     return {
@@ -138,13 +138,14 @@ type ManagedSettingsInspection = {
 };
 
 // The global config is read only when a project install has no config of its own yet.
-const readInheritedSettings = async (details: {
+const readInheritedSettings = async (inheritedRead: {
   request: InstallRequest;
   target: ConfigFileSnapshot;
 }): Promise<ConfigFileSnapshot | null> => {
-  const isInheritedSettingsNeeded = details.request.destination._tag === "project" && details.target._tag === "missing";
+  const isInheritedSettingsNeeded =
+    inheritedRead.request.destination._tag === "project" && inheritedRead.target._tag === "missing";
   if (isInheritedSettingsNeeded) {
-    return readConfigFile(path.join(details.request.host.homeRoot, managedConfigPath));
+    return readConfigFile(path.join(inheritedRead.request.host.homeRoot, managedConfigPath));
   }
 
   return null;
@@ -179,12 +180,15 @@ const inspectManagedSettings = async (request: InstallRequest): Promise<ManagedS
 
 // A reset replaces config.json whatever it holds now, so it keeps the receipt's restoration value
 // without requiring the current bytes to still match what was installed.
-const resetPreviousSettingsFile = (details: { receipt: Receipt | null; snapshot: FileSnapshot }): PreviousFileValue => {
-  const file = readPreviousReceiptFile(details.receipt, managedConfigPath);
+const resetPreviousSettingsFile = (previousFileReset: {
+  receipt: Receipt | null;
+  snapshot: FileSnapshot;
+}): PreviousFileValue => {
+  const file = readPreviousReceiptFile(previousFileReset.receipt, managedConfigPath);
 
   const isSettingsNotReceipted = file == null;
   if (isSettingsNotReceipted) {
-    return readPreviousFileField(details.snapshot);
+    return readPreviousFileField(previousFileReset.snapshot);
   }
 
   const ownership = file.ownership;
@@ -197,52 +201,55 @@ const resetPreviousSettingsFile = (details: { receipt: Receipt | null; snapshot:
   return ownership.previous;
 };
 
-const pickPreviousSettingsFile = (details: {
+const pickPreviousSettingsFile = (previousFilePick: {
   request: InstallRequest;
   inspection: ManagedSettingsInspection;
   previousReceipt: Receipt | null;
 }): PreviousFileValue => {
-  const isSettingsReset = details.request.configuration._tag === "reset";
+  const isSettingsReset = previousFilePick.request.configuration._tag === "reset";
   if (isSettingsReset) {
-    return resetPreviousSettingsFile({ receipt: details.previousReceipt, snapshot: details.inspection.file });
+    return resetPreviousSettingsFile({
+      receipt: previousFilePick.previousReceipt,
+      snapshot: previousFilePick.inspection.file,
+    });
   }
 
   return readPreviousWholeFile({
-    receipt: details.previousReceipt,
+    receipt: previousFilePick.previousReceipt,
     filePath: managedConfigPath,
-    snapshot: details.inspection.file,
+    snapshot: previousFilePick.inspection.file,
     desiredBytes: null,
   });
 };
 
-const createManagedSettingsPlan = (details: {
+const createManagedSettingsPlan = (managedPlanning: {
   request: InstallRequest;
   inspection: ManagedSettingsInspection;
   previousReceipt: Receipt | null;
 }): ManagedConfigPlan => {
-  const previousSettingsFile = pickPreviousSettingsFile(details);
+  const previousSettingsFile = pickPreviousSettingsFile(managedPlanning);
 
   return planManagedConfig({
-    scope: details.request.destination._tag,
-    selection: details.inspection.selection,
+    scope: managedPlanning.request.destination._tag,
+    selection: managedPlanning.inspection.selection,
     previousConfigFile: previousSettingsFile,
   });
 };
 
-const installSummary = (details: {
+const installSummary = (summary: {
   tag: InstallSummary["_tag"];
   request: InstallRequest;
   featureIds: ReadonlyArray<FeatureId>;
   selectedAgents: ReadonlyArray<AgentDefinition>;
 }): InstallSummary => ({
-  _tag: details.tag,
-  scope: details.request.destination._tag,
-  features: [...details.featureIds],
-  agents: details.selectedAgents.map((agent) => agent.id),
+  _tag: summary.tag,
+  scope: summary.request.destination._tag,
+  features: [...summary.featureIds],
+  agents: summary.selectedAgents.map((agent) => agent.id),
   platformRequirements: featureCatalog
-    .filter((feature) => details.featureIds.includes(feature.id))
+    .filter((feature) => summary.featureIds.includes(feature.id))
     .map((feature) => ({ featureId: feature.id, platform: feature.platform })),
-  interaction: details.request.interaction,
+  interaction: summary.request.interaction,
 });
 
 interface DecodedSettingsFile {
@@ -251,23 +258,23 @@ interface DecodedSettingsFile {
 }
 
 // Claude's settings were read and decoded once already, so only the other agents' files are read here.
-const readHookSettingsFile = async (details: {
+const readHookSettingsFile = async (hookFileRead: {
   root: string;
   filePath: string;
   claudeSettings: DecodedSettingsFile;
 }): Promise<DecodedSettingsFile> => {
-  const isClaudeSettings = details.filePath === settingsPath;
+  const isClaudeSettings = hookFileRead.filePath === settingsPath;
   if (isClaudeSettings) {
-    return details.claudeSettings;
+    return hookFileRead.claudeSettings;
   }
 
-  const snapshot = await readFileSnapshot(path.join(details.root, details.filePath));
+  const snapshot = await readFileSnapshot(path.join(hookFileRead.root, hookFileRead.filePath));
 
   return { snapshot, decoded: decodeSettings(snapshot) };
 };
 
 // Claude's settings are always planned, so deselecting Claude restores the hooks it received earlier.
-const planHookSettings = async (details: {
+const planHookSettings = async (hookSettingsRequest: {
   request: InstallRequest;
   featureIds: ReadonlyArray<FeatureId>;
   selectedAgents: ReadonlyArray<AgentDefinition>;
@@ -281,7 +288,7 @@ const planHookSettings = async (details: {
     throw createInstallError("Claude Code catalog entry is missing.");
   }
 
-  const agents = [claude, ...details.selectedAgents.filter((agent) => agent.id !== claude.id)];
+  const agents = [claude, ...hookSettingsRequest.selectedAgents.filter((agent) => agent.id !== claude.id)];
   const plans: FileChange[] = [];
   for (const agent of agents) {
     const nativeHooks = agent.nativeHooks;
@@ -293,19 +300,19 @@ const planHookSettings = async (details: {
 
     const filePath = nativeHooks.configPath;
     const settingsFile = await readHookSettingsFile({
-      root: details.request.destination.root,
+      root: hookSettingsRequest.request.destination.root,
       filePath,
-      claudeSettings: details.claudeSettings,
+      claudeSettings: hookSettingsRequest.claudeSettings,
     });
-    const previousFile = readPreviousReceiptFile(details.previousReceipt, filePath);
+    const previousFile = readPreviousReceiptFile(hookSettingsRequest.previousReceipt, filePath);
     const desiredGroups = readDesiredHookGroups({
-      root: details.request.destination.root,
-      featureIds: details.featureIds,
-      selectedAgents: details.selectedAgents,
+      root: hookSettingsRequest.request.destination.root,
+      featureIds: hookSettingsRequest.featureIds,
+      selectedAgents: hookSettingsRequest.selectedAgents,
       agent,
       path,
     });
-    const installedHooksFolder = path.join(details.request.destination.root, hooksPath);
+    const installedHooksFolder = path.join(hookSettingsRequest.request.destination.root, hooksPath);
     const settingsPlan = planSettings({
       filePath,
       snapshot: settingsFile.snapshot,
@@ -336,18 +343,18 @@ const pickReceiptExpectedCurrent = (receiptSnapshot: ReceiptSnapshot): ExpectedC
 
 // Plans the install from the bytes on disk right now, then applies it unless nothing would change.
 const planAndApplyInstall = async (
-  details: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
+  installWithReceipt: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
   signal: AbortSignal,
 ): Promise<InstallSummary> => {
-  const { request: requested, receiptSnapshot } = details;
+  const { request: requested, receiptSnapshot } = installWithReceipt;
   const destinationRoot = await realpath(requested.destination.root);
   const homeRoot = await realpath(requested.host.homeRoot);
-  const requestDetails = {
+  const realPathRequest = {
     ...requested,
     destination: { ...requested.destination, root: destinationRoot },
     host: { homeRoot },
   };
-  const request = installRequestSchema.parse(requestDetails);
+  const request = installRequestSchema.parse(realPathRequest);
 
   const settingsInspection = await inspectManagedSettings(request);
   const settingsSnapshot = await readFileSnapshot(path.join(request.destination.root, settingsPath));
@@ -425,19 +432,19 @@ const planAndApplyInstall = async (
 };
 
 export const syncInstall = async (
-  details: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
+  installWithReceipt: { request: InstallRequest; receiptSnapshot: ReceiptSnapshot },
   signal: AbortSignal,
 ): Promise<InstallSummary> => {
   try {
-    return await planAndApplyInstall(details, signal);
+    return await planAndApplyInstall(installWithReceipt, signal);
   } catch (error) {
     throw wrapAsInstallError(error);
   }
 };
 
-export const install = async (details: unknown, signal: AbortSignal): Promise<InstallSummary> => {
+export const install = async (uncheckedRequest: unknown, signal: AbortSignal): Promise<InstallSummary> => {
   try {
-    const request = installRequestSchema.parse(details);
+    const request = installRequestSchema.parse(uncheckedRequest);
     const receiptSnapshot = await readReceipt(path.join(request.destination.root, receiptPath));
     const isReceiptPresent = receiptSnapshot._tag === "present";
     const installedIds = isReceiptPresent ? receiptSnapshot.receipt.features : [];

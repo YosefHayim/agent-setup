@@ -4,7 +4,7 @@ import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { isNotFound } from "./file-bytes.js";
 import { isInsideFolder } from "./recovery.js";
 
-interface ExistingLine {
+interface ExistingPathCheck {
   readonly root: string;
   readonly targetPath: string;
   readonly existingPath: string;
@@ -44,16 +44,19 @@ export const validatePlanRoot = async (root: string): Promise<string> => {
   return realRoot;
 };
 
-const validateExistingLine = async (line: ExistingLine): Promise<void> => {
-  const expectedRealPath = resolve(line.root, relative(line.root, line.existingPath));
-  const existingStats = await stat(line.existingPath);
-  const isTargetItself = line.existingPath === line.targetPath;
+const validateExistingPath = async (existingPathCheck: ExistingPathCheck): Promise<void> => {
+  const expectedRealPath = resolve(
+    existingPathCheck.root,
+    relative(existingPathCheck.root, existingPathCheck.existingPath),
+  );
+  const existingStats = await stat(existingPathCheck.existingPath);
+  const isTargetItself = existingPathCheck.existingPath === existingPathCheck.targetPath;
   const isExpectedKind = isTargetItself ? existingStats.isFile() : existingStats.isDirectory();
 
-  const isPathRedirected = line.realPath !== expectedRealPath || !isExpectedKind;
+  const isPathRedirected = existingPathCheck.realPath !== expectedRealPath || !isExpectedKind;
   if (isPathRedirected) {
     throw createRealPathError(
-      `Transaction target ${line.targetPath} has a symlinked or non-file path component at ${line.existingPath}.`,
+      `Transaction target ${existingPathCheck.targetPath} has a symlinked or non-file path component at ${existingPathCheck.existingPath}.`,
     );
   }
 };
@@ -64,7 +67,7 @@ const validateNearestExistingPath = async (root: string, targetPath: string, exi
 
   const isExistingPathFound = realPath !== null;
   if (isExistingPathFound) {
-    return validateExistingLine({ root, targetPath, existingPath, realPath });
+    return validateExistingPath({ root, targetPath, existingPath, realPath });
   }
 
   const parentPath = dirname(existingPath);

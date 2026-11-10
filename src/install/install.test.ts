@@ -89,10 +89,10 @@ const readHookCommands = (settingsString: string): ReadonlyArray<string> =>
     return isCommandMissing ? [] : [String(JSON.parse(commandHit[1]))];
   });
 
-const installRequest = (details: { root: string; preparedRoot: string }) => ({
-  destination: { _tag: "project", root: details.root },
-  host: { homeRoot: details.root },
-  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
+const installRequest = (roots: { root: string; preparedRoot: string }) => ({
+  destination: { _tag: "project", root: roots.root },
+  host: { homeRoot: roots.root },
+  preparedPackage: { root: roots.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code"] },
   interaction: { _tag: "scripted" },

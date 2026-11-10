@@ -314,21 +314,24 @@ describe("checkPlan", () => {
   });
 
   it.each([
-    { name: "plan", input: { ...completePlan, unexpected: true } },
+    { name: "plan", rejectedPlan: { ...completePlan, unexpected: true } },
     {
       name: "write operation",
-      input: { ...completePlan, operations: [{ ...completePlan.operations[0], unexpected: true }] },
+      rejectedPlan: { ...completePlan, operations: [{ ...completePlan.operations[0], unexpected: true }] },
     },
-    { name: "receipt operation", input: { ...completePlan, receipt: { ...completePlan.receipt, unexpected: true } } },
+    {
+      name: "receipt operation",
+      rejectedPlan: { ...completePlan, receipt: { ...completePlan.receipt, unexpected: true } },
+    },
     {
       name: "file target",
-      input: {
+      rejectedPlan: {
         ...completePlan,
         operations: [{ ...completePlan.operations[0], file: { ...runtimeFile, unexpected: true } }],
       },
     },
-  ])("rejects unknown keys on the $name", ({ input: details }) => {
-    expect(readRejectionMessage(() => checkPlan(details))).toContain("Unrecognized key");
+  ])("rejects unknown keys on the $name", ({ rejectedPlan }) => {
+    expect(readRejectionMessage(() => checkPlan(rejectedPlan))).toContain("Unrecognized key");
   });
 
   it.each(["../outside", "/absolute/path", ".claude/../outside", "nested\\windows"])(

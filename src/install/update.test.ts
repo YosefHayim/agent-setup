@@ -81,11 +81,11 @@ const createWorkspace = async () => {
   };
 };
 
-const request = (details: { root: string; preparedRoot: string; features: ReadonlyArray<string> }) => ({
-  destination: { _tag: "project", root: details.root },
-  host: { homeRoot: details.root },
-  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
-  features: { _tag: "selected", ids: details.features },
+const request = (requestFields: { root: string; preparedRoot: string; features: ReadonlyArray<string> }) => ({
+  destination: { _tag: "project", root: requestFields.root },
+  host: { homeRoot: requestFields.root },
+  preparedPackage: { root: requestFields.preparedRoot, version: "0.12.0" },
+  features: { _tag: "selected", ids: requestFields.features },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "automatic" },

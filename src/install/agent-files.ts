@@ -112,9 +112,9 @@ const createSkillDirectoryWrites = async (formatRequest: FormatWritesRequest): P
   const plan = tryAsInstallError(() =>
     planSkillDirectory({
       agent: formatRequest.agent,
-      skills: formatRequest.preparedSkills.map(({ installedSkill, sourceFiles: originFiles }) => ({
+      skills: formatRequest.preparedSkills.map(({ installedSkill, sourceFiles: preparedFiles }) => ({
         installedSkill,
-        sourceFiles: originFiles,
+        sourceFiles: preparedFiles,
       })),
       previousFiles: inspectedFiles.map(({ path, previous }) => ({ path, previous })),
     }),

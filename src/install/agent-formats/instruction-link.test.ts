@@ -17,34 +17,34 @@ const decode = (bytes: Uint8Array): string => stringDecoder.decode(bytes);
 
 const hashDocument = (field: unknown): string => createHash("sha256").update(JSON.stringify(field)).digest("hex");
 
-type RequestDetails = {
+type RequestOverrides = {
   agent?: typeof aider | typeof continueAgent;
   current?: Uint8Array | string;
   desired?: "present" | "absent";
   previousFile?: FileChange["file"];
 };
 
-const request = (details: RequestDetails = {}) => {
-  const current = details.current;
+const request = (overrides: RequestOverrides = {}) => {
+  const current = overrides.current;
   const isCurrentUnset = current == null;
   const isCurrentGivenAsString = typeof current === "string";
-  const isPreviousFileUnset = details.previousFile == null;
+  const isPreviousFileUnset = overrides.previousFile == null;
   return {
-    agent: details.agent || aider,
-    desired: { _tag: details.desired || "present" },
+    agent: overrides.agent || aider,
+    desired: { _tag: overrides.desired || "present" },
     currentFile: isCurrentUnset
       ? { _tag: "missing" }
       : { _tag: "file", bytes: isCurrentGivenAsString ? encode(current) : current },
-    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: details.previousFile },
+    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: overrides.previousFile },
   };
 };
 
-const plan = (details?: RequestDetails): InstructionLinkPlan => planInstructionLink(request(details));
+const plan = (overrides?: RequestOverrides): InstructionLinkPlan => planInstructionLink(request(overrides));
 
 // True only when planning throws an Error, which is how a rejected request shows up.
-const findRejectionMessage = (details: unknown): boolean => {
+const findRejectionMessage = (uncheckedRequest: unknown): boolean => {
   try {
-    planInstructionLink(details);
+    planInstructionLink(uncheckedRequest);
 
     return false;
   } catch (error) {
@@ -52,8 +52,8 @@ const findRejectionMessage = (details: unknown): boolean => {
   }
 };
 
-const write = (details?: RequestDetails) => {
-  const operation = plan(details);
+const write = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
 
   const isNotWriteOperation = operation._tag !== "write";
   if (isNotWriteOperation) {
@@ -63,8 +63,8 @@ const write = (details?: RequestDetails) => {
   return operation;
 };
 
-const restore = (details?: RequestDetails) => {
-  const operation = plan(details);
+const restore = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
 
   const isNotRestoreOperation = operation._tag !== "restore";
   if (isNotRestoreOperation) {
@@ -75,11 +75,11 @@ const restore = (details?: RequestDetails) => {
 };
 
 // Installs the reference into `original`, then removes it again and returns the restoration.
-const readAfterWrite = (details: { agent?: typeof aider | typeof continueAgent; original: string }) => {
-  const installed = write({ agent: details.agent, current: details.original });
+const readAfterWrite = (readBack: { agent?: typeof aider | typeof continueAgent; original: string }) => {
+  const installed = write({ agent: readBack.agent, current: readBack.original });
 
   return restore({
-    agent: details.agent,
+    agent: readBack.agent,
     desired: "absent",
     current: installed.bytes,
     previousFile: installed.file,

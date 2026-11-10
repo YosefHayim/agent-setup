@@ -54,9 +54,9 @@ const writeAt = (plan: SkillDirectoryPlan, path: string) => {
   return write;
 };
 
-const findErrorMessage = (details: unknown): string => {
+const findErrorMessage = (uncheckedRequest: unknown): string => {
   try {
-    planSkillDirectory(details);
+    planSkillDirectory(uncheckedRequest);
   } catch (error) {
     return String(error);
   }

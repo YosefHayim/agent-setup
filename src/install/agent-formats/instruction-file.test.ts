@@ -42,7 +42,7 @@ const createDesiredSkill = (markdown = "Alpha body.") => ({
   markdown,
 });
 
-const request = (details?: {
+const request = (overrides?: {
   agentIds?: ReadonlyArray<string>;
   currentBytes?: Uint8Array;
   desired?: "present" | "absent";
@@ -50,38 +50,38 @@ const request = (details?: {
   previousFile?: OwnedFile;
   skills?: ReadonlyArray<{ installedSkill: typeof makeCodeReadableSkill; markdown: string }>;
 }) => {
-  const isDesiredAbsent = details?.desired === "absent";
-  const isCurrentBytesUnset = details?.currentBytes == null;
-  const isPreviousFileUnset = details?.previousFile == null;
+  const isDesiredAbsent = overrides?.desired === "absent";
+  const isCurrentBytesUnset = overrides?.currentBytes == null;
+  const isPreviousFileUnset = overrides?.previousFile == null;
   return {
-    path: details?.path || "AGENTS.md",
+    path: overrides?.path || "AGENTS.md",
     desired: isDesiredAbsent
       ? { _tag: "absent" }
       : {
           _tag: "present",
-          agentIds: details?.agentIds || ["aider"],
-          skills: details?.skills || [createDesiredSkill()],
+          agentIds: overrides?.agentIds || ["aider"],
+          skills: overrides?.skills || [createDesiredSkill()],
         },
-    currentFile: isCurrentBytesUnset ? { _tag: "missing" } : { _tag: "file", bytes: details.currentBytes },
-    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: details.previousFile },
+    currentFile: isCurrentBytesUnset ? { _tag: "missing" } : { _tag: "file", bytes: overrides.currentBytes },
+    previousFile: isPreviousFileUnset ? { _tag: "missing" } : { _tag: "owned", file: overrides.previousFile },
   };
 };
 
-type RequestDetails = Parameters<typeof request>[0];
+type RequestOverrides = Parameters<typeof request>[0];
 
-const plan = (details?: RequestDetails): InstructionFilePlan => planInstructionFile(request(details));
+const plan = (overrides?: RequestOverrides): InstructionFilePlan => planInstructionFile(request(overrides));
 
-const findRejectionMessage = (details: unknown): boolean => {
+const findRejectionMessage = (uncheckedRequest: unknown): boolean => {
   try {
-    planInstructionFile(details);
+    planInstructionFile(uncheckedRequest);
     return false;
   } catch {
     return true;
   }
 };
 
-const write = (details?: RequestDetails) => {
-  const operation = plan(details);
+const write = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
 
   const isNotWriteOperation = operation._tag !== "write";
   if (isNotWriteOperation) {
@@ -91,8 +91,8 @@ const write = (details?: RequestDetails) => {
   return operation;
 };
 
-const restore = (details?: RequestDetails) => {
-  const operation = plan(details);
+const restore = (overrides?: RequestOverrides) => {
+  const operation = plan(overrides);
 
   const isNotRestoreOperation = operation._tag !== "restore";
   if (isNotRestoreOperation) {
@@ -251,8 +251,8 @@ describe("planInstructionFile", () => {
 
   it.each([["unknown request property", { ...request(), unexpected: true }]])(
     "rejects %s at the strict request boundary",
-    (_case, details) => {
-      expect(findRejectionMessage(details)).toBe(true);
+    (_case, uncheckedRequest) => {
+      expect(findRejectionMessage(uncheckedRequest)).toBe(true);
     },
   );
 

@@ -14,24 +14,25 @@ interface YamlReadLink {
 
 interface YamlReadBlock {
   readonly _tag: "block";
-  readonly source: string;
+  readonly documentString: string;
   readonly pairStart: number;
   readonly pairEnd: number;
   readonly insertionIndex: number;
   readonly itemPrefix: string;
-  readonly items: ReadonlyArray<{ readonly value: string; readonly start: number; readonly end: number }>;
+  readonly references: ReadonlyArray<{ readonly reference: string; readonly start: number; readonly end: number }>;
 }
 
-type YamlReadDocument = { readonly _tag: "missing"; readonly source: string } | YamlReadBlock;
+type YamlReadDocument = { readonly _tag: "missing"; readonly documentString: string } | YamlReadBlock;
 type YamlInsertedPrefix = YamlSequenceFieldOwnership["insertedPrefix"];
 
-const readLineStartAt = (code: string, index: number): number => code.lastIndexOf("\n", index - 1) + 1;
+const readLineStartAt = (documentString: string, index: number): number =>
+  documentString.lastIndexOf("\n", index - 1) + 1;
 
-const readLineEndAfter = (code: string, index: number): number => {
-  const lineFeed = code.indexOf("\n", index);
+const readLineEndAfter = (documentString: string, index: number): number => {
+  const lineFeed = documentString.indexOf("\n", index);
 
   const isLineFeedMissing = lineFeed < 0;
-  return isLineFeedMissing ? code.length : lineFeed + 1;
+  return isLineFeedMissing ? documentString.length : lineFeed + 1;
 };
 
 const readSettingsString = (bytes: Uint8Array, settingsPath: string): string => {
@@ -45,38 +46,38 @@ const readSettingsString = (bytes: Uint8Array, settingsPath: string): string => 
   return stringReply.fileContents;
 };
 
-const inspectYamlReadDocument = (code: string): YamlReadDocument => {
-  const hasTabOrLoneReturn = code.includes("\t") || /\r(?!\n)/.test(code);
+const inspectYamlReadDocument = (documentString: string): YamlReadDocument => {
+  const hasTabOrLoneReturn = documentString.includes("\t") || /\r(?!\n)/.test(documentString);
   if (hasTabOrLoneReturn) {
     throw new Error("Aider configuration is invalid: use spaces with LF or CRLF line endings.");
   }
 
-  const document = parseDocument(code, { keepSourceTokens: true, uniqueKeys: true });
+  const document = parseDocument(documentString, { keepSourceTokens: true, uniqueKeys: true });
 
   const hasParseErrors = document.errors.length > 0;
   if (hasParseErrors) {
     throw new Error(`Aider configuration is invalid: ${document.errors.map((error) => error.message).join("; ")}`);
   }
 
-  const messages = document.contents;
+  const rootNode = document.contents;
 
-  const isDocumentEmpty = messages == null;
+  const isDocumentEmpty = rootNode == null;
   if (isDocumentEmpty) {
-    return { _tag: "missing", source: code };
+    return { _tag: "missing", documentString };
   }
 
-  const isBlockMapping = isMap(messages) && messages.flow !== true;
+  const isBlockMapping = isMap(rootNode) && rootNode.flow !== true;
 
   const isNotBlockMapping = !isBlockMapping;
   if (isNotBlockMapping) {
     throw new Error("Aider configuration must be one block mapping.");
   }
 
-  const pair = messages.items.find((candidate) => isScalar(candidate.key) && candidate.key.value === "read");
+  const pair = rootNode.items.find((candidate) => isScalar(candidate.key) && candidate.key.value === "read");
 
   const isReadKeyMissing = pair == null;
   if (isReadKeyMissing) {
-    return { _tag: "missing", source: code };
+    return { _tag: "missing", documentString };
   }
 
   const keyScalar = isScalar(pair.key) ? pair.key : null;
@@ -89,16 +90,16 @@ const inspectYamlReadDocument = (code: string): YamlReadDocument => {
 
   const isReadFieldEmpty = pair.value === null;
   if (isReadFieldEmpty) {
-    const pairEnd = readLineEndAfter(code, keyRange[2]);
+    const pairEnd = readLineEndAfter(documentString, keyRange[2]);
 
     return {
       _tag: "block",
-      source: code,
+      documentString,
       pairStart: keyRange[0],
       pairEnd,
       insertionIndex: pairEnd,
       itemPrefix: "  - ",
-      items: [],
+      references: [],
     };
   }
 
@@ -112,54 +113,54 @@ const inspectYamlReadDocument = (code: string): YamlReadDocument => {
     throw new Error("Aider read must be one block sequence of strings.");
   }
 
-  const elements = [];
-  let elementPrefix: string | null = null;
-  for (const sequenceElement of readSequence.items) {
-    const elementScalar = isScalar(sequenceElement) ? sequenceElement : null;
-    const elementField = elementScalar?.value;
-    const elementRange = elementScalar?.range;
+  const references = [];
+  let referencePrefix: string | null = null;
+  for (const referenceNode of readSequence.items) {
+    const referenceScalar = isScalar(referenceNode) ? referenceNode : null;
+    const referenceValue = referenceScalar?.value;
+    const referenceRange = referenceScalar?.range;
     const isDirectString =
-      typeof elementField === "string" &&
-      elementRange != null &&
-      elementScalar?.anchor == null &&
-      elementScalar?.tag == null;
+      typeof referenceValue === "string" &&
+      referenceRange != null &&
+      referenceScalar?.anchor == null &&
+      referenceScalar?.tag == null;
 
     const isNotDirectString = !isDirectString;
     if (isNotDirectString) {
       throw new Error("Aider read must contain only direct string values.");
     }
 
-    const start = readLineStartAt(code, elementRange[0]);
-    const prefix = code.slice(start, elementRange[0]);
-    const isPrefixConsistent = /^ +-\s+$/.test(prefix) && (elementPrefix == null || elementPrefix === prefix);
+    const start = readLineStartAt(documentString, referenceRange[0]);
+    const prefix = documentString.slice(start, referenceRange[0]);
+    const isPrefixConsistent = /^ +-\s+$/.test(prefix) && (referencePrefix == null || referencePrefix === prefix);
 
     const isNotPrefixConsistent = !isPrefixConsistent;
     if (isNotPrefixConsistent) {
       throw new Error("Aider read must use one consistent space-indented block sequence.");
     }
 
-    elementPrefix = prefix;
-    elements.push({ value: elementField, start, end: elementRange[2] });
+    referencePrefix = prefix;
+    references.push({ reference: referenceValue, start, end: referenceRange[2] });
   }
 
-  const lastElement = elements.at(-1);
-  const isInsertingAtSequenceEnd = code.endsWith("\n") || lastElement == null;
-  const insertionIndex = isInsertingAtSequenceEnd ? sequenceRange[2] : lastElement.start;
+  const lastReference = references.at(-1);
+  const isInsertingAtSequenceEnd = documentString.endsWith("\n") || lastReference == null;
+  const insertionIndex = isInsertingAtSequenceEnd ? sequenceRange[2] : lastReference.start;
 
   return {
     _tag: "block",
-    source: code,
+    documentString,
     pairStart: keyRange[0],
     pairEnd: sequenceRange[2],
     insertionIndex,
-    itemPrefix: elementPrefix ?? "  - ",
-    items: elements,
+    itemPrefix: referencePrefix ?? "  - ",
+    references: references,
   };
 };
 
-const listYamlReferenceElements = (document: YamlReadDocument, reference: string) => {
+const listYamlReferences = (document: YamlReadDocument, reference: string) => {
   const isDocumentMissing = document._tag === "missing";
-  return isDocumentMissing ? [] : document.items.filter((element) => element.value === reference);
+  return isDocumentMissing ? [] : document.references.filter((readReference) => readReference.reference === reference);
 };
 
 const appendYamlReference = ({
@@ -169,33 +170,33 @@ const appendYamlReference = ({
   document: YamlReadDocument;
   reference: string;
 }): {
-  source: string;
+  documentString: string;
   insertedPrefix: YamlInsertedPrefix;
   keyPreviouslyPresent: boolean;
 } => {
-  const ending = readLineEnding(document.source);
+  const ending = readLineEnding(document.documentString);
 
   const isDocumentMissing = document._tag === "missing";
   if (isDocumentMissing) {
-    const isDocumentEmpty = document.source.length === 0;
+    const isDocumentEmpty = document.documentString.length === 0;
     const insertedPrefix = isDocumentEmpty ? "" : ending;
 
     return {
-      source: `${document.source}${insertedPrefix}read:${ending}  - ${reference}${ending}`,
+      documentString: `${document.documentString}${insertedPrefix}read:${ending}  - ${reference}${ending}`,
       insertedPrefix,
       keyPreviouslyPresent: false,
     };
   }
 
-  const isReferenceInstalled = listYamlReferenceElements(document, reference).length > 0;
+  const isReferenceInstalled = listYamlReferences(document, reference).length > 0;
   if (isReferenceInstalled) {
-    return { source: document.source, insertedPrefix: "", keyPreviouslyPresent: true };
+    return { documentString: document.documentString, insertedPrefix: "", keyPreviouslyPresent: true };
   }
 
   const referenceLine = `${document.itemPrefix}${reference}${ending}`;
 
   return {
-    source: `${document.source.slice(0, document.insertionIndex)}${referenceLine}${document.source.slice(document.insertionIndex)}`,
+    documentString: `${document.documentString.slice(0, document.insertionIndex)}${referenceLine}${document.documentString.slice(document.insertionIndex)}`,
     insertedPrefix: "",
     keyPreviouslyPresent: true,
   };
@@ -239,14 +240,14 @@ export const addYamlRead = (link: YamlReadLink): { bytes: Uint8Array; ownership:
 
   const isLineUnterminated =
     document._tag === "block" &&
-    document.items.length === 0 &&
-    document.source.length > 0 &&
-    !document.source.endsWith("\n");
+    document.references.length === 0 &&
+    document.documentString.length > 0 &&
+    !document.documentString.endsWith("\n");
   if (isLineUnterminated) {
     throw new Error("Aider read key must end its line before a reference can be added.");
   }
 
-  const referenceElements = listYamlReferenceElements(document, link.instructionPath);
+  const referenceElements = listYamlReferences(document, link.instructionPath);
 
   const isReceiptedReferenceChanged = link.previousOwnership != null && referenceElements.length !== 1;
   if (isReceiptedReferenceChanged) {
@@ -261,7 +262,7 @@ export const addYamlRead = (link: YamlReadLink): { bytes: Uint8Array; ownership:
   const desiredYaml = appendYamlReference({ document, reference: link.instructionPath });
 
   return {
-    bytes: stringEncoder.encode(desiredYaml.source),
+    bytes: stringEncoder.encode(desiredYaml.documentString),
     ownership: createYamlOwnership({
       link,
       keyPreviouslyPresent: desiredYaml.keyPreviouslyPresent,
@@ -272,18 +273,18 @@ export const addYamlRead = (link: YamlReadLink): { bytes: Uint8Array; ownership:
 };
 
 const removeInsertedYamlKey = ({
-  source: code,
+  documentString,
   document,
   ownership,
 }: {
-  source: string;
+  documentString: string;
   document: YamlReadBlock;
   ownership: YamlSequenceFieldOwnership;
 }): Uint8Array => {
-  const ending = readLineEnding(code);
+  const ending = readLineEnding(documentString);
   const expectedPair = `read:${ending}${document.itemPrefix}${ownership.reference}${ending}`;
 
-  const installedPair = code.slice(document.pairStart, document.pairEnd);
+  const installedPair = documentString.slice(document.pairStart, document.pairEnd);
 
   const isPairChanged = installedPair !== expectedPair;
   if (isPairChanged) {
@@ -293,13 +294,13 @@ const removeInsertedYamlKey = ({
   const prefixStart = document.pairStart - ownership.insertedPrefix.length;
 
   const isPrefixFramingChanged =
-    prefixStart < 0 || code.slice(prefixStart, document.pairStart) !== ownership.insertedPrefix;
+    prefixStart < 0 || documentString.slice(prefixStart, document.pairStart) !== ownership.insertedPrefix;
   if (isPrefixFramingChanged) {
     throw new Error("Receipted Aider key framing changed after installation.");
   }
 
-  const prefix = code.slice(0, prefixStart);
-  const suffix = code.slice(document.pairEnd);
+  const prefix = documentString.slice(0, prefixStart);
+  const suffix = documentString.slice(document.pairEnd);
   const suffixStartsLineEnding = suffix.startsWith("\n") || suffix.startsWith("\r\n");
   const isSeparatorNeeded = prefix.length > 0 && suffix.length > 0 && !prefix.endsWith("\n") && !suffixStartsLineEnding;
   const separator = isSeparatorNeeded ? ending : "";
@@ -325,7 +326,7 @@ export const removeYamlRead = ({
     throw new Error("Receipted Aider read reference changed after installation.");
   }
 
-  const referenceElements = listYamlReferenceElements(document, ownership.reference);
+  const referenceElements = listYamlReferences(document, ownership.reference);
   const referenceElement = referenceElements[0];
   const isReferenceUnique = referenceElements.length === 1 && referenceElement != null;
 
@@ -348,9 +349,9 @@ export const removeYamlRead = ({
     throw new Error("Receipted Aider reference line changed after installation.");
   }
 
-  const isInsertedKeyOnly = !ownership.keyPreviouslyPresent && document.items.length === 1;
+  const isInsertedKeyOnly = !ownership.keyPreviouslyPresent && document.references.length === 1;
   if (isInsertedKeyOnly) {
-    return removeInsertedYamlKey({ source: settingsYaml, document, ownership });
+    return removeInsertedYamlKey({ documentString: settingsYaml, document, ownership });
   }
 
   return stringEncoder.encode(

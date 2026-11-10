@@ -23,8 +23,8 @@ interface DocumentRulesLink {
 }
 
 interface DocumentConfiguration {
-  readonly source: string;
-  readonly rules: ReadonlyArray<string> | undefined;
+  readonly documentString: string;
+  readonly rules: ReadonlyArray<string> | null;
 }
 
 const isInstructionReferences = (field: unknown): field is ReadonlyArray<string> =>
@@ -48,8 +48,8 @@ export const isDocumentRulesOwnershipIsValid = (ownership: DocumentFieldsOwnersh
   );
 };
 
-const parseDocumentObjectNode = (code: string): JsonNode => {
-  const root = parseTree(code, [], { allowTrailingComma: false, disallowComments: true });
+const parseDocumentObjectNode = (documentString: string): JsonNode => {
+  const root = parseTree(documentString, [], { allowTrailingComma: false, disallowComments: true });
 
   const isNotRootObject = root == null || root.type !== "object";
   if (isNotRootObject) {
@@ -59,8 +59,8 @@ const parseDocumentObjectNode = (code: string): JsonNode => {
   return root;
 };
 
-const insertMissingDocumentRules = (code: string, rules: ReadonlyArray<string>): string => {
-  const root = parseDocumentObjectNode(code);
+const insertMissingDocumentRules = (documentString: string, rules: ReadonlyArray<string>): string => {
+  const root = parseDocumentObjectNode(documentString);
   const lastProperty = root.children?.at(-1);
   const isRootEmpty = lastProperty == null;
   const insertionIndex = isRootEmpty ? root.offset + 1 : lastProperty.offset + lastProperty.length;
@@ -68,45 +68,45 @@ const insertMissingDocumentRules = (code: string, rules: ReadonlyArray<string>):
 
   const encodedRules = encodeDocument(rules);
 
-  return `${code.slice(0, insertionIndex)}${separator}"${RULES_KEY}":${encodedRules}${code.slice(insertionIndex)}`;
+  return `${documentString.slice(0, insertionIndex)}${separator}"${RULES_KEY}":${encodedRules}${documentString.slice(insertionIndex)}`;
 };
 
-const removeRulesAfterPrecedingProperty = (details: {
-  source: string;
+const removeRulesAfterPrecedingProperty = (removal: {
+  documentString: string;
   rulesProperty: JsonNode;
   previousProperty: JsonNode;
 }): string => {
-  const previousEnd = details.previousProperty.offset + details.previousProperty.length;
-  const rulesEnd = details.rulesProperty.offset + details.rulesProperty.length;
-  const commaOffset = details.source.slice(previousEnd, details.rulesProperty.offset).lastIndexOf(",");
+  const previousEnd = removal.previousProperty.offset + removal.previousProperty.length;
+  const rulesEnd = removal.rulesProperty.offset + removal.rulesProperty.length;
+  const commaOffset = removal.documentString.slice(previousEnd, removal.rulesProperty.offset).lastIndexOf(",");
 
   const isCommaMissing = commaOffset < 0;
   if (isCommaMissing) {
     throw new Error("Continue rules member has no stable preceding comma.");
   }
 
-  return `${details.source.slice(0, previousEnd + commaOffset)}${details.source.slice(rulesEnd)}`;
+  return `${removal.documentString.slice(0, previousEnd + commaOffset)}${removal.documentString.slice(rulesEnd)}`;
 };
 
-const removeRulesBeforeFollowingProperty = (details: {
-  source: string;
+const removeRulesBeforeFollowingProperty = (removal: {
+  documentString: string;
   rulesProperty: JsonNode;
   nextProperty: JsonNode;
 }): string => {
-  const rulesEnd = details.rulesProperty.offset + details.rulesProperty.length;
-  const commaOffset = details.source.slice(rulesEnd, details.nextProperty.offset).indexOf(",");
+  const rulesEnd = removal.rulesProperty.offset + removal.rulesProperty.length;
+  const commaOffset = removal.documentString.slice(rulesEnd, removal.nextProperty.offset).indexOf(",");
 
   const isCommaMissing = commaOffset < 0;
   if (isCommaMissing) {
     throw new Error("Continue rules member has no stable following comma.");
   }
 
-  return `${details.source.slice(0, details.rulesProperty.offset)}${details.source.slice(rulesEnd + commaOffset + 1)}`;
+  return `${removal.documentString.slice(0, removal.rulesProperty.offset)}${removal.documentString.slice(rulesEnd + commaOffset + 1)}`;
 };
 
 // Removes the member together with the comma that joined it to a neighbour, so the rest stays byte-identical.
-const removeInsertedDocumentRules = (code: string): string => {
-  const root = parseDocumentObjectNode(code);
+const removeInsertedDocumentRules = (documentString: string): string => {
+  const root = parseDocumentObjectNode(documentString);
   const properties = root.children || [];
   const rulesIndex = properties.findIndex((property) => readDocumentPropertyName(property) === RULES_KEY);
   const rulesProperty = properties[rulesIndex];
@@ -120,7 +120,7 @@ const removeInsertedDocumentRules = (code: string): string => {
 
   const isRulesOnly = properties.length === 1;
   if (isRulesOnly) {
-    return `${code.slice(0, rulesProperty.offset)}${code.slice(rulesEnd)}`;
+    return `${documentString.slice(0, rulesProperty.offset)}${documentString.slice(rulesEnd)}`;
   }
 
   const isNotRulesFirst = rulesIndex !== 0;
@@ -132,7 +132,7 @@ const removeInsertedDocumentRules = (code: string): string => {
       throw new Error("Continue rules member has no stable preceding property.");
     }
 
-    return removeRulesAfterPrecedingProperty({ source: code, rulesProperty, previousProperty });
+    return removeRulesAfterPrecedingProperty({ documentString: documentString, rulesProperty, previousProperty });
   }
 
   const nextProperty = properties[1];
@@ -142,14 +142,14 @@ const removeInsertedDocumentRules = (code: string): string => {
     throw new Error("Continue rules member has no stable following property.");
   }
 
-  return removeRulesBeforeFollowingProperty({ source: code, rulesProperty, nextProperty });
+  return removeRulesBeforeFollowingProperty({ documentString: documentString, rulesProperty, nextProperty });
 };
 
-const replaceRules = (code: string, rules: ReadonlyArray<string>): string =>
+const replaceRules = (documentString: string, rules: ReadonlyArray<string>): string =>
   applyEdits(
-    code,
-    modify(code, [RULES_KEY], rules, {
-      formattingOptions: { insertSpaces: true, tabSize: 2, eol: readLineEnding(code) },
+    documentString,
+    modify(documentString, [RULES_KEY], rules, {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: readLineEnding(documentString) },
     }),
   );
 
@@ -186,36 +186,36 @@ const decodeDocumentConfiguration = (bytes: Uint8Array, filename: string): Docum
     throw new Error(`${filename} is invalid: ${joinZodIssueMessages(configurationCheck.error)}`);
   }
 
-  return { source: documentString, rules: configurationCheck.data.rules };
+  return { documentString: documentString, rules: configurationCheck.data.rules ?? null };
 };
 
-const createDocumentOwnership = (details: {
+const createDocumentOwnership = (creation: {
   link: DocumentRulesLink;
-  previousRules: ReadonlyArray<string> | undefined;
+  previousRules: ReadonlyArray<string> | null;
   desiredRules: ReadonlyArray<string>;
 }): DocumentFieldsOwnership => {
-  const previousOwnership = details.link.previousOwnership;
+  const previousOwnership = creation.link.previousOwnership;
 
   const isPreviousOwnershipMissing = previousOwnership == null;
   const history = isPreviousOwnershipMissing ? null : readOwnedRules(previousOwnership);
 
-  const isPreviousRulesUnset = details.previousRules == null;
+  const isPreviousRulesUnset = creation.previousRules == null;
   const previous: PreviousDocumentField = isPreviousRulesUnset
     ? { _tag: "missing" }
-    : { _tag: "value", value: details.previousRules };
+    : { _tag: "value", value: creation.previousRules };
   const hasNoPreviousOwnership = previousOwnership == null;
 
   const isHistoryMissing = history == null;
   return {
     _tag: "jsonValues",
     filePreviouslyPresent: hasNoPreviousOwnership
-      ? details.link.currentBytes != null
+      ? creation.link.currentBytes != null
       : previousOwnership.filePreviouslyPresent,
     createdContainers: [],
     values: [
       {
         pointer: RULES_POINTER,
-        installed: { _tag: "value", hash: hashDocumentField(details.desiredRules) },
+        installed: { _tag: "value", hash: hashDocumentField(creation.desiredRules) },
         previous: isHistoryMissing ? previous : history.previous,
       },
     ],
@@ -225,9 +225,9 @@ const createDocumentOwnership = (details: {
 export const addDocumentRule = (link: DocumentRulesLink): { bytes: Uint8Array; ownership: DocumentFieldsOwnership } => {
   const isFileMissing = link.currentBytes == null;
   const current: DocumentConfiguration = isFileMissing
-    ? { source: "{}\n", rules: undefined }
+    ? { documentString: "{}\n", rules: null }
     : decodeDocumentConfiguration(link.currentBytes, link.configPath);
-  const { source: code, rules: previousRules } = current;
+  const { documentString, rules: previousRules } = current;
 
   const isLinkPreviousOwnershipMissing = link.previousOwnership == null;
   const owned = isLinkPreviousOwnershipMissing ? null : readOwnedRules(link.previousOwnership);
@@ -243,15 +243,15 @@ export const addDocumentRule = (link: DocumentRulesLink): { bytes: Uint8Array; o
   const isInstructionListed = !isRulesMissing && previousRules.includes(link.instructionPath);
   if (isInstructionListed) {
     return {
-      bytes: stringEncoder.encode(code),
+      bytes: stringEncoder.encode(documentString),
       ownership: createDocumentOwnership({ link, previousRules, desiredRules: previousRules }),
     };
   }
 
   const desiredRules = [...(previousRules ?? []), link.instructionPath];
   const editedOrigin = isRulesMissing
-    ? insertMissingDocumentRules(code, desiredRules)
-    : replaceRules(code, desiredRules);
+    ? insertMissingDocumentRules(documentString, desiredRules)
+    : replaceRules(documentString, desiredRules);
 
   return {
     bytes: stringEncoder.encode(editedOrigin),
@@ -259,21 +259,21 @@ export const addDocumentRule = (link: DocumentRulesLink): { bytes: Uint8Array; o
   };
 };
 
-const isDocumentObjectIsEmpty = (code: string): boolean => {
-  const parsedOrigin: unknown = JSON.parse(code);
-  const objectCheck = documentObjectSchema.safeParse(parsedOrigin);
+const isDocumentObjectEmpty = (documentString: string): boolean => {
+  const parsedDocument: unknown = JSON.parse(documentString);
+  const objectCheck = documentObjectSchema.safeParse(parsedDocument);
 
   return objectCheck.success && Object.keys(objectCheck.data).length === 0;
 };
 
 // Empty bytes mean the file held nothing but what the installation added, so the caller may delete it.
-export const removeDocumentRule = (details: {
+export const removeDocumentRule = (removal: {
   currentBytes: Uint8Array;
   configPath: string;
   ownership: DocumentFieldsOwnership;
 }): Uint8Array => {
-  const document = decodeDocumentConfiguration(details.currentBytes, details.configPath);
-  const owned = readOwnedRules(details.ownership);
+  const document = decodeDocumentConfiguration(removal.currentBytes, removal.configPath);
+  const owned = readOwnedRules(removal.ownership);
 
   const isReceiptedRulesChanged = owned == null || !isInstalledDocumentFieldEqual(owned.installed, document.rules);
   if (isReceiptedRulesChanged) {
@@ -291,15 +291,16 @@ export const removeDocumentRule = (details: {
       throw new Error("Prior Continue rules must be a string array.");
     }
 
-    return stringEncoder.encode(replaceRules(document.source, previousRules));
+    return stringEncoder.encode(replaceRules(document.documentString, previousRules));
   }
 
-  const removedOrigin = removeInsertedDocumentRules(document.source);
+  const documentStringWithoutRules = removeInsertedDocumentRules(document.documentString);
 
-  const isFileEmptyAfterRemoval = !details.ownership.filePreviouslyPresent && isDocumentObjectIsEmpty(removedOrigin);
+  const isFileEmptyAfterRemoval =
+    !removal.ownership.filePreviouslyPresent && isDocumentObjectEmpty(documentStringWithoutRules);
   if (isFileEmptyAfterRemoval) {
     return new Uint8Array();
   }
 
-  return stringEncoder.encode(removedOrigin);
+  return stringEncoder.encode(documentStringWithoutRules);
 };

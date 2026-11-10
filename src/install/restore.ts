@@ -132,9 +132,9 @@ const planFileRestoration = async ({ root, file }: { root: string; file: OwnedFi
 };
 
 // Computes each receipted file's final unowned bytes without touching the filesystem.
-export const planRestorations = async (details: unknown): Promise<FileChange[]> => {
+export const planRestorations = async (uncheckedRequest: unknown): Promise<FileChange[]> => {
   try {
-    const request = restoreRequestSchema.parse(details);
+    const request = restoreRequestSchema.parse(uncheckedRequest);
     const restorations: FileChange[] = [];
     for (const file of request.files) {
       restorations.push(await planFileRestoration({ root: request.root, file }));
@@ -146,26 +146,26 @@ export const planRestorations = async (details: unknown): Promise<FileChange[]> 
   }
 };
 
-export const planStaleRestorations = async (details: {
+export const planStaleRestorations = async (staleRestoration: {
   root: string;
   previousReceipt: Receipt | null;
   desiredWrites: ReadonlyArray<FileChange>;
   settingsPlans: ReadonlyArray<FileChange>;
 }): Promise<FileChange[]> => {
-  const previousReceipt = details.previousReceipt;
+  const previousReceipt = staleRestoration.previousReceipt;
 
   const isThereNoPreviousReceipt = previousReceipt == null;
   if (isThereNoPreviousReceipt) {
     return [];
   }
 
-  const desiredPaths = new Set(details.desiredWrites.map((write) => write.file.path));
-  const settingsRestorations = details.settingsPlans.filter((operation) => operation._tag !== "write");
+  const desiredPaths = new Set(staleRestoration.desiredWrites.map((write) => write.file.path));
+  const settingsRestorations = staleRestoration.settingsPlans.filter((operation) => operation._tag !== "write");
   const settingsPaths = new Set(settingsRestorations.map((operation) => operation.file.path));
   const staleFiles = previousReceipt.ownedFiles.filter(
     (file) => !desiredPaths.has(file.path) && !settingsPaths.has(file.path),
   );
-  const staleFileRestorations = await planRestorations({ root: details.root, files: staleFiles });
+  const staleFileRestorations = await planRestorations({ root: staleRestoration.root, files: staleFiles });
 
   return [...settingsRestorations, ...staleFileRestorations];
 };

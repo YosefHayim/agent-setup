@@ -115,7 +115,7 @@ const createOwnedFile = (kind: string, file: { owner: object; path: string; owne
   kind: { _tag: kind },
 });
 
-const completeReceiptDetails = {
+const completeReceiptFields = {
   version: "1.0.0",
   scope: "project",
   features: ["scratch-folder-guard", "make-code-readable"],
@@ -161,8 +161,8 @@ const completeReceiptDetails = {
 
 const createStrictDecoder =
   <Printout>(zodSchema: z.ZodType<Printout>) =>
-  (details: unknown): Printout =>
-    zodSchema.parse(details);
+  (uncheckedReceipt: unknown): Printout =>
+    zodSchema.parse(uncheckedReceipt);
 
 const decodeReceipt = createStrictDecoder(receiptSchema);
 const decodeLine = createStrictDecoder(ownedFileSchema);
@@ -174,7 +174,7 @@ const decodeDocumentFields = createStrictDecoder(documentFieldsOwnershipSchema);
 const decodeYamlSequenceField = createStrictDecoder(yamlSequenceFieldOwnershipSchema);
 const decodeHookLines = createStrictDecoder(hookLinesOwnershipSchema);
 
-const completeReceipt = decodeReceipt(completeReceiptDetails);
+const completeReceipt = decodeReceipt(completeReceiptFields);
 const completeReceiptDocument = encodeReceiptDocument(completeReceipt);
 
 const createReceiptWithFiles = (files: ReadonlyArray<unknown>) => ({
@@ -298,11 +298,11 @@ describe("receiptSchema", () => {
   });
 
   it.each([
-    { ...completeReceiptDetails, unexpected: true },
-    { ...completeReceiptDetails, detectedAgents: ["codex"] },
-  ])("rejects receipt-level excess or detection evidence", (details) => {
-    expect(() => decodeReceipt(details)).toThrow();
-    expect(() => decodeReceiptDocument(JSON.stringify(details))).toThrow();
+    { ...completeReceiptFields, unexpected: true },
+    { ...completeReceiptFields, detectedAgents: ["codex"] },
+  ])("rejects receipt-level excess or detection evidence", (invalidReceipt) => {
+    expect(() => decodeReceipt(invalidReceipt)).toThrow();
+    expect(() => decodeReceiptDocument(JSON.stringify(invalidReceipt))).toThrow();
   });
 
   it.each([
@@ -310,7 +310,7 @@ describe("receiptSchema", () => {
     { name: "kind", decode: () => decodeKind({ _tag: "runtime", extra: true }) },
     { name: "previous file", decode: () => decodePreviousFile({ _tag: "missing", extra: true }) },
     { name: "previous JSON field", decode: () => decodePreviousDocument({ _tag: "field", field: null, extra: true }) },
-    { name: "owned file", decode: () => decodeLine({ ...completeReceiptDetails.ownedFiles[0], extra: true }) },
+    { name: "owned file", decode: () => decodeLine({ ...completeReceiptFields.ownedFiles[0], extra: true }) },
     {
       name: "owned JSON field",
       decode: () => decodeDocumentFields(createDocumentFields([{ ...createOwnedField("/field"), extra: true }])),

@@ -5,7 +5,7 @@ import { addZodIssueDetails, type ZodIssueDetail } from "#src/zod-issue-messages
 import { replaceBytesWithBase64 } from "./file-bytes.js";
 import { nonEmptyTrimmedTextSchema } from "./text-rules.js";
 
-// e.g. "skills/make-code-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
+// e.g. "skills/make-documentString-readable/SKILL.md" — not "/abs", "C:\x", "a/../b", or "a//b"
 export const relativePathSchema = nonEmptyTrimmedTextSchema
   .regex(
     /^(?!\/)(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\/\0]+(?:\/[^\\/\0]+)*$/,
@@ -72,7 +72,7 @@ const documentFieldSchema = z
   .unknown()
   .refine(isDocumentField, "Previous JSON values must contain only JSON-compatible data.");
 
-const hasUniqueLines = <Line>(lines: ReadonlyArray<Line>): boolean => lines.length === new Set(lines).size;
+const hasUniqueEntries = <Entry>(entries: ReadonlyArray<Entry>): boolean => entries.length === new Set(entries).size;
 
 const knownAgentIds = new Set<string>(agentCatalog.map((agent) => agent.id));
 
@@ -107,7 +107,7 @@ const listAgentCatalogOrderIssues = (agentIds: ReadonlyArray<string>): Array<Zod
 };
 
 const listAgentIdsIssues = (agentIds: ReadonlyArray<string>): Array<ZodIssueDetail> => {
-  const isAgentIdsUnique = hasUniqueLines(agentIds);
+  const isAgentIdsUnique = hasUniqueEntries(agentIds);
 
   const hasDuplicateAgentIds = !isAgentIdsUnique;
   if (hasDuplicateAgentIds) {
@@ -428,9 +428,9 @@ const isOwnershipHitsKind = (kind: FileKind, ownership: Ownership): boolean => {
   }
 };
 
-const parseDocumentOriginOrNull = (code: string): { readonly parsedValue: unknown } | null => {
+const parseDocumentStringOrNull = (documentString: string): { readonly parsedField: unknown } | null => {
   try {
-    return { parsedValue: JSON.parse(code) };
+    return { parsedField: JSON.parse(documentString) };
   } catch {
     // Source that is not JSON simply cannot match the value, so the caller reports it as not restorable.
     return null;
@@ -455,20 +455,20 @@ const isLexicalHitsPrevious = (ownedField: OwnedDocumentField): boolean => {
     return false;
   }
 
-  const lexicalOrigin = parseDocumentOriginOrNull(lexical.source);
+  const lexicalParsed = parseDocumentStringOrNull(lexical.source);
 
-  const isLexicalOriginUnparsed = lexicalOrigin === null;
-  if (isLexicalOriginUnparsed) {
+  const isLexicalUnparsed = lexicalParsed === null;
+  if (isLexicalUnparsed) {
     return false;
   }
 
-  const isLexicalDocumentValid = documentFieldSchema.safeParse(lexicalOrigin.parsedValue).success;
+  const isLexicalDocumentValid = documentFieldSchema.safeParse(lexicalParsed.parsedField).success;
 
-  return isLexicalDocumentValid && isDocumentFieldsEqual(lexicalOrigin.parsedValue, previous.value);
+  return isLexicalDocumentValid && isDocumentFieldsEqual(lexicalParsed.parsedField, previous.value);
 };
 
-const listSettingsLexicalIssues = (line: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {
-  const ownership = line.ownership;
+const listSettingsLexicalIssues = (file: { kind: FileKind; ownership: Ownership }): Array<ZodIssueDetail> => {
+  const ownership = file.ownership;
   const isNotDocumentValuesOwnership = ownership._tag !== "jsonValues";
   if (isNotDocumentValuesOwnership) {
     return [];
@@ -481,8 +481,8 @@ const listSettingsLexicalIssues = (line: { kind: FileKind; ownership: Ownership 
     const hasStoredPreviousField = previousField._tag === "value";
     const lexical = hasStoredPreviousField ? previousField.lexical : null;
 
-    const isNotSettingsLine = line.kind._tag !== "settings";
-    if (isNotSettingsLine) {
+    const isNotSettingsFile = file.kind._tag !== "settings";
+    if (isNotSettingsFile) {
       const isLexicalMissing = lexical == null;
       return isLexicalMissing
         ? []
@@ -498,25 +498,25 @@ const listSettingsLexicalIssues = (line: { kind: FileKind; ownership: Ownership 
   });
 };
 
-const readOwnerKindIssue = (line: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
-  if (isOwnerHitsKind(line.kind, line.owner)) {
+const readOwnerKindIssue = (file: { kind: FileKind; owner: FileOwner }): ZodIssueDetail | null => {
+  if (isOwnerHitsKind(file.kind, file.owner)) {
     return null;
   }
 
   return {
     path: ["owner"],
-    message: `File kind ${line.kind._tag} has incompatible owner ${line.owner._tag}.`,
+    message: `File kind ${file.kind._tag} has incompatible owner ${file.owner._tag}.`,
   };
 };
 
-const readOwnershipKindIssue = (line: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
-  if (isOwnershipHitsKind(line.kind, line.ownership)) {
+const readOwnershipKindIssue = (file: { kind: FileKind; ownership: Ownership }): ZodIssueDetail | null => {
+  if (isOwnershipHitsKind(file.kind, file.ownership)) {
     return null;
   }
 
   return {
     path: ["ownership"],
-    message: `File kind ${line.kind._tag} has incompatible ownership ${line.ownership._tag}.`,
+    message: `File kind ${file.kind._tag} has incompatible ownership ${file.ownership._tag}.`,
   };
 };
 
@@ -527,11 +527,11 @@ export const ownedFileSchema = z
     kind: fileKindSchema,
     ownership: ownershipSchema,
   })
-  .superRefine((line, scope) =>
+  .superRefine((file, scope) =>
     addZodIssueDetails(scope, [
-      readOwnerKindIssue(line),
-      readOwnershipKindIssue(line),
-      ...listSettingsLexicalIssues(line),
+      readOwnerKindIssue(file),
+      readOwnershipKindIssue(file),
+      ...listSettingsLexicalIssues(file),
     ]),
   );
 

@@ -50,8 +50,8 @@ const wrapAsUninstallError = (error: unknown): Error => {
   return createUninstallError(readErrorMessage(error), error);
 };
 
-const parseUninstallRequest = (details: unknown): UninstallRequest => {
-  const requestCheck = uninstallRequestSchema.safeParse(details);
+const parseUninstallRequest = (uncheckedRequest: unknown): UninstallRequest => {
+  const requestCheck = uninstallRequestSchema.safeParse(uncheckedRequest);
 
   const isRequestInvalid = !requestCheck.success;
   if (isRequestInvalid) {
@@ -68,7 +68,7 @@ const readUninstallSummary = (tag: UninstallSummary["_tag"], request: UninstallR
 });
 
 // A generated plan that fails its own checks is an uninstall failure, not an internal error.
-const planCheckedUninstall = (details: {
+const planCheckedUninstall = (checkedUninstall: {
   root: string;
   receipt: Receipt;
   receiptBytes: Uint8Array;
@@ -76,24 +76,24 @@ const planCheckedUninstall = (details: {
 }): Plan => {
   try {
     return planUninstall({
-      root: details.root,
-      receipt: details.receipt,
-      restorations: details.restorations,
+      root: checkedUninstall.root,
+      receipt: checkedUninstall.receipt,
+      restorations: checkedUninstall.restorations,
       receiptTarget: {
         path: receiptPath,
         kind: { _tag: "receipt" },
         owner: { _tag: "application" },
       },
-      receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(details.receiptBytes) },
+      receiptExpectedCurrent: { _tag: "file", sha256: hashBytes(checkedUninstall.receiptBytes) },
     });
   } catch (error) {
     throw createUninstallError(`Generated uninstall plan is invalid: ${readErrorMessage(error)}`, error);
   }
 };
 
-export const uninstall = async (details: unknown, signal: AbortSignal): Promise<UninstallSummary> => {
+export const uninstall = async (uncheckedRequest: unknown, signal: AbortSignal): Promise<UninstallSummary> => {
   try {
-    const decoded = parseUninstallRequest(details);
+    const decoded = parseUninstallRequest(uncheckedRequest);
     const destinationRoot = await realpath(decoded.destination.root);
     const homeRoot = await realpath(decoded.host.homeRoot);
     const request = parseUninstallRequest({

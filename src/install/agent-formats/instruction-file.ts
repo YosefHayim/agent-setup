@@ -433,8 +433,8 @@ const planInstructionRemoval = (request: InstructionFileRequest, currentBlock: C
 };
 
 // Plan one shared instruction path: a write, restoration, removal, or no-op.
-export const planInstructionFile = (details: unknown): InstructionFilePlan => {
-  const requestReply = instructionFileRequestSchema.safeParse(details);
+export const planInstructionFile = (uncheckedRequest: unknown): InstructionFilePlan => {
+  const requestReply = instructionFileRequestSchema.safeParse(uncheckedRequest);
 
   const isRequestInvalid = !requestReply.success;
   if (isRequestInvalid) {

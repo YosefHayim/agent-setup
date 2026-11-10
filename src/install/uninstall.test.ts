@@ -55,10 +55,10 @@ const createWorkspace = async (): Promise<{ root: string; preparedRoot: string }
 const readFileMessages = (root: string, relativePath: string): Promise<string> =>
   readFile(join(root, relativePath), "utf8");
 
-const installRequest = (details: { root: string; preparedRoot: string }) => ({
-  destination: { _tag: "project", root: details.root },
-  host: { homeRoot: details.root },
-  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
+const installRequest = (roots: { root: string; preparedRoot: string }) => ({
+  destination: { _tag: "project", root: roots.root },
+  host: { homeRoot: roots.root },
+  preparedPackage: { root: roots.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["make-code-readable", "scratch-folder-guard"] },
   agents: { _tag: "selected", ids: ["claude-code", "cursor", "codex", "aider", "continue"] },
   interaction: { _tag: "scripted" },

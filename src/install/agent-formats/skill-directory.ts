@@ -50,27 +50,27 @@ const isShippedFilePath = (path: string): boolean => /(?:^|\/)[^/]+\.[^/]+$/.tes
 const isForShippedPath = (path: string, shippedPath: string): boolean =>
   path === shippedPath || (!isShippedFilePath(shippedPath) && path.startsWith(`${shippedPath}/`));
 
-const preparedOriginFileSchema = z.strictObject({
+const preparedSkillFileSchema = z.strictObject({
   path: relativePathSchema.describe("File path relative to one prepared installed-skill directory."),
   bytes: z.instanceof(Uint8Array).describe("Exact prepared source bytes read before pure format planning."),
 });
 
-type PreparedOriginFile = z.infer<typeof preparedOriginFileSchema>;
+type PreparedSkillFile = z.infer<typeof preparedSkillFileSchema>;
 
 const preparedSkillFieldsSchema = z.strictObject({
   installedSkill: installedSkillSchema.describe("Catalog-owned installed skill and its exact shipped-path allowlist."),
-  sourceFiles: z.array(preparedOriginFileSchema).describe("Complete prepared file snapshot for this installed skill."),
+  sourceFiles: z.array(preparedSkillFileSchema).describe("Complete prepared file snapshot for this installed skill."),
 });
 
 type PreparedSkillFields = z.infer<typeof preparedSkillFieldsSchema>;
 
 // A shipped file path cannot also have descendants prepared under it.
 const readShippedFileWithDescendantIssue = (
-  originFiles: ReadonlyArray<PreparedOriginFile>,
+  preparedFiles: ReadonlyArray<PreparedSkillFile>,
   shippedPath: string,
 ): ZodIssueDetail | null => {
   const isShippedFile = isShippedFilePath(shippedPath);
-  const descendantIndex = originFiles.findIndex((file) =>
+  const descendantIndex = preparedFiles.findIndex((file) =>
     readNormalizedPath(file.path).startsWith(`${readNormalizedPath(shippedPath)}/`),
   );
 
@@ -87,11 +87,13 @@ const readShippedFileWithDescendantIssue = (
 
 // A shipped directory root cannot also be a prepared file.
 const readShippedDirectoryRootIssue = (
-  originFiles: ReadonlyArray<PreparedOriginFile>,
+  preparedFiles: ReadonlyArray<PreparedSkillFile>,
   shippedPath: string,
 ): ZodIssueDetail | null => {
   const isShippedFile = isShippedFilePath(shippedPath);
-  const rootIndex = originFiles.findIndex((file) => readNormalizedPath(file.path) === readNormalizedPath(shippedPath));
+  const rootIndex = preparedFiles.findIndex(
+    (file) => readNormalizedPath(file.path) === readNormalizedPath(shippedPath),
+  );
 
   const isThereNoIssue = isShippedFile || rootIndex < 0;
   if (isThereNoIssue) {
@@ -151,12 +153,15 @@ const readByPath = (left: { path: string }, right: { path: string }): number => 
   return isLeftPathFirst ? -1 : 1;
 };
 
-const listSelectedOriginFiles = (request: SkillDirectoryRequestFields) =>
-  request.skills.flatMap(({ installedSkill, sourceFiles: originFiles }) =>
-    originFiles
+const listSelectedSkillFiles = (request: SkillDirectoryRequestFields) =>
+  request.skills.flatMap(({ installedSkill, sourceFiles: preparedFiles }) =>
+    preparedFiles
       .filter((file) => installedSkill.shippedPaths.some((shippedPath) => isForShippedPath(file.path, shippedPath)))
       .sort(readByPath)
-      .map((file) => ({ destination: `${request.agent.target.path}/${installedSkill.id}/${file.path}`, source: file })),
+      .map((file) => ({
+        destination: `${request.agent.target.path}/${installedSkill.id}/${file.path}`,
+        preparedFile: file,
+      })),
   );
 
 const listMissingShippedPathIssues = (skills: ReadonlyArray<PreparedSkillFields>): ReadonlyArray<ZodIssueDetail> =>
@@ -222,7 +227,7 @@ const listPreviousFileIssues = (
 const listSkillDirectoryRequestIssues = (
   request: SkillDirectoryRequestFields,
 ): ReadonlyArray<ZodIssueDetail | null> => {
-  const desiredPaths = listSelectedOriginFiles(request).map((file) => file.destination);
+  const desiredPaths = listSelectedSkillFiles(request).map((file) => file.destination);
 
   return [
     ...listDuplicateInstalledSkillIssues(request.skills),
@@ -257,7 +262,7 @@ export type SkillDirectoryPlan = { writes: SkillWrite[] };
 
 const createSkillWrite = (
   request: SkillDirectoryRequest,
-  file: { destination: string; source: { bytes: Uint8Array } },
+  file: { destination: string; preparedFile: { bytes: Uint8Array } },
 ): SkillWrite => {
   const previous = request.previousFiles.find((candidate) => candidate.path === file.destination);
 
@@ -266,7 +271,7 @@ const createSkillWrite = (
     throw createSkillPlanError(`Missing previous-file state for desired skill file ${file.destination}.`);
   }
 
-  const bytes = file.source.bytes;
+  const bytes = file.preparedFile.bytes;
 
   return {
     _tag: "write",
@@ -288,7 +293,7 @@ export const planSkillDirectory = (candidateRequest: unknown): SkillDirectoryPla
   if (isRequestAccepted) {
     const request = requestCheck.data;
 
-    return { writes: listSelectedOriginFiles(request).map((file) => createSkillWrite(request, file)) };
+    return { writes: listSelectedSkillFiles(request).map((file) => createSkillWrite(request, file)) };
   }
 
   throw createSkillPlanError(joinZodIssueMessages(requestCheck.error));

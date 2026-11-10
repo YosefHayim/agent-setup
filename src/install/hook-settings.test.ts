@@ -112,12 +112,12 @@ const appendForeignStop = async (root: string, relativePath: string): Promise<vo
   await writeFiles(root, { [relativePath]: JSON.stringify(settings) });
 };
 
-const installRequest = (details: { root: string; preparedRoot: string; agentIds: ReadonlyArray<string> }) => ({
-  destination: { _tag: "project", root: details.root },
-  host: { homeRoot: details.root },
-  preparedPackage: { root: details.preparedRoot, version: "0.12.0" },
+const installRequest = (requestFields: { root: string; preparedRoot: string; agentIds: ReadonlyArray<string> }) => ({
+  destination: { _tag: "project", root: requestFields.root },
+  host: { homeRoot: requestFields.root },
+  preparedPackage: { root: requestFields.preparedRoot, version: "0.12.0" },
   features: { _tag: "selected", ids: ["scratch-folder-guard"] },
-  agents: { _tag: "selected", ids: details.agentIds },
+  agents: { _tag: "selected", ids: requestFields.agentIds },
   interaction: { _tag: "scripted" },
   configuration: { _tag: "selected", config: defaultConfig },
 });

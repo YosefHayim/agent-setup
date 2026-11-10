@@ -20,15 +20,15 @@ export const readDocumentPropertyName = (property: Node): string | null => {
 
 const listObjectProperties = (node: Node): ReadonlyArray<Node> => node.children || [];
 
-const readCommaBetween = (details: { source: string; start: number; end: number }): number | null => {
-  const offset = details.source.indexOf(",", details.start);
-  const isCommaInside = offset >= details.start && offset < details.end;
+const readCommaBetween = (gap: { document: string; start: number; end: number }): number | null => {
+  const offset = gap.document.indexOf(",", gap.start);
+  const isCommaInside = offset >= gap.start && offset < gap.end;
 
   return isCommaInside ? offset : null;
 };
 
-const requireCommaBetween = (details: { source: string; start: number; end: number }): number => {
-  const comma = readCommaBetween(details);
+const requireCommaBetween = (gap: { document: string; start: number; end: number }): number => {
+  const comma = readCommaBetween(gap);
 
   const isCommaMissing = comma == null;
   if (isCommaMissing) {
@@ -38,46 +38,45 @@ const requireCommaBetween = (details: { source: string; start: number; end: numb
   return comma;
 };
 
-const readSpliceOrigin = (details: { source: string; start: number; end: number; text?: string }): string =>
-  `${details.source.slice(0, details.start)}${details.text ?? ""}${details.source.slice(details.end)}`;
+const replaceDocumentRange = (range: { document: string; start: number; end: number; replacement?: string }): string =>
+  `${range.document.slice(0, range.start)}${range.replacement ?? ""}${range.document.slice(range.end)}`;
 
-const removeDocumentProperty = (details: { source: string; parent: Node; property: Node }): string => {
-  const properties = listObjectProperties(details.parent);
-  const index = properties.indexOf(details.property);
+const removeDocumentProperty = (removal: { document: string; parent: Node; property: Node }): string => {
+  const properties = listObjectProperties(removal.parent);
+  const index = properties.indexOf(removal.property);
   const previous = properties[index - 1];
   const next = properties[index + 1];
-  const propertyEnd = details.property.offset + details.property.length;
+  const propertyEnd = removal.property.offset + removal.property.length;
 
   const hasNext = next != null;
   if (hasNext) {
-    const comma = requireCommaBetween({ source: details.source, start: propertyEnd, end: next.offset });
+    const comma = requireCommaBetween({ document: removal.document, start: propertyEnd, end: next.offset });
 
-    return readSpliceOrigin({ source: details.source, start: details.property.offset, end: comma + 1 });
+    return replaceDocumentRange({ document: removal.document, start: removal.property.offset, end: comma + 1 });
   }
 
   const hasPrevious = previous != null;
   if (hasPrevious) {
     const comma = requireCommaBetween({
-      source: details.source,
+      document: removal.document,
       start: previous.offset + previous.length,
-      end: details.property.offset,
+      end: removal.property.offset,
     });
 
-    return readSpliceOrigin({ source: details.source, start: comma, end: propertyEnd });
+    return replaceDocumentRange({ document: removal.document, start: comma, end: propertyEnd });
   }
 
-  return readSpliceOrigin({ source: details.source, start: details.property.offset, end: propertyEnd });
+  return replaceDocumentRange({ document: removal.document, start: removal.property.offset, end: propertyEnd });
 };
 
-const findProperty = (details: { source: string; path: ReadonlyArray<string> }) => {
-  const root = parseTree(details.source);
-  const key = details.path.at(-1);
+const findProperty = (location: { document: string; path: ReadonlyArray<string> }) => {
+  const root = parseTree(location.document);
+  const key = location.path.at(-1);
 
   const isRootMissing = root == null;
-  const parent = isRootMissing ? undefined : findNodeAtLocation(root, details.path.slice(0, -1));
+  const parent = isRootMissing ? undefined : findNodeAtLocation(root, location.path.slice(0, -1));
 
   const isObjectLocated = parent?.type === "object";
-
   const isPathUnlocated = key == null || !isObjectLocated;
   if (isPathUnlocated) {
     return null;
@@ -90,157 +89,185 @@ const findProperty = (details: { source: string; path: ReadonlyArray<string> }) 
   };
 };
 
-const replaceDocumentPropertyField = (details: {
-  source: string;
+const findEditableProperty = (location: { document: string; path: ReadonlyArray<string> }) => {
+  const located = findProperty(location);
+
+  const isPropertyLocationMissing = located == null;
+  if (isPropertyLocationMissing) {
+    throw createInstallError(`settings.json path /${location.path.join("/")} is not an editable object property.`);
+  }
+
+  return located;
+};
+
+const replaceDocumentPropertyField = (replacement: {
+  document: string;
   key: string;
   property: Node;
-  value: unknown;
+  newField: unknown;
 }): string => {
-  const currentField = details.property.children?.[1];
+  const currentField = replacement.property.children?.[1];
 
   const isCurrentFieldMissing = currentField == null;
   if (isCurrentFieldMissing) {
-    throw createInstallError(`settings.json property ${details.key} has no value.`);
+    throw createInstallError(`settings.json property ${replacement.key} has no value.`);
   }
 
-  return readSpliceOrigin({
-    source: details.source,
+  return replaceDocumentRange({
+    document: replacement.document,
     start: currentField.offset,
     end: currentField.offset + currentField.length,
-    text: encodeDocument(details.value),
+    replacement: encodeDocument(replacement.newField),
   });
 };
 
 // A new property copies the key/value spacing and indentation of the last existing one.
-const addDocumentProperty = (details: { source: string; key: string; parent: Node; value: unknown }): string => {
-  const previous = listObjectProperties(details.parent).at(-1);
+const addDocumentProperty = (addition: { document: string; key: string; parent: Node; newField: unknown }): string => {
+  const previous = listObjectProperties(addition.parent).at(-1);
   const previousKey = previous?.children?.[0];
   const previousField = previous?.children?.[1];
   const hasKeyFieldSpacing = previousKey != null && previousField != null;
   const keyFieldSeparator = hasKeyFieldSpacing
-    ? details.source.slice(previousKey.offset + previousKey.length, previousField.offset)
+    ? addition.document.slice(previousKey.offset + previousKey.length, previousField.offset)
     : ":";
-  const encodedProperty = `${JSON.stringify(details.key)}${keyFieldSeparator}${encodeDocument(details.value)}`;
+  const encodedProperty = `${JSON.stringify(addition.key)}${keyFieldSeparator}${encodeDocument(addition.newField)}`;
 
   const isFirstProperty = previous == null;
   if (isFirstProperty) {
-    const opening = details.parent.offset + 1;
+    const opening = addition.parent.offset + 1;
 
-    return readSpliceOrigin({ source: details.source, start: opening, end: opening, text: encodedProperty });
+    return replaceDocumentRange({
+      document: addition.document,
+      start: opening,
+      end: opening,
+      replacement: encodedProperty,
+    });
   }
 
   const offset = previous.offset + previous.length;
-  const closingWhitespace = details.source.slice(offset, details.parent.offset + details.parent.length - 1);
+  const closingWhitespace = addition.document.slice(offset, addition.parent.offset + addition.parent.length - 1);
 
-  return readSpliceOrigin({
-    source: details.source,
+  return replaceDocumentRange({
+    document: addition.document,
     start: offset,
     end: offset,
-    text: `,${closingWhitespace}${encodedProperty}`,
+    replacement: `,${closingWhitespace}${encodedProperty}`,
   });
 };
 
-export const editDocumentField = (details: { source: string; path: ReadonlyArray<string>; value: unknown }): string => {
-  const located = findProperty(details);
+export const editDocumentField = (edit: {
+  document: string;
+  path: ReadonlyArray<string>;
+  newField: unknown;
+}): string => {
+  const { key, parent, property } = findEditableProperty(edit);
 
-  const isPropertyLocationMissing = located == null;
-  if (isPropertyLocationMissing) {
-    throw createInstallError(`settings.json path /${details.path.join("/")} is not an editable object property.`);
-  }
-
-  const { key, parent, property } = located;
   const isPropertyPresent = property != null;
-  const isFieldRemoval = details.value === undefined;
-
-  const isPropertyRemoval = isPropertyPresent && isFieldRemoval;
-  if (isPropertyRemoval) {
-    return removeDocumentProperty({ source: details.source, parent, property });
-  }
-
   if (isPropertyPresent) {
-    return replaceDocumentPropertyField({ source: details.source, key, property, value: details.value });
+    return replaceDocumentPropertyField({ document: edit.document, key, property, newField: edit.newField });
   }
 
-  if (isFieldRemoval) {
-    return details.source;
-  }
-
-  return addDocumentProperty({ source: details.source, key, parent, value: details.value });
+  return addDocumentProperty({ document: edit.document, key, parent, newField: edit.newField });
 };
 
-const findArray = (details: { source: string; path: ReadonlyArray<string> }): Node => {
-  const root = parseTree(details.source);
+// Removes the field at the path; a field that is already absent leaves the document unchanged.
+export const removeDocumentField = (removal: { document: string; path: ReadonlyArray<string> }): string => {
+  const { parent, property } = findEditableProperty(removal);
+
+  const isPropertyAbsent = property == null;
+  if (isPropertyAbsent) {
+    return removal.document;
+  }
+
+  return removeDocumentProperty({ document: removal.document, parent, property });
+};
+
+const findArray = (location: { document: string; path: ReadonlyArray<string> }): Node => {
+  const root = parseTree(location.document);
 
   const isRootMissing = root == null;
-  const array = isRootMissing ? undefined : findNodeAtLocation(root, [...details.path]);
+  const array = isRootMissing ? undefined : findNodeAtLocation(root, [...location.path]);
 
   const isNotArrayLocated = array?.type !== "array";
   if (isNotArrayLocated) {
-    throw createInstallError(`settings.json path /${details.path.join("/")} is not an array.`);
+    throw createInstallError(`settings.json path /${location.path.join("/")} is not an array.`);
   }
 
   return array;
 };
 
 // A new item copies the spacing in front of the last item, so removing it again restores the exact bytes.
-export const appendDocumentArrayElement = (details: {
-  source: string;
+export const appendDocumentArrayElement = (append: {
+  document: string;
   path: ReadonlyArray<string>;
-  value: unknown;
+  newElement: unknown;
 }): string => {
-  const array = findArray(details);
-  const elements = array.children || [];
-  const last = elements.at(-1);
-  const encodedElement = encodeDocument(details.value);
+  const array = findArray(append);
+  const elementNodes = array.children || [];
+  const lastElementNode = elementNodes.at(-1);
+  const encodedElement = encodeDocument(append.newElement);
 
-  const isArrayEmpty = last == null;
+  const isArrayEmpty = lastElementNode == null;
   if (isArrayEmpty) {
     const opening = array.offset + 1;
 
-    return readSpliceOrigin({ source: details.source, start: opening, end: opening, text: encodedElement });
+    return replaceDocumentRange({
+      document: append.document,
+      start: opening,
+      end: opening,
+      replacement: encodedElement,
+    });
   }
 
-  const beforeLast = elements.at(-2);
-  const isOnlyElement = beforeLast == null;
+  const beforeLastElementNode = elementNodes.at(-2);
+  const isOnlyElement = beforeLastElementNode == null;
   const separatorComma = isOnlyElement
     ? array.offset
-    : requireCommaBetween({ source: details.source, start: beforeLast.offset + beforeLast.length, end: last.offset });
-  const leadingWhitespace = details.source.slice(separatorComma + 1, last.offset);
-  const lastEnd = last.offset + last.length;
+    : requireCommaBetween({
+        document: append.document,
+        start: beforeLastElementNode.offset + beforeLastElementNode.length,
+        end: lastElementNode.offset,
+      });
+  const leadingWhitespace = append.document.slice(separatorComma + 1, lastElementNode.offset);
+  const lastEnd = lastElementNode.offset + lastElementNode.length;
 
-  return readSpliceOrigin({
-    source: details.source,
+  return replaceDocumentRange({
+    document: append.document,
     start: lastEnd,
     end: lastEnd,
-    text: `,${leadingWhitespace}${encodedElement}`,
+    replacement: `,${leadingWhitespace}${encodedElement}`,
   });
 };
 
-export const removeDocumentArrayElement = (details: {
-  source: string;
+export const removeDocumentArrayElement = (removal: {
+  document: string;
   path: ReadonlyArray<string>;
   index: number;
 }): string => {
-  const array = findArray(details);
-  const elements = array.children || [];
+  const array = findArray(removal);
+  const elementNodes = array.children || [];
 
-  const element = elements[details.index];
+  const elementNode = elementNodes[removal.index];
 
-  const isElementMissing = element == null;
+  const isElementMissing = elementNode == null;
   if (isElementMissing) {
-    throw createInstallError(`settings.json array /${details.path.join("/")} has no item ${details.index}.`);
+    throw createInstallError(`settings.json array /${removal.path.join("/")} has no item ${removal.index}.`);
   }
 
-  const previous = elements[details.index - 1];
-  const next = elements[details.index + 1];
-  const elementEnd = element.offset + element.length;
-  const hasPrevious = previous != null;
+  const previousElementNode = elementNodes[removal.index - 1];
+  const nextElementNode = elementNodes[removal.index + 1];
+  const elementEnd = elementNode.offset + elementNode.length;
+  const hasPrevious = previousElementNode != null;
   const previousComma = hasPrevious
-    ? requireCommaBetween({ source: details.source, start: previous.offset + previous.length, end: element.offset })
+    ? requireCommaBetween({
+        document: removal.document,
+        start: previousElementNode.offset + previousElementNode.length,
+        end: elementNode.offset,
+      })
     : null;
-  const start = previousComma ?? element.offset;
-  const isFirstElementBeforeNext = previous == null && next != null;
-  const end = isFirstElementBeforeNext ? next.offset : elementEnd;
+  const start = previousComma ?? elementNode.offset;
+  const isFirstElementBeforeNext = previousElementNode == null && nextElementNode != null;
+  const end = isFirstElementBeforeNext ? nextElementNode.offset : elementEnd;
 
-  return readSpliceOrigin({ source: details.source, start, end });
+  return replaceDocumentRange({ document: removal.document, start, end });
 };

@@ -47,8 +47,8 @@ export const readPreviousFileField = (snapshot: FileSnapshot): PreviousFileValue
   return isMissing ? { _tag: "missing" } : { _tag: "priorFile", bytes: snapshot.bytes };
 };
 
-export const checkFileChange = (details: unknown): FileChange => {
-  const changeCheck = fileChangeSchema.safeParse(details);
+export const checkFileChange = (uncheckedChange: unknown): FileChange => {
+  const changeCheck = fileChangeSchema.safeParse(uncheckedChange);
 
   const isChangeInvalid = !changeCheck.success;
   if (isChangeInvalid) {
@@ -69,35 +69,35 @@ export const readPreviousReceiptFile = (receipt: Receipt | null, filePath: strin
 
 // A receipted file that already holds the bytes about to be written is adopted, not refused: an external
 // skill sync can reproduce our content, and rewriting identical bytes destroys nothing.
-export const readPreviousWholeFile = (details: {
+export const readPreviousWholeFile = (previousRead: {
   receipt: Receipt | null;
   filePath: string;
   snapshot: FileSnapshot;
   desiredBytes: Uint8Array | null;
 }): PreviousFileValue => {
-  const file = readPreviousReceiptFile(details.receipt, details.filePath);
+  const file = readPreviousReceiptFile(previousRead.receipt, previousRead.filePath);
 
   const isNewFile = file == null;
   if (isNewFile) {
-    return readPreviousFileField(details.snapshot);
+    return readPreviousFileField(previousRead.snapshot);
   }
 
   const ownership = file.ownership;
 
   const isOwnershipIncompatible = ownership._tag !== "wholeFile";
   if (isOwnershipIncompatible) {
-    throw createInstallError(`Receipted whole-file file ${details.filePath} has incompatible ownership.`);
+    throw createInstallError(`Receipted whole-file file ${previousRead.filePath} has incompatible ownership.`);
   }
 
-  const snapshot = details.snapshot;
+  const snapshot = previousRead.snapshot;
   const isSnapshotFile = snapshot._tag === "file";
   const isInstalledBytes = isSnapshotFile && hashBytes(snapshot.bytes) === ownership.installedHash;
   const isDesiredBytes =
-    isSnapshotFile && details.desiredBytes != null && bytesEqual(snapshot.bytes, details.desiredBytes);
+    isSnapshotFile && previousRead.desiredBytes != null && bytesEqual(snapshot.bytes, previousRead.desiredBytes);
 
   const isChangedAfterInstall = !isInstalledBytes && !isDesiredBytes;
   if (isChangedAfterInstall) {
-    throw createInstallError(`Receipted whole-file file ${details.filePath} changed after installation.`);
+    throw createInstallError(`Receipted whole-file file ${previousRead.filePath} changed after installation.`);
   }
 
   return ownership.previous;

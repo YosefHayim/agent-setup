@@ -83,8 +83,8 @@ const wrapAsUpdateError = (error: unknown): Error => {
   return createUpdateError(readErrorMessage(error), error);
 };
 
-const parseUpdateRequest = (details: unknown): UpdateRequest => {
-  const requestCheck = updateRequestSchema.safeParse(details);
+const parseUpdateRequest = (uncheckedRequest: unknown): UpdateRequest => {
+  const requestCheck = updateRequestSchema.safeParse(uncheckedRequest);
 
   const isRequestInvalid = !requestCheck.success;
   if (isRequestInvalid) {
@@ -94,8 +94,8 @@ const parseUpdateRequest = (details: unknown): UpdateRequest => {
   return requestCheck.data;
 };
 
-const applyUpdate = async (details: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
-  const request = parseUpdateRequest(details);
+const applyUpdate = async (uncheckedRequest: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
+  const request = parseUpdateRequest(uncheckedRequest);
   const receiptSnapshot = await readReceipt(path.join(request.destination.root, receiptPath));
 
   const isReceiptMissing = receiptSnapshot._tag === "missing";
@@ -138,9 +138,9 @@ const applyUpdate = async (details: unknown, signal: AbortSignal): Promise<Updat
   return updateSummary;
 };
 
-export const update = async (details: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
+export const update = async (uncheckedRequest: unknown, signal: AbortSignal): Promise<UpdateSummary> => {
   try {
-    return await applyUpdate(details, signal);
+    return await applyUpdate(uncheckedRequest, signal);
   } catch (error) {
     throw wrapAsUpdateError(error);
   }
