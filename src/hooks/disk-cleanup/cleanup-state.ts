@@ -11,3 +11,6 @@ export const cacheCleanupStampFile = (): string => path.join(readStorageFolder()
 export const readKeptWorktreesFile = (): string => path.join(readStorageFolder(), "kept-worktrees");
 
 export const readCleanupLogFile = (): string => path.join(readStorageFolder(), "cleanup.log");
+
+export const mergedWorktreeCleanupStampFile = (): string =>
+  path.join(readStorageFolder(), "last-merged-worktree-cleanup");

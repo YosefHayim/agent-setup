@@ -10,8 +10,9 @@ import { claimIntervalSlot } from "../../interval-stamp.js";
 import { acquireWatcherLock, isWatcherLockHeldByOther, releaseWatcherLock } from "../../watcher-lock.js";
 import { cleanUpCaches } from "../cache-cleanup.js";
 import { appendToCleanupLog } from "../cleanup-log.js";
-import { cacheCleanupStampFile, readCleanupLockFile } from "../cleanup-state.js";
+import { cacheCleanupStampFile, mergedWorktreeCleanupStampFile, readCleanupLockFile } from "../cleanup-state.js";
 import { isSessionLive } from "../live-sessions.js";
+import { cleanUpMergedWorktrees } from "../merged-worktree-cleanup.js";
 import { reportLine } from "../report-line.js";
 import { pushUnpushedBranches } from "../unpushed-branches.js";
 import { cleanUpWorktrees } from "../worktree-cleanup.js";
@@ -27,6 +28,8 @@ const WAIT_POLL_MILLISECONDS = 2_000;
 const DEFAULT_WAIT_LIMIT_MILLISECONDS = 10 * 60 * 1_000;
 // Sessions end many times a day; the caches only need a look once a day.
 const CACHE_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60;
+// Looking for merged worktrees asks gh about each repo, so it runs once an hour, not at every session end.
+const MERGED_WORKTREE_CLEANUP_INTERVAL_SECONDS = 60 * 60;
 
 const decodeWatcherSettings = (argv: ReadonlyArray<string>): WatcherSettings => {
   const { values: fields } = parseArgs({
@@ -72,6 +75,14 @@ const isCacheCleanupDue = (settings: WatcherSettings): boolean =>
   settings.dryRun ||
   claimIntervalSlot({ stampFile: cacheCleanupStampFile(), minimumSeconds: CACHE_CLEANUP_INTERVAL_SECONDS });
 
+const isMergedWorktreeCleanupDue = (settings: WatcherSettings): boolean =>
+  !settings.cachesOnly &&
+  (settings.dryRun ||
+    claimIntervalSlot({
+      stampFile: mergedWorktreeCleanupStampFile(),
+      minimumSeconds: MERGED_WORKTREE_CLEANUP_INTERVAL_SECONDS,
+    }));
+
 const claimCleanupTurn = (request: { readonly homeRoot: string; readonly options: WatcherSettings }) => {
   const isNotWaiting = !request.options.wait;
   if (isNotWaiting) {
@@ -109,9 +120,12 @@ const runWatcher = async (): Promise<void> => {
 
     const isCachesOnly = settings.cachesOnly;
     const worktreeLines = isCachesOnly ? [] : cleanUpWorktrees({ ...cleanupRequest, rootFolders });
+    const mergedWorktreeLines = isMergedWorktreeCleanupDue(settings)
+      ? cleanUpMergedWorktrees({ ...cleanupRequest, rootFolders })
+      : [];
     const branchLines = isCachesOnly ? [] : pushUnpushedBranches({ ...cleanupRequest, rootFolders });
     const cacheLines = isCacheCleanupDue(settings) ? cleanUpCaches(cleanupRequest) : [];
-    const reportLines = [...worktreeLines, ...branchLines, ...cacheLines];
+    const reportLines = [...worktreeLines, ...mergedWorktreeLines, ...branchLines, ...cacheLines];
     writeSync(1, reportLines.map((line) => `${line}\n`).join(""));
 
     const isNotDryRun = !settings.dryRun;
