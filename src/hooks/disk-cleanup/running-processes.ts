@@ -12,11 +12,18 @@ const PROCESS_LIST_BYTES = 64 * 1024 * 1024;
 // bring the full list down from seconds to a fraction of one; -w drops the warnings -b prints.
 const OPEN_FILE_QUERY = ["-n", "-P", "-b", "-w", "-Fn"];
 
-// A hook's PATH can lack /usr/sbin, where macOS keeps lsof.
-const readSystemToolCall = (request: { readonly tool: string; readonly toolArguments: ReadonlyArray<string> }) =>
+// A hook's PATH can lack /usr/sbin, where macOS keeps lsof, and the Homebrew folders, where gh lives.
+export const readSystemToolCall = (request: {
+  readonly tool: string;
+  readonly toolArguments: ReadonlyArray<string>;
+  readonly workingFolder?: string;
+  readonly timeoutMilliseconds?: number;
+}) =>
   spawnSync(request.tool, request.toolArguments, {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${process.env.PATH || ""}:/usr/sbin:/usr/bin:/bin` },
+    cwd: request.workingFolder,
+    timeout: request.timeoutMilliseconds,
+    env: { ...process.env, PATH: `${process.env.PATH || ""}:/opt/homebrew/bin:/usr/local/bin:/usr/sbin:/usr/bin:/bin` },
     maxBuffer: PROCESS_LIST_BYTES,
   });
 
