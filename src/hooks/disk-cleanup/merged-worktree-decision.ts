@@ -1,9 +1,9 @@
 export interface MergedWorktreeFacts {
   readonly isLocked: boolean;
   readonly isInUse: boolean;
-  /** Every git and find question about the worktree was answered. */
+  // Every git and find question about the worktree was answered.
   readonly isReadable: boolean;
-  /** A file outside node_modules and .git, or in its gitdir apart from index, changed in the last 2 hours. */
+  // A file outside node_modules and .git, or in its gitdir apart from index, changed in the last 2 hours.
   readonly hasRecentChange: boolean;
   readonly hasUncommittedFiles: boolean;
 }
