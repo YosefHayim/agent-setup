@@ -1,6 +1,7 @@
 ---
 name: run-tasks-in-parallel
 description: Use when you have a numbered list of tasks and want one agent per task. Each task gets its own branch, folder, tests, and PR. It can also only set up the branches, or only merge finished ones. Use it for a long run, a run overnight, or work that must survive memory loss across waves. Also use it for one big job that needs more than 8 PRs or several waves, even when the user does not say parallel. Say "one agent per task" or "run these tasks in parallel". For one feature, use ship-one-feature.
+effort: high
 type: flow
 ---
 

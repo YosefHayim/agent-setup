@@ -1,6 +1,7 @@
 ---
 name: simplify-repo-with-tests
 description: Use when you want to find over-engineering in the whole repo and prove that a simpler version works the same. Helper agents find it and show before and after, then it simplifies with tests first. Say "find over-engineering" or "fewer files, same behavior". For a small cleanup, use simplify-code.
+effort: high
 type: flow
 disable-model-invocation: true
 ---

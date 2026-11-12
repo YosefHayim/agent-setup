@@ -1,6 +1,7 @@
 ---
 name: ask-before-build
 description: Use when you start a new task and want every question asked up front, so scope does not arrive one message at a time. It sorts the task by type, asks only the open points in the fewest question cards, cuts the scope to an MVP, backlogs the rest until there is demand, then shows a brief and plan and waits for your go. Say "ask before build", "ask me everything first", or "/ask-before-build". Not for a task a skill with its own question card already owns. To grill a plan you already have, use question-my-plan. For a messy prompt, run which-skill first.
+effort: high
 type: flow
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: image-to-code
 description: Use when you have an image (screenshot, mockup, or design) and want code that looks exactly the same — SVG, HTML/CSS, or animation. It renders, compares pixels, and fixes until it matches. Say "turn this image into code", "pixel-perfect", or "PNG to SVG".
+effort: high
 ---
 
 # Image to code

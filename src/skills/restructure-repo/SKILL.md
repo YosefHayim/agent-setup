@@ -1,6 +1,7 @@
 ---
 name: restructure-repo
 description: Use when a whole repo needs a better structure — folders, file names, function, variable, and type names, function bodies, import order, repeated code, comments, and dependencies. It starts from the safe fixes and a rule scan against ~/.claude/rules/, then checks the repo against the official docs of every framework it uses (Expo, React, Cloudflare, Express…) and the repo's own PROJECT.md, README.md, and LANGUAGE.md. Cheap read-only scout agents scan; the main agent decides, shows one review page for approval, and makes the changes on a branch, phase by phase. Also for "clean all my repos". Say "restructure this repo", "better project structure", "rename across the codebase", or "which deps do we not need". Not for one file or folder; use make-code-readable or simplify-code.
+effort: xhigh
 type: flow
 ---
 

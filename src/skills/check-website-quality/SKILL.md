@@ -1,6 +1,7 @@
 ---
 name: check-website-quality
 description: Use when you want to check a website and fix what is wrong — HTML, accessibility, images, speed, security headers, SEO, and AI-readiness. It runs a scanner and gives copy-paste fixes. Say "check my site", "accessibility", "SEO tags", or "security headers". For speed checks in CI, use website-speed-ci.
+effort: xhigh
 ---
 
 # Check website quality (audit + fix)

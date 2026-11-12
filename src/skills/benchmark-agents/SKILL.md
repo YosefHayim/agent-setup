@@ -1,6 +1,7 @@
 ---
 name: benchmark-agents
 description: Use when you want to compare agents, skills, or workflows on the same tasks. It runs each one and measures tokens, time, cost, and success, so you know if a change really helps. Say "benchmark this", "compare agents", or "does this skill help".
+effort: xhigh
 type: flow
 disable-model-invocation: true
 ---

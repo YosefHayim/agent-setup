@@ -1,6 +1,7 @@
 ---
 name: chrome-store-seo
 description: Use when you want more people to find your Chrome extension. It improves the store name, summary, and description, and the landing page, using Google's official rules. Say "Chrome Web Store SEO", "store listing", or "keywords for my extension".
+effort: high
 ---
 
 # Chrome Store SEO (+ GEO)

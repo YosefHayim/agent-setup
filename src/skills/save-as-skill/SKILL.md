@@ -1,6 +1,7 @@
 ---
 name: save-as-skill
 description: Use when you want to reuse what we just did. It turns the steps that worked into a skill, script, or template for next time. Say "save this as a skill", "make this repeatable", or "automate these steps".
+effort: high
 type: flow
 ---
 

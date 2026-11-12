@@ -1,6 +1,7 @@
 ---
 name: release-mobile-app
 description: Use when you want to release a mobile app to the App Store, TestFlight, or Google Play. It builds, bumps the version, writes release notes, submits, and records which commit was shipped. Say "release new version", "release to TestFlight", "internal testing", "I don't see it in TestFlight", "submit to App Store", or "what did we ship".
+effort: high
 type: flow
 ---
 

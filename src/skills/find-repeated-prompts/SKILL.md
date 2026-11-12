@@ -1,6 +1,7 @@
 ---
 name: find-repeated-prompts
 description: Use when you want to find prompts you repeat in your past agent sessions (Claude Code, Codex, Cursor, and others). Repeated work is a good idea for a new skill. Say "scan my sessions", "what do I repeat", or "find skill ideas".
+effort: high
 type: flow
 ---
 

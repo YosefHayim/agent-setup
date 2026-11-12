@@ -12,6 +12,7 @@ type Frontmatter = {
   description?: string;
   type?: string;
   "disable-model-invocation"?: boolean;
+  effort?: string;
 };
 
 const parseFrontmatter = (file: string): { frontmatter: Frontmatter | null; body: string } => {
@@ -79,6 +80,12 @@ const expectValidSkillFrontmatter = (skillMd: string, expectedName: string): voi
 
   if (isSkillTypeSet) {
     expect(["prompt", "inline", "flow"]).toContain(frontmatter.type);
+  }
+
+  const isEffortSet = frontmatter?.effort != null;
+
+  if (isEffortSet) {
+    expect(["low", "medium", "high", "xhigh", "max"]).toContain(frontmatter.effort);
   }
 };
 

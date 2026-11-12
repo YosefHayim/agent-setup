@@ -1,6 +1,7 @@
 ---
 name: ship-one-feature
 description: Use when you want one feature or one GitHub issue done all the way — branch, code, tests, a PR with a confidence score, local checks, merge, and reinstall. Say "ship this feature", "implement this issue fully", or "feature to main". For many tasks, use run-tasks-in-parallel.
+effort: high
 type: flow
 ---
 

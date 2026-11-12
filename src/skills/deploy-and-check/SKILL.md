@@ -1,6 +1,7 @@
 ---
 name: deploy-and-check
 description: Use when you want to deploy to production and prove it is live. It deploys (Cloudflare or other hosts) and tests the real production URL, not only your computer. Say "deploy", "redeploy", "is it live", or "prove production". To test on your computer, use run-local-and-check.
+effort: medium
 type: flow
 ---
 

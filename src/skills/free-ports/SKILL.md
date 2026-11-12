@@ -1,6 +1,7 @@
 ---
 name: free-ports
 description: Use when a port is busy and your dev server will not start. It stops the local servers that hold the ports (it keeps Metro on 8081). Say "kill ports", "free ports", or "port already in use".
+effort: medium
 type: flow
 ---
 

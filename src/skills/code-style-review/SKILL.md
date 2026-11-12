@@ -1,6 +1,7 @@
 ---
 name: code-style-review
 description: Use when you want to check a big change (a branch, a PR, or AI-written code) against the project style rules without reading every file. It fixes simple problems, checks the rest with helper agents, and lists only the real problems. Say "review this" or "can I trust this diff". To learn while you build, use code-style-teach-me.
+effort: xhigh
 ---
 
 <what-to-do>

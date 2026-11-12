@@ -1,6 +1,7 @@
 ---
 name: simplify-code
 description: Use when code is over-engineered and you want only what the job needs. It removes extra wrappers, layers, folders, vague names, and files used only once. Say "simplify this", "over-engineered", "too much abstraction", or "deslop". For readability only, use make-code-readable.
+effort: high
 ---
 
 # Simplify code — remove over-engineering

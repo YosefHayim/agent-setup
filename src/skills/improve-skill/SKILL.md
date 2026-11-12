@@ -1,6 +1,7 @@
 ---
 name: improve-skill
 description: Use when a skill did something wrong and you want to fix it from feedback. It turns your notes into changes in the skill's SKILL.md. Say "improve this skill", "fix this skill", or "this skill did X wrong". For a new skill, use add-skill.
+effort: high
 type: flow
 ---
 

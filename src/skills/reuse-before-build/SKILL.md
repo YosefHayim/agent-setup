@@ -1,6 +1,7 @@
 ---
 name: reuse-before-build
 description: Use when you are about to build a feature and want to check what already exists — code in the repo, platform features, or packages. It gives one answer — reuse, extend, use a package, or build only what is missing. Say "do we already have this", "reuse first", or "is there a package for this".
+effort: high
 type: flow
 ---
 
