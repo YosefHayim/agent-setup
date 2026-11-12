@@ -28,6 +28,7 @@ const createCheck = (overrides: Partial<LeftoverProcessCheck>): LeftoverProcessC
   workingFolders: new Map(),
   missingFolders: new Set(),
   codeRoots: [CODE_ROOT],
+  finishedFolders: [],
   testBrowserMinimumAgeSeconds: ONE_HOUR_SECONDS,
   ...overrides,
 });
@@ -205,6 +206,68 @@ describe("decideLeftoverProcesses", () => {
     const leftovers = decideLeftoverProcesses(check);
 
     expect(leftovers).toEqual([]);
+  });
+});
+
+describe("decideLeftoverProcesses with finished Claude folders", () => {
+  const finishedFolder = "/Users/me/.claude-account3/jobs/9b81403e/tmp";
+  const testApp = createProcess({
+    name: "Business OS",
+    commandLine: `${finishedFolder}/run3/Trivial OS.app/Contents/MacOS/Business OS`,
+  });
+
+  it("stops a protected-looking app that runs from a finished job folder", () => {
+    const check = createCheck({ processes: [testApp], finishedFolders: [finishedFolder] });
+
+    const leftovers = decideLeftoverProcesses(check);
+
+    expect(leftovers.map((leftover) => leftover.processId)).toEqual([100]);
+    expect(leftovers[0]?.reason).toContain(finishedFolder);
+  });
+
+  it("stops a process whose working folder is inside a finished folder", () => {
+    const check = createCheck({
+      processes: [createProcess({})],
+      workingFolders: new Map([[100, `${finishedFolder}/run3`]]),
+      finishedFolders: [finishedFolder],
+    });
+
+    const leftovers = decideLeftoverProcesses(check);
+
+    expect(leftovers.map((leftover) => leftover.processId)).toEqual([100]);
+  });
+
+  it("keeps the owner's Business OS that runs from elsewhere", () => {
+    const ownersApp = createProcess({
+      name: "Business OS",
+      commandLine: "/Applications/Business OS.app/Contents/MacOS/Business OS",
+    });
+    const check = createCheck({ processes: [ownersApp], finishedFolders: [finishedFolder] });
+
+    expect(decideLeftoverProcesses(check)).toEqual([]);
+  });
+
+  it("keeps a live session process and a shell even inside a finished folder", () => {
+    const liveSession = createProcess({ processId: 200, commandLine: `${finishedFolder}/x/run` });
+    const shell = createProcess({ processId: 201, name: "zsh", commandLine: `${finishedFolder}/x/zsh` });
+    const check = createCheck({
+      processes: [liveSession, shell],
+      protectedProcessIds: new Set([200]),
+      finishedFolders: [finishedFolder],
+    });
+
+    expect(decideLeftoverProcesses(check)).toEqual([]);
+  });
+
+  it("keeps a process outside every finished folder, even one with a similar name", () => {
+    const sibling = createProcess({ commandLine: `${finishedFolder}-other/run` });
+    const check = createCheck({
+      processes: [sibling],
+      workingFolders: new Map([[100, `${finishedFolder}-other`]]),
+      finishedFolders: [finishedFolder],
+    });
+
+    expect(decideLeftoverProcesses(check)).toEqual([]);
   });
 });
 
