@@ -16,7 +16,7 @@ Like `mcp-ui`, but for terminal skills. This skill is a **thin consumer of the o
 
 ## Sketch plans and wireframes (the default for plans)
 
-Show every plan as a sketch plan: hand-drawn pages, one picture per page, short notes tied to their part, and a last "Your call" page with options A, B and C. Serve it in **live mode** (the loop below) by default. Use `serve` only when the Monitor tool or a WebSocket is not available.
+Show every plan as a sketch plan: hand-drawn pages, one picture per page, short notes tied to their part, and a last "Your call" page with the real options. Serve it in **live mode** (the loop below) by default. Use `serve` only when the Monitor tool or a WebSocket is not available.
 
 ```bash
 npx -y planpage@latest recipes                     # list the 80 recipes (flows, systems, data, screens, account, product...)
@@ -28,7 +28,12 @@ npx -y planpage@latest serve <scratchpad>/plan.html <scratchpad>/decision.json -
 npx -y planpage@latest render sketch-kit --sample --out <scratchpad>/kit.html   # see every part drawn
 ```
 
-- **Start from a recipe.** Pick the closest one, copy its `scene`, change the words. Full app screens (log in, sign up, paywall, settings, dashboard, checkout, pricing, AI chat, search, landing...) are ready as the `account` and `product` recipes.
+- **Pick pictures by question, never one fixed flow.** Before drawing, write each page's question in one line, then take the recipe whose `useFor` answers it:
+  - In what order? `flows`, `time`. Which files? `files`. What data? `data`. Who talks to whom? `systems`. What do I decide? `decisions`. What will I see? `screens`, `account`, `product` (only on request, see below).
+  - Keep the recipe's parts (lanes, trees, tables) and change only the words; never redraw it as plain boxes.
+  - Use a recipe again only for the same kind of question. No fixed first page: no set Overview or Today and after page; `overview-grid` only for plans of 3 or more parts.
+- **The Your call page shows the real options, 1 to 4.** Never pad to three. When one answer is clear, show one option, "Build as shown". Draw each option with the `decisions` recipe that fits it (`compare-table`, `effort-value`, `risks-questions`...).
+- Full app screens (log in, sign up, paywall, settings, dashboard, checkout, pricing, AI chat, search, landing...) are ready as the `account` and `product` recipes.
 - **Wireframes only when asked.** A normal plan uses flow, file, data, system and decision pictures. Draw a screen wireframe (or use the `account` / `product` / `screens` recipes) only when the person asks for a wireframe, mockup or screen sketch.
 - **Wireframes** are scene nodes of kind `screen` (`{ id, kind: "screen", x, y, w, h, html }`). Lay out with Tailwind inside one device frame (`sk-phone`, `sk-browser-window`, `sk-terminal-window`), put `sk-*` parts inside, and give a part `data-part="name"` so a note can point at it with `link: "<screenId>#name"`.
 - **The decision** for a sketch plan is `{ approved, choice, notes }`, where `choice` is the letter picked.
