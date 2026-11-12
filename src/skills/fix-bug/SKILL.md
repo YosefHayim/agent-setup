@@ -1,6 +1,7 @@
 ---
 name: fix-bug
 description: Use when you want to fix real bugs with proof. It reproduces the bug first, finds the real cause, fixes it, tests edge cases, and shows that the fix works. Say "fix this bug", "reproduce then fix", or "debug this failure".
+effort: xhigh
 type: flow
 ---
 

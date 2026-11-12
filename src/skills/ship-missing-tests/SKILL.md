@@ -1,6 +1,7 @@
 ---
 name: ship-missing-tests
 description: Use when you want missing tests added across many features and merged to main. It backs up main, gives each feature its own agent and branch, writes the tests first, opens PRs, and merges after the checks pass. Say "ship missing tests" or "test gaps all the way to main". To add tests without merging, use find-missing-tests.
+effort: high
 type: flow
 disable-model-invocation: true
 ---

@@ -1,6 +1,7 @@
 ---
 name: run-ci-locally
 description: Use only when the user asks to run the repo's GitHub Actions workflows locally in Docker with act. Runs each job, reports pass or fail, then removes every container, volume, image and file the run made, and quits Docker Desktop. Say "run CI locally" or "run act".
+effort: medium
 type: flow
 ---
 

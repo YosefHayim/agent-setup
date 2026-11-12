@@ -1,6 +1,7 @@
 ---
 name: manage-cloudflare
 description: Use when you want to set up or fix Cloudflare — wrangler config, D1 databases, KV, R2, Workers, Pages, and secrets. Say "wrangler config", "D1 migrate", "R2 bucket", or "Cloudflare secrets". To prove a deploy is live, use deploy-and-check.
+effort: medium
 type: flow
 ---
 

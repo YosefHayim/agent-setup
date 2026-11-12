@@ -1,6 +1,7 @@
 ---
 name: organize-commits
 description: Use when you want your changes split into small, clear commits with good messages. It can also clean up history and merge branches without losing work. It works on a feature branch, not main. Say "organize commits", "organized commits", "split commits", or "clean git history". To also run checks and push, use finish-and-push.
+effort: medium
 type: flow
 ---
 

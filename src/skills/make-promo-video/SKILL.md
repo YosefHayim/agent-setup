@@ -1,6 +1,7 @@
 ---
 name: make-promo-video
 description: Use when you want a short promo video for a project (LinkedIn, YouTube, Instagram, TikTok). It writes the story from the repo, makes and animates the images, adds voice and music, and cuts a version for each app. You approve the plan two times. Say "make a trailer", "promo video", or "launch video".
+effort: high
 disable-model-invocation: true
 ---
 

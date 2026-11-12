@@ -1,6 +1,7 @@
 ---
 name: check-rtl-ui
 description: Use when you want to check or fix right-to-left screens (Hebrew, Arabic, Persian, Urdu). It checks mirroring, mixed-direction text, icons, forms, and mobile sizes. Say "check RTL", "Hebrew UI is broken", or "mirror the layout".
+effort: high
 type: flow
 ---
 

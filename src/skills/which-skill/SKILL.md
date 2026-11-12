@@ -1,6 +1,7 @@
 ---
 name: which-skill
 description: Use when you are not sure which skill to use, or your prompt is long or messy (for example, from voice). It picks the right skill and gives you a short, ready prompt. Say "which skill", "how should I run this", or "refine my prompt".
+effort: medium
 type: flow
 ---
 

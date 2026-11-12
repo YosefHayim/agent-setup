@@ -1,6 +1,7 @@
 ---
 name: update-agent-docs
 description: Use when you want to create or update agent instruction files — AGENTS.md, CLAUDE.md, Cursor rules, and others. It checks each agent's official docs first. Say "update AGENTS.md", "refresh CLAUDE.md", or "sync agent docs". For the README, use write-readme.
+effort: high
 ---
 
 # Update agent docs

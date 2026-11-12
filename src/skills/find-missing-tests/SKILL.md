@@ -1,6 +1,7 @@
 ---
 name: find-missing-tests
 description: Use when you want to find which tests each feature is missing and add them. Helper agents check every test type (unit, mocks, integration, e2e), write a report per feature, then add the missing tests test-first. Say "find missing tests", "test gaps", or "add tests to this feature". To merge them across many features, use ship-missing-tests.
+effort: high
 type: flow
 ---
 

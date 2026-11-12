@@ -1,6 +1,7 @@
 ---
 name: plan-page
 description: Use when a skill needs to show a plan, an approval step, or a report as an interactive web page. You approve or change choices in the browser, and your answer goes back to the agent. It uses the planpage package. Say "show the plan as a page" or "approval page".
+effort: xhigh
 ---
 
 # plan-page — interactive HTML plans for skills

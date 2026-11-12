@@ -1,6 +1,7 @@
 ---
 name: website-speed-ci
 description: Use when you want website speed checks in CI. It adds Lighthouse budgets to every PR and a real-user speed check after deploy, for Core Web Vitals. Say "Lighthouse CI", "Core Web Vitals", "performance budget", or "my site is slow".
+effort: high
 ---
 
 # Website speed CI (Core Web Vitals)

@@ -1,6 +1,7 @@
 ---
 name: github-repo-about
 description: Use when you want to write or check the GitHub "About" box of a repo — a one-line description, a website link, and topics. It follows GitHub's rules and shows before and after. Say "repo description", "GitHub topics", or "About section".
+effort: medium
 ---
 
 # GitHub repo About

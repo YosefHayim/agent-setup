@@ -1,6 +1,7 @@
 ---
 name: run-local-and-check
 description: Use when you want to run the app on your computer and prove it works. It starts the app, tests it in a real browser with Playwright, or in the iOS simulator or Android emulator for Expo and React Native apps. No deploy. Say "run local", "test it in the browser", "simulator", "emulator", "on my phone", "relaunch so I see it", or "did you check it works". For production, use deploy-and-check.
+effort: medium
 type: flow
 ---
 

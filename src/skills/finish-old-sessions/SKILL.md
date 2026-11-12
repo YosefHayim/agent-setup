@@ -1,6 +1,7 @@
 ---
 name: finish-old-sessions
 description: Use when you want to find and finish work left half done in past agent sessions. It compares each session with the current repos, so nothing is done twice. Say "finish old sessions", "resume unfinished work", or "what did I leave half done".
+effort: medium
 type: flow
 disable-model-invocation: true
 ---

@@ -1,6 +1,7 @@
 ---
 name: write-blog-post
 description: Use when you want a new blog post for Joseph Sabag's portfolio, written in Joseph's voice. It adds the post to the blog data file and makes a matching cover image in ChatGPT. Say "write a post", "new blog post", or "post in my voice".
+effort: high
 disable-model-invocation: true
 ---
 

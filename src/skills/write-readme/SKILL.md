@@ -1,6 +1,7 @@
 ---
 name: write-readme
 description: Use when you want to write or fix a project README (and llms.txt). It reads the repo first, asks you one question at a time with a suggested answer, then writes the docs. Say "write a README", "fix the README", or "llms.txt". For AGENTS.md and other agent files, use update-agent-docs.
+effort: medium
 ---
 
 # Write README

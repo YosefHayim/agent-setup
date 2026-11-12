@@ -1,6 +1,7 @@
 ---
 name: add-skill
 description: Use when you want a new skill and can describe it. It asks you questions until the skill is clear, shows what it will do and its steps for you to approve, then adds it to agent-setup, runs the checks, and installs it. Say "add a skill", "new skill", or "make a skill that…". To fix a skill, use improve-skill. To reuse what we just did, use save-as-skill.
+effort: high
 type: flow
 ---
 

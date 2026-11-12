@@ -1,6 +1,7 @@
 ---
 name: add-mcp-server
 description: Use when you want to add or fix an MCP server for an agent. It installs the server, runs the login, restarts the agent, and checks that the tools work. Say "add MCP server", "MCP login", or "MCP not working".
+effort: medium
 type: flow
 ---
 

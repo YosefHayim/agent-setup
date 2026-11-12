@@ -1,6 +1,7 @@
 ---
 name: clean-repo-by-feature
 description: Use when a project is messy and you want to clean it one feature at a time. It backs up main, gives each feature its own agent and branch, and opens one PR per feature for you to review. Say "messy repo", "clean up the whole project", or "one agent per feature".
+effort: xhigh
 type: flow
 disable-model-invocation: true
 ---

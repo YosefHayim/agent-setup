@@ -1,6 +1,7 @@
 ---
 name: fix-env-config
 description: Use when your environment variables and config are a mess. It moves them to one typed and checked place, and finds duplicate reads, hidden defaults, and secrets that leak to the browser. Say "env vars are a mess", "validate config", or "missing env var".
+effort: medium
 type: flow
 ---
 
