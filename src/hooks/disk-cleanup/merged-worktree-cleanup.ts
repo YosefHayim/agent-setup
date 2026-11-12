@@ -19,7 +19,7 @@ interface RepoWorktrees {
 
 interface RepoMergedWorktrees {
   readonly mainFolder: string;
-  /** null when gh could not list the merged pull requests. */
+  // null when gh could not list the merged pull requests.
   readonly mergedWorktrees: ReadonlyArray<LinkedWorktree> | null;
 }
 

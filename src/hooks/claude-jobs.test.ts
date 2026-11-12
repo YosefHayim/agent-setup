@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { listFinishedClaudeJobTmpFolders, listUnfinishedClaudeJobStatuses } from "./claude-jobs.js";
 
@@ -14,6 +14,8 @@ const workspaces: Array<string> = [];
 const createHomeRoot = (): string => {
   const homeRoot = mkdtempSync(path.join(packageRoot, "scratch-claude-jobs-"));
   workspaces.push(homeRoot);
+  // The session running the tests sets CLAUDE_CONFIG_DIR to a real account folder, which would be read too.
+  vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(homeRoot, ".claude"));
   return homeRoot;
 };
 
@@ -41,6 +43,7 @@ const hasJobFor = (request: { readonly homeRoot: string; readonly sessionId: str
   listUnfinishedClaudeJobStatuses(request.homeRoot).some((jobStatus) => jobStatus.sessionId === request.sessionId);
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const workspace of workspaces.splice(0)) {
     rmSync(workspace, { recursive: true, force: true });
   }
