@@ -4,13 +4,11 @@ import { isInsideAnyFolder, readFolderPaths } from "./folder-paths.js";
 import { type LinkedWorktree, listLinkedWorktrees } from "./linked-worktrees.js";
 import { decideMergedWorktreeCleanup, type MergedWorktreeFacts } from "./merged-worktree-decision.js";
 import { reportLine } from "./report-line.js";
-import { readSystemToolCall } from "./running-processes.js";
-import { readWorktreesInUse } from "./worktrees-in-use.js";
+import { isUsedByRunningProcess, readRunningProcesses, readSystemToolCall } from "./running-processes.js";
 
 interface MergedWorktreeCleanupRequest {
   readonly homeRoot: string;
   readonly rootFolders: ReadonlyArray<string>;
-  readonly endedSessionId: string;
   readonly dryRun: boolean;
 }
 
@@ -158,6 +156,26 @@ const readMergedWorktreeFacts = (request: {
   };
 };
 
+// A process that holds a file in a worktree or names it on its command line uses it, by any path it goes by. When the
+// processes cannot be listed, nothing can be ruled out.
+const readFoldersUsedByProcesses = (request: {
+  readonly worktreeFolders: ReadonlyArray<string>;
+  readonly roots: ReadonlyArray<string>;
+}): ReadonlySet<string> => {
+  const processes = readRunningProcesses();
+
+  const hasNoProcesses = processes === null;
+  if (hasNoProcesses) {
+    return new Set(request.worktreeFolders);
+  }
+
+  const usedFolders = request.worktreeFolders.filter((folder) => {
+    const folderPaths = readFolderPaths({ folder, roots: request.roots });
+    return isUsedByRunningProcess({ paths: folderPaths.paths, processes });
+  });
+  return new Set(usedFolders);
+};
+
 const removeMergedWorktree = (worktree: LinkedWorktree): MergedWorktreeReport => {
   const isRemoved = isGitSuccessful({ folder: worktree.mainFolder, query: ["worktree", "remove", worktree.folder] });
 
@@ -231,7 +249,7 @@ export const cleanUpMergedWorktrees = (request: MergedWorktreeCleanupRequest): R
   const repoReplies = groupWorktreesByRepo(codeWorktrees).map(readRepoMergedWorktrees);
   const mergedWorktrees = repoReplies.flatMap((repoReply) => repoReply.mergedWorktrees ?? []);
   const worktreeFolders = mergedWorktrees.map((worktree) => worktree.folder);
-  const usedFolders = readWorktreesInUse({ ...request, worktreeFolders, roots });
+  const usedFolders = readFoldersUsedByProcesses({ worktreeFolders, roots });
   const reports = mergedWorktrees.map((worktree) =>
     cleanUpMergedWorktree({ worktree, isInUse: usedFolders.has(worktree.folder), dryRun: request.dryRun }),
   );
