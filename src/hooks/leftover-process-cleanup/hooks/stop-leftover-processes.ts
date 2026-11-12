@@ -9,6 +9,7 @@ import { readFailureText } from "../../failure-text.js";
 import { readSettings } from "../../hook-config.js";
 import { claimIntervalSlot } from "../../interval-stamp.js";
 import { listRunningProcesses } from "../../process-table.js";
+import { listFinishedClaudeFolders } from "../finished-claude-folders.js";
 import { decideLeftoverProcesses, isNeverStopped, readAncestorProcessIds } from "../leftover-process-decision.js";
 import { readLeftoverStorageFolder, writeStoppedProcesses } from "../leftover-process-log.js";
 import { stopProcesses } from "../stop-processes.js";
@@ -45,12 +46,14 @@ const stopLeftoverProcesses = async (): Promise<void> => {
   const workingFolders = listWorkingFolders(lookableProcessIds);
   const missingFolders = new Set([...workingFolders.values()].filter((folder) => !existsSync(folder)));
   const codeRoots = listCodeRootFolders({ homeRoot, rootFolders: readSettings().diskCleanupRoots });
+  const finishedFolders = listFinishedClaudeFolders(homeRoot);
   const leftoverProcesses = decideLeftoverProcesses({
     processes,
     protectedProcessIds,
     workingFolders,
     missingFolders,
     codeRoots,
+    finishedFolders,
     testBrowserMinimumAgeSeconds: readTestBrowserMinimumAgeSeconds(),
   });
 

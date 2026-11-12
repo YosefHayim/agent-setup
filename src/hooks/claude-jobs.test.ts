@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listUnfinishedClaudeJobStatuses } from "./claude-jobs.js";
+import { listFinishedClaudeJobTmpFolders, listUnfinishedClaudeJobStatuses } from "./claude-jobs.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workingSessionId = "5cc2fa97-8a4b-4379-b0f0-4141d18275da";
@@ -75,5 +75,22 @@ describe("unfinishedClaudeJobStates", () => {
     runLinkToItself(path.join(homeRoot, ".claude", "jobs"));
 
     expect(() => listUnfinishedClaudeJobStatuses(homeRoot)).toThrow();
+  });
+});
+
+describe("listFinishedClaudeJobTmpFolders", () => {
+  it("lists the tmp folder of done jobs in every account folder and leaves unfinished jobs out", () => {
+    const homeRoot = createHomeRoot();
+    const firstRoot = path.join(homeRoot, ".claude");
+    const thirdRoot = path.join(homeRoot, ".claude-account3");
+    writeJobStatus({ configRoot: firstRoot, jobName: "working-job", sessionId: workingSessionId, state: "working" });
+    writeJobStatus({ configRoot: firstRoot, jobName: "done-job", sessionId: doneSessionId, state: "done" });
+    writeJobStatus({ configRoot: thirdRoot, jobName: "other-done-job", sessionId: doneSessionId, state: "done" });
+
+    const finishedFolders = listFinishedClaudeJobTmpFolders(homeRoot);
+
+    expect(finishedFolders).toHaveLength(2);
+    expect(finishedFolders).toContain(path.join(firstRoot, "jobs", "done-job", "tmp"));
+    expect(finishedFolders).toContain(path.join(thirdRoot, "jobs", "other-done-job", "tmp"));
   });
 });

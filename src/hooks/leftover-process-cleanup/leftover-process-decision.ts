@@ -6,6 +6,7 @@ export interface LeftoverProcessCheck {
   readonly workingFolders: ReadonlyMap<number, string>;
   readonly missingFolders: ReadonlySet<string>;
   readonly codeRoots: ReadonlyArray<string>;
+  readonly finishedFolders: ReadonlyArray<string>;
   readonly testBrowserMinimumAgeSeconds: number;
 }
 
@@ -52,18 +53,23 @@ const isInsideFolder = (request: { readonly folder: string; readonly root: strin
   return request.folder === request.root || request.folder.startsWith(insideStart);
 };
 
-export const isNeverStopped = (request: {
+const isProtectedByIdOrName = (request: {
   readonly runningProcess: RunningProcess;
   readonly protectedProcessIds: ReadonlySet<number>;
 }): boolean => {
   const { runningProcess } = request;
   const isProtectedId = request.protectedProcessIds.has(runningProcess.processId);
   const hasProtectedName = NEVER_STOPPED_NAMES.has(runningProcess.name);
-  const hasProtectedCommandLine = NEVER_STOPPED_COMMAND_LINES.some((pattern) =>
-    pattern.test(runningProcess.commandLine),
-  );
-  return isProtectedId || hasProtectedName || hasProtectedCommandLine;
+  return isProtectedId || hasProtectedName;
 };
+
+const hasProtectedCommandLine = (runningProcess: RunningProcess): boolean =>
+  NEVER_STOPPED_COMMAND_LINES.some((pattern) => pattern.test(runningProcess.commandLine));
+
+export const isNeverStopped = (request: {
+  readonly runningProcess: RunningProcess;
+  readonly protectedProcessIds: ReadonlySet<number>;
+}): boolean => isProtectedByIdOrName(request) || hasProtectedCommandLine(request.runningProcess);
 
 const collectAncestors = (
   parentByProcessId: ReadonlyMap<number, number>,
@@ -112,6 +118,27 @@ const listFolderGoneLeftover = (
   return [{ processId: runningProcess.processId, name: runningProcess.name, reason }];
 };
 
+// A copy of a protected app (Business OS) started from a finished job's folder is a leftover test build, not the owner's.
+const listFinishedFolderLeftover = (
+  check: LeftoverProcessCheck,
+  runningProcess: RunningProcess,
+): ReadonlyArray<LeftoverProcess> => {
+  const workingFolder = check.workingFolders.get(runningProcess.processId);
+  const finishedFolder = check.finishedFolders.find((folder) => {
+    const isRunFromFolder = runningProcess.commandLine.includes(`${folder}/`);
+    const isWorkingInFolder = workingFolder != null && isInsideFolder({ folder: workingFolder, root: folder });
+    return isRunFromFolder || isWorkingInFolder;
+  });
+
+  const isNotInFinishedFolder = finishedFolder == null;
+  if (isNotInFinishedFolder) {
+    return [];
+  }
+
+  const reason = `running from the folder of a finished Claude job or session: ${finishedFolder}`;
+  return [{ processId: runningProcess.processId, name: runningProcess.name, reason }];
+};
+
 const readTestBrowserProfile = (runningProcess: RunningProcess): string | null =>
   TEST_BROWSER_PROFILE.exec(runningProcess.commandLine)?.[1] ?? null;
 
@@ -140,13 +167,34 @@ const listTestBrowserLeftover = (
   return [{ processId: runningProcess.processId, name: runningProcess.name, reason }];
 };
 
+const listLeftover = (request: {
+  readonly check: LeftoverProcessCheck;
+  readonly orphanedProfiles: ReadonlySet<string>;
+  readonly runningProcess: RunningProcess;
+}): ReadonlyArray<LeftoverProcess> => {
+  const { check, orphanedProfiles, runningProcess } = request;
+
+  const isProtected = isProtectedByIdOrName({ runningProcess, protectedProcessIds: check.protectedProcessIds });
+  if (isProtected) {
+    return [];
+  }
+
+  const finishedFolderLeftover = listFinishedFolderLeftover(check, runningProcess);
+  const isInFinishedFolder = finishedFolderLeftover.length > 0;
+  if (isInFinishedFolder) {
+    return finishedFolderLeftover;
+  }
+
+  if (hasProtectedCommandLine(runningProcess)) {
+    return [];
+  }
+
+  const folderGone = listFolderGoneLeftover(check, runningProcess);
+  const isFolderGone = folderGone.length > 0;
+  return isFolderGone ? folderGone : listTestBrowserLeftover(runningProcess, orphanedProfiles);
+};
+
 export const decideLeftoverProcesses = (check: LeftoverProcessCheck): ReadonlyArray<LeftoverProcess> => {
   const orphanedProfiles = readOrphanedTestBrowserProfiles(check);
-  return check.processes
-    .filter((runningProcess) => !isNeverStopped({ runningProcess, protectedProcessIds: check.protectedProcessIds }))
-    .flatMap((runningProcess) => {
-      const folderGone = listFolderGoneLeftover(check, runningProcess);
-      const isFolderGone = folderGone.length > 0;
-      return isFolderGone ? folderGone : listTestBrowserLeftover(runningProcess, orphanedProfiles);
-    });
+  return check.processes.flatMap((runningProcess) => listLeftover({ check, orphanedProfiles, runningProcess }));
 };
